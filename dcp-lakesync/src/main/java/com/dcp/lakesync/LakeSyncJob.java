@@ -120,7 +120,8 @@ public final class LakeSyncJob {
                 .appName("lakesync-" + cfg.logicalTable)
                 .master(master)
                 .config("spark.ui.enabled", "false")
-                .config("spark.sql.session.timeZone", "Asia/Shanghai");
+                .config("spark.sql.session.timeZone", "Asia/Shanghai")
+                .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions");
         String p = "spark.sql.catalog." + L.catalog;
         b.config(p, "org.apache.iceberg.spark.SparkCatalog")
                 .config(p + ".type", L.type)
@@ -137,23 +138,34 @@ public final class LakeSyncJob {
         }
         if (L.ioImpl != null && !L.ioImpl.isBlank()) b.config(p + ".io-impl", L.ioImpl);
         if (L.s3 != null) {
+            Map<String, String> map = Map.of(
+                    "endpoint", "s3.endpoint",
+                    "pathStyleAccess", "s3.path-style-access",
+                    "accessKey", "s3.access-key-id",
+                    "secretKey", "s3.secret-access-key",
+                    "region", "s3.region");
             L.s3.forEach((k, v) -> {
-                if (v != null) b.config(p + ".s3." + k, v);
+                String prop = map.getOrDefault(k, "s3." + k);
+                if (v != null) b.config(p + "." + prop, v);
             });
         }
         return b.getOrCreate();
     }
 
-    /** 读数据面单表; 有谓词则 JDBC 下推, 否则全表(首载) */
+    /** 读数据面单表; 有谓词则子查询下推(真下推到 MySQL/TiDB), 否则全表(首载) */
     private static Dataset<Row> readSource(SparkSession spark, LakeJobConfig cfg) {
         Map<String, String> opts = new HashMap<>();
         opts.put("url", cfg.dataSource.url);
         opts.put("user", cfg.dataSource.user);
         opts.put("password", cfg.dataSource.password);
         opts.put("driver", "com.mysql.cj.jdbc.Driver");
-        opts.put("dbtable", "`" + cfg.dataSource.table + "`");
         String pred = cfg.pullPredicate();
-        if (pred != null) opts.put("predicates", pred);
+        if (pred == null) {
+            opts.put("dbtable", "`" + cfg.dataSource.table + "`");
+        } else {
+            // 下推: 库内先过滤, 只把增量行拉回(避免全表到 Spark)
+            opts.put("dbtable", "(SELECT * FROM `" + cfg.dataSource.table + "` WHERE " + pred + ") AS __lake_src");
+        }
         Dataset<Row> df = spark.read().format("jdbc").options(opts).load();
         // 去掉数据面内部自增列(湖不需要), 其余整行镜像(业务键+字段+各源 seq+墓碑透传)
         return df.columns().length == 0 ? df : df.drop("_pk_id");
