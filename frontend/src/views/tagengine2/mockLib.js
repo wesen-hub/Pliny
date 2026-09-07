@@ -1,5 +1,8 @@
 // 打标引擎 V2(mock 共享库, 未接后端)
-// 标签注册表元数据 + 规则资产(规则单元 / 规则流) 两级。模块级单例: 页面间共享增删改, 刷新即复位。
+// 规则资产统一为「规则」: 定义形态二选一 ——
+//   simple: 基础规则(style=cond 单条 WHEN→THEN | style=bucket 分档规则[一条规则内含多档位排他])
+//   flow  : 编排规则(规则流: 步骤引用规则库任意规则[基础或编排], 支持嵌套; 命中/未命中分支)
+// 任务绑定规则资产(基础先行, 编排后跑)。模块级单例, 页面间共享, 刷新复位。
 import { reactive } from 'vue'
 
 /* ---------- 标签注册表(与 Registry.vue 同一套示例) ---------- */
@@ -17,116 +20,124 @@ export const metaBool = (t) => !!(tagMeta[t] || {}).bool
 export const domainOf = (t) => (tagMeta[t] || {}).domain || []
 
 /* ---------- 规则资产 ---------- */
-// 单元(Unit): 原子 WHEN→THEN, 可被任务平铺引用或被流编排
-//   activationGroup: 互斥组名(同组=同标签档位, 命中最高 salience 一条); '' = 不互斥
-// 流(Flow): 决策链, step = { unitId, withGroup(连同互斥组), hit: next|stop|jump(+hitJump), miss: next|end|jump(+missJump) }
-let seq = 100
-const nid = () => 'u' + ++seq
+let seq = 200
+const nid = () => 'r' + ++seq
 
 export const ruleState = reactive({
-  units: [
+  rules: [
+    // 基础-分档规则: 一条规则表达 金额档(档位排他 + 兜底), 无需先建多条单元
     {
-      id: 'u1', name: '金额-大额', ver: 1, desc: '单笔金额 ≥ 1 万 → 金额档=大额',
-      salience: 30, activationGroup: '订单/金额档', status: 1,
-      when: [{ logic: 'AND', conds: [{ field: 'amount', op: '>=', val: '10000' }] }],
-      actions: [{ type: 'tag', tag: '订单/金额档', val: '大额' }]
+      id: 'r1', name: '金额档', ver: 1, desc: '单笔金额分档: ≥1万 大额 / ≥1千 中额 / 兜底 小额',
+      kind: 'simple', style: 'bucket', status: 1,
+      bucket: { field: 'amount', tag: '订单/金额档', rows: [{ op: '>=', th: '10000', val: '大额' }, { op: '>=', th: '1000', val: '中额' }], elseVal: '小额' }
     },
+    // 基础-单条规则
     {
-      id: 'u2', name: '金额-中额', ver: 1, desc: '单笔金额 ≥ 1 千 → 金额档=中额',
-      salience: 20, activationGroup: '订单/金额档', status: 1,
-      when: [{ logic: 'AND', conds: [{ field: 'amount', op: '>=', val: '1000' }] }],
-      actions: [{ type: 'tag', tag: '订单/金额档', val: '中额' }]
-    },
-    {
-      id: 'u3', name: '金额-小额(默认档)', ver: 1, desc: '金额档兜底: 恒真 → 小额',
-      salience: 5, activationGroup: '订单/金额档', status: 1,
-      when: [],
-      actions: [{ type: 'tag', tag: '订单/金额档', val: '小额' }]
-    },
-    {
-      id: 'u4', name: '黑名单命中', ver: 1, desc: 'status=black → 打风控/黑名单(布尔)',
-      salience: 10, activationGroup: '', status: 1,
+      id: 'r2', name: '黑名单命中', ver: 1, desc: 'status=black → 打 风控/黑名单(布尔)',
+      kind: 'simple', style: 'cond', status: 1,
       when: [{ logic: 'AND', conds: [{ field: 'status', op: '==', val: 'black' }] }],
       actions: [{ type: 'tag', tag: '风控/黑名单', val: '' }]
     },
     {
-      id: 'u5', name: '华东归属', ver: 1, desc: 'region=华东 → 打区域/华东(布尔)',
-      salience: 10, activationGroup: '', status: 1,
+      id: 'r3', name: '华东归属', ver: 1, desc: 'region=华东 → 打 区域/华东(布尔)',
+      kind: 'simple', style: 'cond', status: 1,
       when: [{ logic: 'AND', conds: [{ field: 'region', op: '==', val: '华东' }] }],
       actions: [{ type: 'tag', tag: '区域/华东', val: '' }]
-    }
-  ],
-  flows: [
+    },
+    // 编排规则(规则流): 引用 基础规则 / 其它编排规则, 决策链
     {
-      id: 'f1', name: '风控优先决策链', ver: 1, desc: '先判黑名单(命中整链终止), 未命中再分金额档',
-      status: 1,
+      id: 'f1', name: '风控优先决策链', ver: 1, desc: '黑名单命中即整链终止, 否则进金额档分档',
+      kind: 'flow', status: 1,
       steps: [
-        { unitId: 'u4', withGroup: false, hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
-        { unitId: 'u1', withGroup: true, hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
+        { ruleId: 'r2', hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
+        { ruleId: 'r1', hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
+      ]
+    },
+    {
+      id: 'f2', name: '高价值运营链(嵌套示例)', ver: 1, desc: '先看华东归属, 再整体跑「风控优先决策链」—— 规则流引用规则流',
+      kind: 'flow', status: 1,
+      steps: [
+        { ruleId: 'r3', hit: 'next', hitJump: 0, miss: 'end', missJump: 0 },
+        { ruleId: 'f1', hit: 'next', hitJump: 0, miss: 'next', missJump: 0 }
       ]
     }
   ]
 })
 
-export const unitOf = (id) => ruleState.units.find(u => u.id === id)
-export const flowOf = (id) => ruleState.flows.find(f => f.id === id)
-const actSum = (a) => (a.type === 'stop' ? '停止' : '打' + a.tag + (metaBool(a.tag) || a.val === '' ? '' : '=' + a.val))
-export const whenSum = (u) => {
-  if (!u.when || !u.when.length) return '恒真(默认档)'
-  return u.when.map(g => (g.conds || []).map(c => (c.field || '?') + ' ' + c.op + ' ' + (c.val || '')).join(' 且 ')).join('  或 ')
+export const ruleOf = (id) => ruleState.rules.find(x => x.id === id)
+export const kindLabel = (r) => (r.kind === 'flow' ? '编排流' : (r.style === 'bucket' ? '分档' : '单条'))
+export const kindTagType = (r) => (r.kind === 'flow' ? 'warning' : (r.style === 'bucket' ? 'danger' : 'primary'))
+
+const condText = (when) => {
+  if (!when || !when.length) return '恒真'
+  return when.map(g => (g.conds || []).map(c => (c.field || '?') + ' ' + c.op + ' ' + (c.val || '')).join(' 且 ')).join('  或 ')
 }
-export const thenSum = (u) => (u.actions || []).map(actSum).join('; ')
-/** 规则资产声明的字段依赖: WHEN 条件引用的全部字段名(由任务装配的 数据集字段∪派生字段 满足) */
-export const depsOf = (u) => {
-  const s = new Set()
-  ;(u.when || []).forEach(g => (g.conds || []).forEach(c => { if (c.field) s.add(c.field) }))
-  return [...s]
-}
-/** 单元执行摘要 */
-export const unitBrief = (u) => u.name + ' · v' + u.ver + ' — ' + whenSum(u) + ' → ' + thenSum(u)
-/** 一个节点实际生效的单元集(连同互斥组时 = 共享 activationGroup 的全部同组单元) */
-export const nodeUnits = (step) => {
-  const u = unitOf(step.unitId)
-  if (!u) return []
-  if (step.withGroup && u.activationGroup) {
-    return ruleState.units.filter(x => x.activationGroup === u.activationGroup && x.status !== 0)
+const actText = (a) => (a.type === 'stop' ? '停止' : '打' + a.tag + (metaBool(a.tag) || a.val === '' ? '' : '=' + a.val))
+/** 一条规则的摘要(任意形态, 递归安全: 流只显示步骤数/节点名, 不外扩) */
+export const sumRule = (r) => {
+  if (!r) return '(已删)'
+  if (r.kind === 'flow') {
+    const names = (r.steps || []).map(s => {
+      const t = ruleOf(s.ruleId)
+      return (t ? t.name : '?' + s.ruleId) + (s.hit === 'stop' ? '⏹' : s.hit === 'jump' ? '⤵#' + s.hitJump : '')
+    }).join(' → ')
+    return '编排流(' + (r.steps || []).length + '步): ' + names
   }
-  return [u]
+  if (r.style === 'bucket') {
+    const b = r.bucket
+    const rows = (b.rows || []).map(x => b.field + ' ' + x.op + ' ' + x.th + '→' + x.val).join('; ')
+    return '分档→' + b.tag + ': ' + rows + (b.elseVal ? '; 兜底→' + b.elseVal : '')
+  }
+  return condText(r.when) + ' → ' + (r.actions || []).map(actText).join('; ')
 }
-export const stepSum = (st, idx) => {
-  const u = unitOf(st.unitId)
-  const g = st.withGroup && u && u.activationGroup ? '(组:' + u.activationGroup + ')' : ''
+export const stepText = (st) => {
+  const t = ruleOf(st.ruleId)
+  const n = t ? (t.kind === 'flow' ? '⤷' : '') + t.name : '?' + st.ruleId
   const hit = st.hit === 'jump' ? '跳#' + st.hitJump : st.hit === 'stop' ? '终止' : '下一步'
   const miss = st.miss === 'jump' ? '跳#' + st.missJump : st.miss === 'end' ? '结束' : '下一步'
-  return (u ? u.name : '?' + st.unitId) + g + '  [命中→' + hit + ' / 未中→' + miss + ']'
+  return n + ' [命中→' + hit + ' / 未中→' + miss + ']'
 }
-export const flowBrief = (f) => (f.steps || []).map((s, i) => (i + 1) + '.' + stepSum(s, i)).join('  →  ')
-/** 流内所有节点的字段依赖(供任务校验) */
-export const flowDeps = (f) => {
+/** 字段依赖(递归, 环安全 seen) */
+export function depNamesOf(r, seen) {
   const s = new Set()
-  ;(f.steps || []).forEach(st => nodeUnits(st).forEach(u => depsOf(u).forEach(d => s.add(d))))
+  const walk = (x, seen2) => {
+    if (!x || seen2.has(x.id)) return
+    seen2.add(x.id)
+    if (x.kind === 'flow') (x.steps || []).forEach(st => walk(ruleOf(st.ruleId), seen2))
+    else if (x.style === 'bucket') { if (x.bucket && x.bucket.field) s.add(x.bucket.field) }
+    else (x.when || []).forEach(g => (g.conds || []).forEach(c => { if (c.field) s.add(c.field) }))
+  }
+  walk(r, seen || new Set())
   return [...s]
 }
+/** 是否被其它编排规则引用(删除守卫) */
+export const usedByFlows = (id) => ruleState.rules.filter(x => x.kind === 'flow' && (x.steps || []).some(s => s.ruleId === id)).map(x => x.name)
+/** 保存编排规则前的环检测: 新 steps 集合里若能从某步引用到达规则自身 → 成环 */
+export function cycleCheck(flowRule) {
+  const selfId = flowRule.id
+  const seen = new Set()
+  const canReach = (fromId) => {
+    if (!fromId || seen.has(fromId)) return false
+    seen.add(fromId)
+    const x = ruleOf(fromId)
+    if (!x) return false
+    if (fromId === selfId) return true
+    if (x.kind === 'flow') return (x.steps || []).some(st => canReach(st.ruleId))
+    return false
+  }
+  return (flowRule.steps || []).some(st => canReach(st.ruleId))
+}
 
-export function addUnit(u) { u.id = nid(); u.ver = 1; ruleState.units.push(u); return u }
-export function upsertUnit(u) {
-  const i = ruleState.units.findIndex(x => x.id === u.id)
-  if (i >= 0) { u.ver = (ruleState.units[i].ver || 1) + 1; ruleState.units[i] = u } else { u.id = nid(); u.ver = 1; ruleState.units.push(u) }
-  return u
+export function upsertRule(rule) {
+  const i = ruleState.rules.findIndex(x => x.id === rule.id)
+  if (i >= 0) { rule.ver = (ruleState.rules[i].ver || 1) + 1; ruleState.rules[i] = rule }
+  else { rule.id = nid(); rule.ver = 1; ruleState.rules.push(rule) }
+  return rule
 }
-export function removeUnit(id) {
-  const usedBy = ruleState.flows.filter(f => (f.steps || []).some(s => s.unitId === id)).map(f => f.name)
+export function removeRule(id) {
+  const usedBy = usedByFlows(id)
   if (usedBy.length) return { ok: false, usedBy }
-  const i = ruleState.units.findIndex(u => u.id === id)
-  if (i >= 0) ruleState.units.splice(i, 1)
+  const i = ruleState.rules.findIndex(x => x.id === id)
+  if (i >= 0) ruleState.rules.splice(i, 1)
   return { ok: true }
-}
-export function upsertFlow(f) {
-  const i = ruleState.flows.findIndex(x => x.id === f.id)
-  if (i >= 0) { f.ver = (ruleState.flows[i].ver || 1) + 1; ruleState.flows[i] = f } else { f.id = 'f' + ++seq; f.ver = 1; ruleState.flows.push(f) }
-  return f
-}
-export function removeFlow(id) {
-  const i = ruleState.flows.findIndex(f => f.id === id)
-  if (i >= 0) ruleState.flows.splice(i, 1)
 }

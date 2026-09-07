@@ -3,182 +3,85 @@
     <el-card shadow="never">
       <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:4px">
         <div>
-          <div class="pg-title">规则库(V2)</div>
-          <el-text size="small" type="info">规则资产独立维护: 原子「规则单元」可被任务平铺引用或被「规则流」编排; 决策表 = 批量生产互斥单元的工具; DRL = 源码视图(高级)。字段依赖只声明字段名, 由任务的 数据集字段 ∪ 派生字段 满足(发布时校验)。</el-text>
+          <div class="pg-title">规则库</div>
+          <el-text size="small" type="info">规则 = 可复用的打标资产, 统一在此维护(增删改/版本/启停)。定义形态两种: <b>基础规则</b>(单条 WHEN→THEN, 或「分档规则」一条表达多档位)与 <b>编排规则</b>(规则流: 把规则库里的规则/规则流编排成新的规则流, 可嵌套)。字段依赖自动收集, 由任务装配的 数据集字段∪派生字段 满足(发布校验)。</el-text>
         </div>
       </div>
 
-      <el-tabs v-model="tab" style="margin-top:6px">
-        <!-- ═══ 规则单元 ═══ -->
-        <el-tab-pane :label="'规则单元 (' + ruleState.units.length + ')'" name="unit">
-          <div class="flex" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <el-button type="primary" @click="goCreateUnit">＋ 新建单元</el-button>
-            <el-button @click="dtOpen = true">⚙ 决策表生成互斥单元(分档)</el-button>
-            <el-text size="small" type="info">示例: 金额档 = 3 个同互斥组单元(大额/中额/小额), 只命中最高档</el-text>
-          </div>
-          <el-table :data="ruleState.units" size="small" border stripe>
-            <el-table-column label="名称" min-width="170">
-              <template #default="{ row }"><el-text size="small">{{ row.name }}</el-text></template>
-            </el-table-column>
-            <el-table-column label="版本" width="60"><template #default="{ row }"><el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></template></el-table-column>
-            <el-table-column label="WHEN(条件)" min-width="200"><template #default="{ row }"><el-text size="small" type="info">{{ whenSum(row) }}</el-text></template></el-table-column>
-            <el-table-column label="THEN(动作)" min-width="170"><template #default="{ row }"><el-text size="small">{{ thenSum(row) }}</el-text></template></el-table-column>
-            <el-table-column label="优先级" width="70" align="center"><template #default="{ row }">{{ row.salience }}</template></el-table-column>
-            <el-table-column label="互斥组" width="130">
-              <template #default="{ row }"><el-tag v-if="row.activationGroup" size="small" type="warning" effect="plain">{{ row.activationGroup }}</el-tag><el-text v-else size="small" type="info">—</el-text></template>
-            </el-table-column>
-            <el-table-column label="字段依赖" min-width="140">
-              <template #default="{ row }">
-                <el-tag v-for="d in depsOf(row)" :key="d" size="small" type="info" effect="plain" style="margin-right:4px">{{ d }}</el-tag>
-                <el-text v-if="!depsOf(row).length" size="small" type="info">—</el-text>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="70">
-              <template #default="{ row }"><el-switch v-model="row.status" :active-value="1" :inactive-value="0" size="small" /></template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="goEditUnit(row.id)">编辑</el-button>
-                <el-button size="small" text @click="copyUnit(row)">复制</el-button>
-                <el-button size="small" text type="danger" @click="delUnit(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-        <!-- ═══ 规则流 ═══ -->
-        <el-tab-pane :label="'规则流 (' + ruleState.flows.length + ')'" name="flow">
-          <div class="flex" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <el-button type="primary" @click="goCreateFlow">＋ 新建流</el-button>
-            <el-text size="small" type="info">决策链: 每步引用一个单元(可连同互斥组), 按 命中/未命中 分支(下一步 / 终止 / 跳转); 画布版 P1。</el-text>
-          </div>
-          <el-table :data="ruleState.flows" size="small" border stripe>
-            <el-table-column label="名称" min-width="150"><template #default="{ row }"><el-text size="small">{{ row.name }}</el-text></template></el-table-column>
-            <el-table-column label="版本" width="60"><template #default="{ row }"><el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></template></el-table-column>
-            <el-table-column label="步骤数" width="70" align="center"><template #default="{ row }">{{ row.steps.length }}</template></el-table-column>
-            <el-table-column label="决策链结构" min-width="360">
-              <template #default="{ row }">
-                <el-text size="small" type="info">{{ flowBrief(row) }}</el-text>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="70">
-              <template #default="{ row }"><el-switch v-model="row.status" :active-value="1" :inactive-value="0" size="small" /></template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="goEditFlow(row.id)">编辑</el-button>
-                <el-button size="small" text @click="copyFlow(row)">复制</el-button>
-                <el-button size="small" text type="danger" @click="delFlow(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
-    </el-card>
-
-    <!-- ═══ 决策表: 批量生成互斥单元 ═══ -->
-    <el-dialog v-model="dtOpen" title="决策表 → 生成互斥单元" width="640">
-      <el-alert type="info" :closable="false" style="margin-bottom:10px"
-        title="每行 = 一个档位; 生成的单元自动同互斥组(只命中最高档), 落规则库「单元」, 可被流以「连同互斥组」整组编排" />
-      <div class="flex" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-        <el-text size="small" type="info">按字段分档 → 打标签</el-text>
-        <el-select v-model="dt.field" size="small" style="width:160px"><el-option v-for="f in fieldOpts" :key="f" :value="f" :label="f" /></el-select>
-        <el-select v-model="dt.tag" size="small" style="width:180px"><el-option v-for="t in tagOptions" :key="t" :value="t" :label="t" /></el-select>
-        <el-text size="small" type="info">(组 = 该标签)</el-text>
+      <div class="flex" style="gap:8px;margin:12px 0;flex-wrap:wrap;align-items:center">
+        <el-radio-group v-model="filter" size="small">
+          <el-radio-button value="all">全部 ({{ ruleState.rules.length }})</el-radio-button>
+          <el-radio-button value="simple">基础规则 ({{ baseCount }})</el-radio-button>
+          <el-radio-button value="flow">编排规则 ({{ flowCount }})</el-radio-button>
+        </el-radio-group>
+        <div style="flex:1"></div>
+        <el-button type="primary" size="small" @click="$router.push('/tagengine2/rule/simple')">＋ 基础规则</el-button>
+        <el-button type="primary" size="small" plain @click="$router.push('/tagengine2/rule/simple?style=bucket')">＋ 分档规则(金额档式)</el-button>
+        <el-button type="warning" size="small" plain @click="$router.push('/tagengine2/rule/flow')">＋ 编排规则(规则流)</el-button>
       </div>
-      <el-table :data="dt.rows" size="small" border>
-        <el-table-column label="档" type="index" width="46" />
-        <el-table-column label="条件">
+
+      <el-table :data="shown" size="small" border stripe>
+        <el-table-column label="名称" min-width="160">
           <template #default="{ row }">
-            <div class="flex" style="gap:6px;align-items:center">
-              <el-select v-model="row.op" size="small" style="width:64px"><el-option value=">=" label="≥" /><el-option value=">" label=">" /><el-option value="<" label="<" /><el-option value="==" label="=" /></el-select>
-              <el-input v-model="row.th" size="small" style="width:110px" placeholder="阈值" />
-            </div>
+            <el-text size="small" style="font-weight:600">{{ row.name }}</el-text>
+            <el-tag size="small" :type="kindTagType(row)" effect="plain" style="margin-left:6px">{{ kindLabel(row) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="命中 → 标签值">
-          <template #default="{ row }"><el-input v-model="row.val" size="small" placeholder="如 大额" style="width:150px" /></template>
+        <el-table-column label="版本" width="56"><template #default="{ row }"><el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></template></el-table-column>
+        <el-table-column label="规则定义摘要" min-width="300">
+          <template #default="{ row }"><el-text size="small" type="info">{{ sumRule(row) }}</el-text></template>
         </el-table-column>
-        <el-table-column width="56"><template #default="{ $index }"><el-button size="small" text type="danger" @click="dt.rows.splice($index, 1)">✕</el-button></template></el-table-column>
+        <el-table-column label="被引用(编排)" min-width="100">
+          <template #default="{ row }">
+            <el-tag v-if="refCount(row.id)" size="small" type="warning" effect="plain">{{ refCount(row.id) }} 处</el-tag>
+            <el-text v-else size="small" type="info">—</el-text>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="70">
+          <template #default="{ row }"><el-switch v-model="row.status" :active-value="1" :inactive-value="0" size="small" /></template>
+        </el-table-column>
+        <el-table-column label="操作" width="170" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text type="primary" @click="goEdit(row)">编辑</el-button>
+            <el-button size="small" text @click="copyRule(row)">复制</el-button>
+            <el-button size="small" text type="danger" @click="delRule(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
-      <div class="flex" style="gap:10px;margin-top:8px;align-items:center;flex-wrap:wrap">
-        <el-button size="small" text type="primary" @click="dt.rows.push({ op: '>=', th: '', val: '' })">＋ 档位行</el-button>
-        <el-text size="small" type="info">兜底档值</el-text>
-        <el-input v-model="dt.elseVal" size="small" style="width:100px" placeholder="如 小额" />
-        <el-button size="small" plain @click="fillDemo">填入示例(金额档)</el-button>
-        <el-button type="success" size="small" @click="gen">生成互斥单元</el-button>
-      </div>
-    </el-dialog>
+      <el-text size="small" type="info" style="margin-top:8px;display:block">提示: 金额档 = 一条「分档规则」; 想让黑名单先判、金额档后判 → 新建「编排规则」引用它们(可引用别的编排规则, 层层组合; 引用会被环检测拦下)。</el-text>
+    </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ruleState, tagOptions, depsOf, whenSum, thenSum, flowBrief, unitOf, addUnit, removeUnit, removeFlow, upsertFlow, metaBool } from './mockLib.js'
+import { ruleState, kindLabel, kindTagType, sumRule, upsertRule, removeRule } from './mockLib.js'
 
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))
-const tab = ref('unit')
-const fieldOpts = ['amount', 'pay_amount', 'quantity', 'order_date']
+const filter = ref('all')
+const baseCount = computed(() => ruleState.rules.filter(r => r.kind === 'simple').length)
+const flowCount = computed(() => ruleState.rules.filter(r => r.kind === 'flow').length)
+const shown = computed(() => (filter.value === 'all' ? ruleState.rules : ruleState.rules.filter(r => r.kind === filter.value)))
+const refCount = (id) => ruleState.rules.filter(x => x.kind === 'flow' && (x.steps || []).some(s => s.ruleId === id)).length
 
-const goCreateUnit = () => router.push('/tagengine2/rule/unit')
-const goEditUnit = (id) => router.push('/tagengine2/rule/unit?id=' + id)
-const goCreateFlow = () => router.push('/tagengine2/rule/flow')
-const goEditFlow = (id) => router.push('/tagengine2/rule/flow?id=' + id)
-
-function copyUnit(u) {
-  addUnit(JSON.parse(JSON.stringify({ ...u, id: undefined, name: u.name + '(副本)', activationGroup: '', status: 1 })))
-  toast('已复制为副本单元(副本不带互斥组)')
+const goEdit = (row) => router.push(row.kind === 'flow' ? '/tagengine2/rule/flow?id=' + row.id : '/tagengine2/rule/simple?id=' + row.id)
+function copyRule(row) {
+  const c = JSON.parse(JSON.stringify(row))
+  delete c.id
+  c.name = row.name + '(副本)'
+  c.desc = (c.desc ? c.desc + ' ' : '') + '副本'
+  upsertRule(c)
+  toast('已复制: ' + c.name + ' v' + c.ver)
 }
-function copyFlow(f) {
-  const c = JSON.parse(JSON.stringify(f))
-  upsertFlow({ ...c, id: undefined, name: f.name + '(副本)' })
-  toast('已复制流(节点仍引用原单元)')
-}
-async function delUnit(u) {
-  const r = removeUnit(u.id)
-  if (!r.ok) { toast('该单元正被流引用: ' + r.usedBy.join('、') + ', 请先在流中移除节点', 'warning'); return }
-  toast('已删除单元 ' + u.name)
-}
-function delFlow(f) {
-  ElMessageBox.confirm('删除规则流「' + f.name + '」? 不影响其引用的单元。', '删除流', { type: 'warning' }).then(() => {
-    removeFlow(f.id)
-    toast('已删除流')
+function delRule(row) {
+  ElMessageBox.confirm('删除规则「' + row.name + '」?', '删除', { type: 'warning' }).then(() => {
+    const r = removeRule(row.id)
+    if (!r.ok) { toast('被编排规则引用, 请先在引用处移除: ' + r.usedBy.join('、'), 'warning'); return }
+    toast('已删除 ' + row.name)
   }).catch(() => {})
-}
-
-/* 决策表 */
-const dtOpen = ref(false)
-const dt = ref({ field: 'amount', tag: '订单/金额档', elseVal: '小额', rows: [{ op: '>=', th: '10000', val: '大额' }, { op: '>=', th: '1000', val: '中额' }] })
-function fillDemo() {
-  dt.value = { field: 'amount', tag: '订单/金额档', elseVal: '小额', rows: [{ op: '>=', th: '10000', val: '大额' }, { op: '>=', th: '1000', val: '中额' }] }
-}
-function gen() {
-  const tag = dt.value.tag
-  const n0 = ruleState.units.filter(u => u.activationGroup === tag).length
-  let made = 0
-  dt.value.rows.forEach((row, i) => {
-    if (!row.val || row.th === '' || row.th === undefined) return
-    addUnit({
-      name: '档-' + tag.split('/').pop() + '-' + row.val, salience: 100 - i * 10, activationGroup: tag, status: 1,
-      when: [{ logic: 'AND', conds: [{ field: dt.value.field, op: row.op, val: String(row.th) }] }],
-      actions: [{ type: 'tag', tag, val: row.val }],
-      desc: '决策表生成: ' + dt.value.field + ' ' + row.op + ' ' + row.th + ' → ' + tag + '=' + row.val
-    })
-    made++
-  })
-  if (dt.value.elseVal) {
-    addUnit({
-      name: '档-' + tag.split('/').pop() + '-兜底', salience: 5, activationGroup: tag, status: 1,
-      when: [], actions: [{ type: 'tag', tag, val: dt.value.elseVal }],
-      desc: '决策表兜底档: 恒真 → ' + tag + '=' + dt.value.elseVal
-    })
-    made++
-  }
-  const existed = ruleState.units.filter(u => u.activationGroup === tag).length > n0
-  toast('已生成 ' + made + ' 个互斥单元(组=' + tag + (existed ? ', 与原组单元同组)' : ')') + '; 需布尔标签请直接建单元')
 }
 </script>
 

@@ -4,7 +4,7 @@
       <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:4px">
         <div>
           <div class="pg-title">打标任务(V2)</div>
-          <el-text size="small" type="info">任务 = 执行形态(批/流/在线) + 事实装配(数据集 + 派生字段) + 绑定的规则资产; 任务只管「跑什么数据、按什么顺序跑规则」, 规则在「规则库」单独维护(也可建任务时内联新建落库)。</el-text>
+          <el-text size="small" type="info">任务 = 执行形态(批/流/在线) + 事实装配(数据集 + 派生字段) + 绑定的规则资产; 规则在「规则库」统一维护(单条/分档/编排流三种形态), 任务引用或内联新建落库。</el-text>
         </div>
         <el-button type="primary" @click="$router.push('/tagengine2/task/create')">＋ 新建打标任务</el-button>
       </div>
@@ -25,9 +25,9 @@
           <template #default="{ row }">
             <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
               <el-tag v-for="(b, i) in row.bound" :key="i" size="small" :type="b.kind === 'flow' ? 'warning' : 'primary'" effect="plain">
-                {{ b.kind === 'flow' ? '流' : '单元' }}:{{ b.name }} v{{ b.ver }}
+                {{ b.kind === 'flow' ? '编排' : '基础·' + b.style }}:{{ b.name }} v{{ b.ver }}
               </el-tag>
-              <el-text size="small" type="info" style="margin-left:2px">(先 {{ row.bound.filter(b => b.kind === 'unit').length }} 单元 → 后 {{ row.bound.filter(b => b.kind === 'flow').length }} 流)</el-text>
+              <el-text size="small" type="info" style="margin-left:2px">(先 {{ row.bound.filter(b => b.kind !== 'flow').length }} 基础 → 后 {{ row.bound.filter(b => b.kind === 'flow').length }} 编排)</el-text>
             </div>
           </template>
         </el-table-column>
@@ -61,20 +61,20 @@ const tasks = ref([
     id: 't1', name: '客户价值分层批任务', mode: 'batch', fact: 'customer_wide(36.2 万) · 派生 2', sched: '每日 02:00',
     status: '运行中',
     bound: [
-      { kind: 'unit', name: '华东归属', ver: 1 },
+      { kind: 'simple', style: 'cond', name: '黑名单命中', ver: 1 },
       { kind: 'flow', name: '风控优先决策链', ver: 1 },
-      { kind: 'unit', name: '金额-大额', ver: 1 }
+      { kind: 'simple', style: 'bucket', name: '金额档', ver: 1 }
     ]
   },
   {
     id: 't2', name: '支付事件实时打标', mode: 'stream', fact: 'pay-events · 5 分钟滑动窗 · 派生 1', sched: '常驻',
     status: '运行中',
-    bound: [{ kind: 'unit', name: '金额-中额', ver: 1 }]
+    bound: [{ kind: 'simple', style: 'bucket', name: '金额档', ver: 1 }]
   },
   {
     id: 't3', name: '在线风控瞬时置位', mode: 'online', fact: 'Kafka 事件 → Redis TTL', sched: '常驻',
     status: '已停',
-    bound: [{ kind: 'unit', name: '黑名单命中', ver: 1 }]
+    bound: [{ kind: 'simple', style: 'cond', name: '黑名单命中', ver: 1 }]
   }
 ])
 const edit = (row) => { toast('演示: 任务编辑向导中规则为「绑定/新增」, 规则本体在规则库维护'); router.push('/tagengine2/task/create') }
