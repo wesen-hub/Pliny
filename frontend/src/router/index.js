@@ -38,6 +38,15 @@ const routes = [
       { path: 'asset/:id', name: 'asset-detail', component: () => import('../views/asset/Detail.vue'), meta: { title: '资产详情', active: 'asset-catalog' } },
       // ---------- 标签管理 ----------
       { path: 'tag', name: 'tag', component: () => import('../views/tag/List.vue'), meta: { title: '标签管理' } },
+      // ---------- 打标引擎(页面设计稿, 数据 mock, 未接后端) ----------
+      { path: 'tagengine/task', name: 'tagengine-task', component: () => import('../views/tagengine/TaskList.vue'), meta: { title: '打标引擎 V1', active: 'tagengine' } },
+      // ---------- 打标引擎 V2(注册表+三态任务, 页面设计稿 mock) ----------
+      { path: 'tagengine2/tag', name: 'tagengine2-tag', component: () => import('../views/tagengine2/Registry.vue'), meta: { title: '打标引擎 V2', active: 'tagengine2' } },
+      { path: 'tagengine2/task/create', name: 'tagengine2-create', component: () => import('../views/tagengine2/TaskWizard.vue'), meta: { title: '新建打标任务(V2)', active: 'tagengine2' } },
+      { path: 'tagengine/rule', name: 'tagengine-rule', component: () => import('../views/tagengine/RuleList.vue'), meta: { title: '规则打标', active: 'tagengine-rule' } },
+      { path: 'tagengine/rule/create', name: 'tagengine-rule-create', component: () => import('../views/tagengine/RuleWizard.vue'), meta: { title: '新建规则打标', active: 'tagengine-rule' } },
+      { path: 'tagengine/task/create', name: 'tagengine-create', component: () => import('../views/tagengine/TaskWizard.vue'), meta: { title: '新建打标任务', active: 'tagengine' } },
+      { path: 'tagengine/task/:id', name: 'tagengine-detail', component: () => import('../views/tagengine/TaskDetail.vue'), meta: { title: '打标任务详情', active: 'tagengine' } },
       // ---------- 订阅与分发 ----------
       { path: 'subscribe', name: 'subscribe', component: () => import('../views/subscribe/List.vue'), meta: { title: '订阅中心' } },
       { path: 'subscribe/create', name: 'subscribe-create', component: () => import('../views/subscribe/Wizard.vue'), meta: { title: '新建订阅', active: 'subscribe' } },
