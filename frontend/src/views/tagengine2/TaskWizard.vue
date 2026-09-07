@@ -4,8 +4,8 @@
       <el-steps :active="step" align-center finish-status="success" style="margin-bottom:16px">
         <el-step title="数据集与事实" />
         <el-step title="绑定规则(规则/规则流)" />
-        <el-step title="试跑与命中分析" />
-        <el-step title="调度与发布" />
+        <el-step title="确认与发布" />
+        <el-step title="调度与运行" />
       </el-steps>
 
       <!-- ═══ ① 执行形态 + 数据集与事实 ═══ -->
@@ -19,82 +19,41 @@
             <el-radio-button value="online" disabled>在线(瞬时置位)·P1</el-radio-button>
           </el-radio-group>
           <el-tooltip content="P0 只实现批引擎(Spark 读 Iceberg); 流/在线 P1 开放, 后端 mode/校验位已预留" placement="top">
-            <el-text size="small" type="warning">P0 仅批可用; 流/在线置灰(P1)</el-text>
+            <el-text size="small" type="warning">P0 仅批可用</el-text>
           </el-tooltip>
-          <el-text size="small" type="info">{{ modeHint }}</el-text>
         </div>
         <div class="flex" style="gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-          <template v-if="mode === 'batch'">
-            <el-select v-model="form.dataset" style="width:230px" @change="onDs">
-              <el-option v-for="d in dsList" :key="d.name" :value="d.name" :label="d.name + ' · ' + d.rows" />
-            </el-select>
-            <el-text size="small" type="info">实体键</el-text>
-            <el-select v-model="form.entityKey" style="width:150px"><el-option v-for="k in pksOf" :key="k" :value="k" :label="k" /></el-select>
-            <el-text size="small" type="info">时间窗</el-text>
-            <el-select v-model="form.win" style="width:110px"><el-option value="none" label="全量" /><el-option value="rel" label="近 N 天" /></el-select>
-            <template v-if="form.win === 'rel'">
-              <el-input-number v-model="form.winNum" size="small" style="width:90px" :min="1" />
-              <el-select v-model="form.winOn" size="small" style="width:140px"><el-option v-for="f in dateFields" :key="f" :value="f" :label="f" /></el-select>
-            </template>
-            <el-text size="small" type="success">装配: 每行 = 一个 Fact, 规则逐行求值</el-text>
-          </template>
-          <template v-else-if="mode === 'stream'">
-            <el-select v-model="st.topic" style="width:240px">
-              <el-option value="pay-events" label="pay-events(支付事件)" />
-              <el-option value="cdc-binlog-events" label="CDC binlog" />
-              <el-option value="click-stream" label="click-stream" />
-            </el-select>
-            <el-text size="small" type="info">实体键(事件字段)</el-text>
-            <el-select v-model="form.entityKey" style="width:140px"><el-option value="customer_id" label="customer_id" /></el-select>
-            <el-text size="small" type="info">事件时间</el-text>
-            <el-select v-model="st.eventTime" size="small" style="width:130px"><el-option value="event_time" label="event_time" /></el-select>
-            <el-text size="small" type="info">窗口</el-text>
-            <el-radio-group v-model="st.winType" size="small"><el-radio-button value="sliding">滑动</el-radio-button><el-radio-button value="tumbling">滚动</el-radio-button></el-radio-group>
-            <el-input-number v-model="st.winLen" size="small" style="width:80px" :min="1" />
-            <el-select v-model="st.winUnit" size="small" style="width:70px"><el-option value="m" label="分钟" /><el-option value="h" label="小时" /><el-option value="d" label="天" /></el-select>
-            <el-text size="small" type="success">事实 = 事件(窗口聚合见派生字段)</el-text>
-          </template>
-          <template v-else>
-            <el-radio-group v-model="st.srcType" size="small"><el-radio-button value="topic">Kafka 事件</el-radio-button><el-radio-button value="api">平台 API</el-radio-button></el-radio-group>
-            <el-select v-if="st.srcType === 'topic'" v-model="st.topic" size="small" style="width:220px"><el-option value="app-heartbeat" label="app-heartbeat" /></el-select>
-            <el-text v-else size="small" type="info">POST /api/tags/ingest { entity, tag, value, ts }</el-text>
-            <el-text size="small" type="success">事实 = 单事件; 只支持布尔/瞬时标签(注册表 timing=instant)</el-text>
-          </template>
+          <el-select v-model="form.dataset" style="width:230px" @change="onDs">
+            <el-option v-for="d in dsList" :key="d.name" :value="d.name" :label="d.name + ' · ' + d.rows" />
+          </el-select>
+          <el-text size="small" type="info">实体键</el-text>
+          <el-select v-model="form.entityKey" style="width:150px"><el-option v-for="k in pksOf" :key="k" :value="k" :label="k" /></el-select>
+          <el-text size="small" type="success">每行 = 一个 Fact, 规则逐行求值; 源 = 逻辑表的 Iceberg 湖表(湖落地外部推进, task-json 湖参数由平台配置)</el-text>
         </div>
 
-        <div class="cfg-title">派生字段(事实预处理: 字段变换 / 聚合统计; 满足所绑规则的字段依赖)
-          <el-text v-if="mode === 'stream'" size="small" type="warning" style="margin-left:8px">流模式: 聚合将用窗口实现</el-text>
-          <el-text v-else-if="mode === 'online'" size="small" type="warning" style="margin-left:8px">在线模式: 仅事件字段直取, 不支持聚合派生</el-text>
-        </div>
+        <div class="cfg-title">派生字段(事实预处理: 字段变换 / 聚合统计; 满足所绑规则字段依赖; 发布时后端校验)</div>
         <div v-for="(d, di) in derived" :key="'d' + di" class="metric-row">
           <el-input v-model="d.name" size="small" style="width:140px" placeholder="字段名, 如 pay7d" />
           <el-text size="small" type="info">=</el-text>
-          <el-input v-model="d.expr" size="small" style="flex:1;min-width:260px" spellcheck="false"
-            placeholder="表达式: concat(region,'-',city) / upper(status) / 或聚合 SUM(amount) 按实体(近90天, 引擎自动 GROUP BY 实体)" />
-          <el-select v-model="d.ins" size="small" style="width:150px" placeholder="插入字段" @change="insD(d)">
-            <el-option v-for="f in dsFields[form.dataset]" :key="'i' + f" :value="f" :label="f" />
-          </el-select>
+          <el-input v-model="d.expr" size="small" style="flex:1;min-width:260px" spellcheck="false" placeholder="表达式: concat(region,'-',city) / 或聚合 SUM(amount)(按实体近N天, 执行器实现)" />
           <el-button size="small" text type="danger" @click="derived.splice(di, 1)">✕</el-button>
         </div>
-        <div class="flex" style="gap:8px;align-items:center">
-          <el-button size="small" type="primary" plain @click="derived.push({ name: 'f' + (derived.length + 1), expr: '', ins: '' })">＋ 派生字段</el-button>
-          <el-text size="small" type="info">例: pay7d = SUM(amount)(近7天) · net = pay_amount - coupon_amount · 大区 = concat(region,'大区')</el-text>
-        </div>
+        <el-button size="small" type="primary" plain @click="derived.push({ name: '', expr: '' })">＋ 派生字段</el-button>
+        <el-text size="small" type="info" style="margin-left:8px">例: pay7d = SUM(amount)(聚合, 执行器按实体 groupBy) · net = pay_amount - coupon_amount</el-text>
       </div>
 
       <!-- ═══ ② 绑定规则 ═══ -->
       <div v-if="step === 1" class="sec">
-        <div class="sec-title">② 绑定规则 —— 规则与规则流在「规则库」分开维护(规则管理 / 规则流管理), 这里选择/新建; 执行序 = 规则先跑, 再按序跑规则流</div>
-
+        <div class="sec-title">② 绑定规则(规则管理/规则流管理资产; 执行序 = 规则先跑 → 规则流按序后跑; 数据实时来自后端)</div>
         <div class="bind-sec">
-          <div class="cfg-title">A. 规则(先执行: 可视化/决策表/DRL 定义的完整规则, 各自独立判定; 决策表规则内部档位排他)</div>
+          <div class="cfg-title">A. 规则(先执行)</div>
           <div v-if="!bindRule.length" class="empty-tip">尚未绑定规则 —— 从规则管理选择, 或直接新建一个</div>
           <div v-for="(r, ri) in bindRule" :key="'br' + ri" class="asset-row">
             <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap;flex:1">
-              <el-tag size="small" :type="defTagType(r)" effect="plain">规则·{{ defLabel(r) }}</el-tag>
+              <el-tag size="small" :type="modeTag(r)" effect="plain">规则·{{ defLabel(r) }}</el-tag>
               <el-text size="small" style="font-weight:600">{{ r.name }}</el-text>
               <el-tag size="small" effect="plain">v{{ r.ver }}</el-tag>
-              <el-text size="small" type="info">{{ sumRule(r) }}</el-text>
+              <el-text size="small" type="info">{{ brief(r) }}</el-text>
             </div>
             <div class="flex" style="gap:4px;align-items:center">
               <el-tag v-for="d in depsOf(r)" :key="d" size="small" :type="depOk(d) ? 'success' : 'danger'" effect="plain">{{ d }} {{ depOk(d) ? '✓' : '缺' }}</el-tag>
@@ -105,20 +64,19 @@
           </div>
           <div class="flex" style="gap:8px;margin-top:6px;flex-wrap:wrap">
             <el-button size="small" type="primary" plain @click="openPicker('rule')">从规则管理选择</el-button>
-            <el-button size="small" plain @click="quickOpen = true">＋ 新建规则(落库后自动绑定)</el-button>
-            <el-button size="small" text type="primary" @click="$router.push('/tagengine2/rule')">去规则库维护 →</el-button>
+            <el-button size="small" plain @click="quickOpen = true">＋ 新建规则(可视化/决策表)</el-button>
           </div>
         </div>
 
         <div class="bind-sec">
-          <div class="cfg-title">B. 规则流(后执行, 按绑定顺序; 流内决策链可引用规则与规则流, 命中/未命中分支、可终止)</div>
-          <div v-if="!bindFlow.length" class="empty-tip">尚未绑定规则流 —— 从规则流管理选择(如「风控优先决策链」), 或新建一个</div>
+          <div class="cfg-title">B. 规则流(后执行, 按绑定顺序; 链内可引规则/规则流)</div>
+          <div v-if="!bindFlow.length" class="empty-tip">尚未绑定规则流 —— 从规则流管理选择, 或新建一个</div>
           <div v-for="(r, ri) in bindFlow" :key="'bf' + ri" class="asset-row">
             <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap;flex:1">
               <el-tag size="small" type="warning" effect="plain">规则流</el-tag>
               <el-text size="small" style="font-weight:600">{{ r.name }}</el-text>
               <el-tag size="small" effect="plain">v{{ r.ver }}</el-tag>
-              <el-text size="small" type="info">{{ sumRule(r) }}</el-text>
+              <el-text size="small" type="info">{{ brief(r) }}</el-text>
             </div>
             <div class="flex" style="gap:4px;align-items:center">
               <el-tag v-for="d in depsOf(r)" :key="d" size="small" :type="depOk(d) ? 'success' : 'danger'" effect="plain">{{ d }} {{ depOk(d) ? '✓' : '缺' }}</el-tag>
@@ -130,93 +88,79 @@
           <div class="flex" style="gap:8px;margin-top:6px;flex-wrap:wrap">
             <el-button size="small" type="primary" plain @click="openPicker('flow')">从规则流管理选择</el-button>
             <el-button size="small" plain @click="flowQuickOpen = true">＋ 新建规则流(示例决策链)</el-button>
-            <el-button size="small" text type="primary" @click="$router.push('/tagengine2/rule')">去规则库维护 →</el-button>
           </div>
         </div>
 
         <div v-if="missingDeps.length" class="dep-warn">
-          <el-text size="small" type="danger"><b>依赖不满足 {{ missingDeps.length }} 个字段</b>: {{ missingDeps.join('、') }} —— 回到①在「派生字段」中定义(或更换数据集), 否则发布被拦截</el-text>
+          <el-text size="small" type="danger"><b>依赖不满足 {{ missingDeps.length }} 个字段</b>: {{ missingDeps.join('、') }} —— 回到①补派生字段或换数据集(发布时后端同样校验)</el-text>
         </div>
-        <el-text v-else size="small" type="success" style="margin-top:6px;display:block">✓ 所绑规则/规则流的字段依赖(含流内嵌套递归; DRL 规则除外)全部被 数据集字段 ∪ 派生字段 满足</el-text>
+        <el-text v-else size="small" type="success" style="margin-top:6px;display:block">✓ 字段依赖全部可满足</el-text>
       </div>
 
-      <!-- ═══ ③ 试跑与命中分析 ═══ -->
+      <!-- ═══ ③ 确认与发布 ═══ -->
       <div v-if="step === 2" class="sec">
-        <div class="sec-title">③ 试跑与命中分析(按执行序逐 Fact 求值: 规则 → 规则流[链内步骤])</div>
-        <div class="flex" style="gap:10px;align-items:center">
-          <el-button type="primary" :loading="testing" @click="doTest">▶ {{ testLabel }}</el-button>
-          <el-text size="small" type="info">{{ testHint }}</el-text>
-        </div>
-        <template v-if="tested">
-          <el-table :data="hitRows" size="small" border stripe style="margin-top:10px">
-            <el-table-column type="index" label="序" width="46" />
-            <el-table-column label="执行对象" min-width="190">
-              <template #default="{ row }">
-                <el-tag size="small" :type="row.kind === '规则流' ? 'warning' : 'primary'" effect="plain">{{ row.kind }}</el-tag>
-                <el-text size="small" style="margin-left:4px">{{ row.rule }}</el-text>
-              </template>
-            </el-table-column>
-            <el-table-column label="规则定义/流向摘要" min-width="280"><template #default="{ row }"><el-text size="small" type="info">{{ row.when }}</el-text></template></el-table-column>
-            <el-table-column label="动作/去向" min-width="140"><template #default="{ row }"><el-text size="small">{{ row.then }}</el-text></template></el-table-column>
-            <el-table-column label="命中数" width="90"><template #default="{ row }"><el-text size="small" type="success">{{ row.hits }}</el-text></template></el-table-column>
-            <el-table-column label="截断/短路" width="110"><template #default="{ row }"><el-text size="small" :type="row.blocked ? 'danger' : 'info'">{{ row.blocked }}</el-text></template></el-table-column>
-          </el-table>
-          <div class="flex" style="gap:10px;margin-top:10px;align-items:center">
-            <el-tag type="success" effect="plain">规则 {{ bindRule.length }} · 规则流 {{ bindFlow.length }} · 嵌套流 {{ nestedCnt }} 处</el-tag>
-            <el-button type="success" @click="step = 3">继续: 调度与发布</el-button>
-          </div>
-        </template>
-      </div>
-
-      <!-- ═══ ④ 调度与发布 ═══ -->
-      <div v-if="step === 3" class="sec">
-        <div class="sec-title">④ 调度与发布</div>
-        <el-form label-width="110px" style="max-width:640px">
-          <el-form-item label="任务名称">
-            <el-input v-model="taskName" style="width:340px" placeholder="任务名称(必填)" />
-          </el-form-item>
-          <el-form-item label="调度">
-            <el-radio-group v-model="sched">
-              <el-radio-button v-if="mode === 'batch'" value="cron">定时</el-radio-button>
-              <el-radio-button value="manual">手动</el-radio-button>
-              <el-radio-button v-if="mode !== 'batch'" value="resident">常驻(流/在线)</el-radio-button>
-            </el-radio-group>
-            <el-input v-if="sched === 'cron'" v-model="cron" size="small" style="width:220px;margin-left:10px" placeholder="0 0 2 * * ?" />
-          </el-form-item>
-          <el-form-item label="护栏">
-            <el-checkbox v-model="guard">命中变化率 &gt; 30% 拦截</el-checkbox>
-            <el-checkbox v-model="schemaCheck" style="margin-left:14px">标签类型/取值域校验失败即失败</el-checkbox>
-          </el-form-item>
-          <el-form-item label="规则快照">
-            <el-text size="small" type="info">发布时固化所绑规则/规则流版本快照({{ bindRule.length + bindFlow.length }} 条), 规则库后续升版不影响本任务, 除非重新发布</el-text>
+        <div class="sec-title">③ 确认与发布</div>
+        <el-form label-width="100px" style="max-width:620px">
+          <el-form-item label="任务名称"><el-input v-model="taskName" style="width:320px" placeholder="任务名称(必填)" /></el-form-item>
+          <el-form-item label="数据集"><el-text size="small">{{ form.dataset }} · 实体键 {{ form.entityKey }}</el-text></el-form-item>
+          <el-form-item label="绑定资产">
+            <el-text size="small">{{ bindRule.length }} 规则(先) + {{ bindFlow.length }} 规则流(后) —— 共 {{ bindRule.length + bindFlow.length }} 条</el-text>
           </el-form-item>
         </el-form>
         <div v-if="badChecks.length" class="check-bar">
           <el-text size="small" type="danger">校验 {{ badChecks.length }} 项:</el-text>
           <el-tag v-for="c in badChecks" :key="c" size="small" type="danger" effect="plain" style="margin-left:6px">{{ c }}</el-tag>
         </div>
-        <el-button type="success" :disabled="!!badChecks.length" @click="publish">提交审批发布</el-button>
-        <el-text size="small" type="info" style="margin-left:10px">发布后: 装配 ds → 派生字段 → 规则(可视化/决策表/DRL 编译执行) → 规则流(决策链) → 校验落 tag_fact</el-text>
+        <el-button type="primary" :disabled="!!badChecks.length || saving" @click="createTask">{{ saving ? '保存中…' : '创建任务(草稿)' }}</el-button>
+        <el-text v-if="createdId" size="small" type="success" style="margin-left:10px">已创建 #{{ createdId }} —— 下一步发布</el-text>
       </div>
 
-      <div class="nav-bar">
+      <!-- ═══ ④ 调度与运行 ═══ -->
+      <div v-if="step === 3" class="sec">
+        <div class="sec-title">④ 调度与运行</div>
+        <el-form label-width="110px" style="max-width:640px">
+          <el-form-item label="调度">
+            <el-radio-group v-model="sched">
+              <el-radio-button value="none">手动</el-radio-button>
+              <el-radio-button value="cron">定时(cron)</el-radio-button>
+            </el-radio-group>
+            <el-input v-if="sched === 'cron'" v-model="cron" size="small" style="width:220px;margin-left:10px" placeholder="0 0 2 * * ?" />
+            <el-text v-if="sched === 'cron'" size="small" type="info" style="margin-left:8px">后端 tick 自动触发(auto-run 开关)</el-text>
+          </el-form-item>
+          <el-form-item v-if="createdId && taskStatus === 'published'" label="运行">
+            <el-button type="success" size="small" @click="runNow">⚡ 触发运行(演练/提交)</el-button>
+            <el-text v-if="lastRun" size="small" type="info" style="margin-left:10px">run #{{ lastRun.runId }}: {{ lastRun.status }}</el-text>
+          </el-form-item>
+        </el-form>
+        <div class="nav-bar" style="margin-top:14px">
+          <el-button :disabled="step === 0" @click="step--">上一步</el-button>
+          <el-button type="success" :disabled="!createdId || taskStatus === 'published'" @click="publishNow">
+            {{ taskStatus === 'published' ? '✓ 已发布(快照固化)' : '发布(固化规则版本快照)' }}
+          </el-button>
+          <el-button v-if="taskStatus === 'published'" plain @click="$router.push('/tagengine2/task')">去任务列表</el-button>
+          <div style="flex:1"></div>
+          <el-text size="small" type="info">创建 → 发布 → 触发运行; 后端生成 task-json 落盘并演练/提交 Spark</el-text>
+        </div>
+      </div>
+
+      <div class="nav-bar" v-if="step < 3">
         <el-button :disabled="step === 0" @click="step--">上一步</el-button>
-        <el-button v-if="step < 3" type="primary" @click="step++">下一步</el-button>
+        <el-button type="primary" @click="step++">下一步</el-button>
         <div style="flex:1"></div>
-        <el-text size="small" type="info">第 {{ step + 1 }} / 4 步 · 规则管理(可视化/决策表/DRL) + 规则流管理 · 任务绑定执行(mock)</el-text>
+        <el-text size="small" type="info">第 {{ step + 1 }} / 4 步 · 数据已接后端 /api/tagengine/*</el-text>
       </div>
     </el-card>
 
     <!-- ═══ 从规则库选择 ═══ -->
-    <el-dialog v-model="pickerOpen" :title="pickerKind === 'rule' ? '从规则管理选择规则(可多选)' : '从规则流管理选择规则流(可多选)'" width="760">
+    <el-dialog v-model="pickerOpen" :title="pickerKind === 'rule' ? '从规则管理选择(可多选)' : '从规则流管理选择(可多选)'" width="720">
       <el-table :data="candidates" size="small" border @selection-change="sel = $event">
         <el-table-column type="selection" width="42" />
         <el-table-column label="名称" min-width="170">
           <template #default="{ row }">
-            <el-text size="small">{{ row.name }} <el-tag size="small" :type="defTagType(row)" effect="plain">{{ defLabel(row) }}</el-tag> <el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></el-text>
+            <el-text size="small">{{ row.name }} <el-tag size="small" :type="modeTag(row)" effect="plain">{{ defLabel(row) }}</el-tag> <el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></el-text>
           </template>
         </el-table-column>
-        <el-table-column label="定义摘要" min-width="380"><template #default="{ row }"><el-text size="small" type="info">{{ sumRule(row) }}</el-text></template></el-table-column>
+        <el-table-column label="摘要" min-width="320"><template #default="{ row }"><el-text size="small" type="info">{{ brief(row) }}</el-text></template></el-table-column>
       </el-table>
       <template #footer>
         <el-button @click="pickerOpen = false">取消</el-button>
@@ -225,31 +169,27 @@
     </el-dialog>
 
     <!-- ═══ 快速新建规则 ═══ -->
-    <el-dialog v-model="quickOpen" title="新建规则(保存到规则管理并自动绑定)" width="600">
+    <el-dialog v-model="quickOpen" title="新建规则(可视化/决策表, 保存到规则管理并自动绑定)" width="600">
       <el-radio-group v-model="uq.mode" size="small" style="margin-bottom:10px">
         <el-radio-button value="visual">可视化(单条件)</el-radio-button>
         <el-radio-button value="table">决策表(档位)</el-radio-button>
       </el-radio-group>
-      <el-alert type="info" :closable="false" title="快捷创建两种形态; 完整三视图编辑(含 DRL 定义)到「规则库 → 规则管理」。" style="margin-bottom:10px" />
       <el-form label-width="90px">
         <el-form-item label="名称"><el-input v-model="uq.name" style="width:300px" placeholder="如: 高价值客户判定" /></el-form-item>
         <template v-if="uq.mode === 'visual'">
-          <el-form-item label="WHEN 条件">
+          <el-form-item label="WHEN">
             <div class="flex" style="gap:6px;flex-wrap:wrap">
               <el-select v-model="uq.field" style="width:150px"><el-option v-for="f in condFields" :key="f" :value="f" :label="f" /></el-select>
               <el-select v-model="uq.op" style="width:90px"><el-option v-for="o in opers" :key="o.v" :value="o.v" :label="o.l" /></el-select>
               <el-input v-model="uq.val" style="width:110px" placeholder="值" />
             </div>
           </el-form-item>
-          <el-form-item label="THEN 打标签">
+          <el-form-item label="THEN 标签">
             <div class="flex" style="gap:6px;flex-wrap:wrap">
-              <el-select v-model="uq.tag" style="width:180px" filterable placeholder="标签(注册表)">
+              <el-select v-model="uq.tag" style="width:180px" filterable placeholder="标签(注册表/路径)">
                 <el-option v-for="t in tagOptions" :key="t" :value="t" :label="t" />
               </el-select>
-              <template v-if="!metaBool(uq.tag)">
-                <el-input v-model="uq.val2" style="width:110px" placeholder="标签值" />
-                <el-text v-if="badVal2" size="small" type="danger">域外</el-text>
-              </template>
+              <template v-if="!metaBool(uq.tag)"><el-input v-model="uq.val2" style="width:110px" placeholder="值" /></template>
               <el-text v-else size="small" type="info">(布尔)</el-text>
             </div>
           </el-form-item>
@@ -271,8 +211,7 @@
             </div>
             <el-button size="small" text type="primary" @click="uq.buckets.push({ op: '>=', th: '', val: '' })">＋ 档位</el-button>
             <div class="flex" style="gap:6px;margin-top:6px;align-items:center">
-              <el-text size="small" type="info">兜底</el-text>
-              <el-input v-model="uq.elseVal" size="small" style="width:100px" placeholder="如 小额" />
+              <el-text size="small" type="info">兜底</el-text><el-input v-model="uq.elseVal" size="small" style="width:100px" placeholder="如 小额" />
             </div>
           </el-form-item>
         </template>
@@ -284,10 +223,10 @@
     </el-dialog>
 
     <!-- ═══ 快速新建规则流 ═══ -->
-    <el-dialog v-model="flowQuickOpen" title="新建规则流(示例决策链, 保存到规则流管理并自动绑定)" width="520">
-      <el-form label-width="90px">
+    <el-dialog v-model="flowQuickOpen" title="新建规则流(示例决策链, 保存到规则流管理并自动绑定)" width="540">
+      <el-form label-width="100px">
         <el-form-item label="规则流名称"><el-input v-model="fq.name" style="width:300px" placeholder="如: 风控+金额档链" /></el-form-item>
-        <el-alert type="info" :closable="false" title="生成两步示例: ① 黑名单命中 → 整链终止; ② 金额档(决策表规则)分档。建好后可去规则流管理继续编辑。" />
+        <el-alert type="info" :closable="false" title="生成两步示例: ① 黑名单命中 → 终止整链; ② 金额档(决策表)分档; 若无同名规则则按库内可用规则回退。" />
       </el-form>
       <template #footer>
         <el-button @click="flowQuickOpen = false">取消</el-button>
@@ -298,36 +237,23 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import {
-  ruleState, tagOptions, metaBool, domainOf, assetOf,
-  defLabel, defTagType, sumRule, stepText, depNamesOf, upsertAsset
-} from './mockLib.js'
+import { rulesApi, tasksApi } from '../../api/tagengine.js'
+import { tagOptions, metaBool, defLabel } from './mockLib.js'
 
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))
 const step = ref(0)
+const saving = ref(false)
 const taskName = ref('')
-const mode = ref('batch')
-const modeHint = computed(() => ({
-  batch: '表快照事实 · 定时/手动 · 支持聚合派生 · 落事实层',
-  stream: '事件流事实 + 窗口 · 常驻 · 结果近实时双写 事实+在线',
-  online: '单事件事实 · 常驻 · 布尔/瞬时标签置位在线层(Redis TTL)'
-}[mode.value]))
-const st = ref({ topic: 'pay-events', eventTime: 'event_time', winType: 'sliding', winLen: 5, winUnit: 'm', srcType: 'topic' })
-const testLabel = computed(() => (mode.value === 'batch' ? '▶ 试跑(1% 采样)' : mode.value === 'stream' ? '▶ 干跑(事件回放 10 分钟)' : '▶ 回放(最近 1 万事件)'))
-const testHint = computed(() => (mode.value === 'batch'
-  ? '事实 = 数据行(含派生字段); 规则 → 规则流逐行求值'
-  : mode.value === 'stream'
-    ? '事实 = 事件/窗口聚合结果; 同一执行计划在 Flink 算子内求值'
-    : '事实 = 单事件; 规则即时求值置位, TTL 自动过期'))
-const sched = ref('cron')
-const cron = ref('0 0 2 * * ?')
-const guard = ref(true)
-const schemaCheck = ref(true)
+const createdId = ref(null)
+const taskStatus = ref('draft')
+const lastRun = ref(null)
 
+/* ---------- ① 形态/装配 ---------- */
+const mode = ref('batch')
 const dsList = [
   { name: 'order_wide', rows: '412 万' },
   { name: 'customer_wide', rows: '36.2 万' }
@@ -337,49 +263,66 @@ const dsFields = {
   customer_wide: ['customer_id', 'name', 'region', 'data_secret', 'status', 'last_active_at']
 }
 const pks = { order_wide: ['order_id'], customer_wide: ['customer_id'] }
-const dateFields = computed(() => (dsFields[form.dataset] || []).filter(f => /date|time|_at/.test(f)))
-const form = ref({ dataset: 'order_wide', entityKey: 'order_id', win: 'rel', winNum: 90, winOn: 'order_date' })
+const form = ref({ dataset: 'order_wide', entityKey: 'order_id' })
 const pksOf = computed(() => pks[form.dataset] || ['id'])
 function onDs() {
   form.entityKey = pks[form.dataset][0]
 }
-const derived = ref([
-  { name: 'pay7d', expr: 'SUM(amount)  (近7天, 按实体聚合)', ins: '' },
-  { name: 'net_amt', expr: 'pay_amount - coupon_amount', ins: '' },
-  { name: 'region_lv', expr: "concat(region, '大区')", ins: '' }
-])
-function insD(d) {
-  if (!d.ins) return
-  d.expr = (d.expr ? d.expr + ' ' : '') + d.ins
-  d.ins = ''
-}
-const derivedAggNames = computed(() => derived.value.filter(d => /SUM|COUNT|AVG|MAX|MIN/i.test(d.expr)).map(d => d.name))
+const derived = ref([])
+const derivedNames = computed(() => derived.value.map(d => d.name).filter(Boolean))
+const condFields = computed(() => [...new Set([...dsFields[form.dataset], ...derivedNames.value])])
 
-/* ---------- ② 绑定 ---------- */
+/* ---------- ② 绑定(资产来自后端) ---------- */
+const allAssets = ref([])
+const mapOf = computed(() => new Map(allAssets.value.map(a => [Number(a.id), a])))
 const bindRule = ref([])
 const bindFlow = ref([])
-function seedDefault() {
-  if (bindRule.value.length || bindFlow.value.length) return
-  const r2 = ruleState.rules.find(x => x.id === 'r2') || ruleState.rules.find(x => x.kind === 'rule')
-  const f1 = ruleState.rules.find(x => x.id === 'f1') || ruleState.rules.find(x => x.kind === 'flow')
-  if (r2) bindRule.value.push(JSON.parse(JSON.stringify(r2)))
-  if (f1) bindFlow.value.push(JSON.parse(JSON.stringify(f1)))
-}
-seedDefault()
-const mvArr = (arr, i, d) => {
-  const j = i + d
-  ;[arr[i], arr[j]] = [arr[j], arr[i]]
-}
-const depsOf = (r) => depNamesOf(r)
-const availFields = computed(() => {
-  const s = new Set(dsFields[form.dataset] || [])
-  derived.value.forEach(d => { if (d.name) s.add(d.name) })
-  return s
+onMounted(async () => {
+  try { allAssets.value = await rulesApi.list() } catch (e) { /* 已提示 */ }
 })
-const depOk = (d) => availFields.value.has(d)
+const mvArr = (arr, i, d) => { const j = i + d; [arr[i], arr[j]] = [arr[j], arr[i]] }
+
+/* 展示助手(本地实现, 不依赖 mock 库内 store) */
+const defLabelX = defLabel
+const modeTag = (r) => (r.kind === 'flow' ? 'warning' : r.def && r.def.mode === 'drl' ? 'danger' : r.def && r.def.mode === 'table' ? 'primary' : 'success')
+const brief = (r) => {
+  if (!r) return '(已删)'
+  if (r.kind === 'flow') {
+    const names = (r.def && r.def.steps || []).map(s => { const t = mapOf.value.get(Number(s.refId)); return (t ? (t.kind === 'flow' ? '⤷' : '') + t.name : '?') }).join(' → ')
+    return '编排(' + (r.def && r.def.steps || []).length + '步): ' + names
+  }
+  const d = r.def || {}
+  if (d.mode === 'table') {
+    const t = d.table || {}
+    return '决策表→' + t.tag + ': ' + (t.rows || []).map(x => t.field + x.op + x.th + '→' + x.val).join('; ') + (t.elseVal ? '; 兜底→' + t.elseVal : '')
+  }
+  if (d.mode === 'drl') return 'DRL(' + ((d.drl || '').split('\n').length) + '行)'
+  const v = d.visual || {}
+  const w = (v.when || []).map(g => (g.conds || []).map(c => c.field + ' ' + c.op + ' ' + c.val).join(' 且 ')).join(' 或 ')
+  return (w || '恒真') + ' → ' + (v.actions || []).map(a => a.type === 'stop' ? '停止' : '打' + a.tag).join('; ')
+}
+/** 本地递归依赖(flow 嵌套经全量资产表解析) */
+function depCollect(r, seen) {
+  const out = new Set()
+  const walk = (x) => {
+    if (!x || seen.has(x.id)) return
+    seen.add(x.id)
+    if (x.kind === 'flow') (x.def && x.def.steps || []).forEach(s => walk(mapOf.value.get(Number(s.refId))))
+    else {
+      const d = x.def || {}
+      if (d.mode === 'table') { if (d.table && d.table.field) out.add(d.table.field) }
+      else if (d.mode === 'visual') (d.visual && d.visual.when || []).forEach(g => (g.conds || []).forEach(c => { if (c.field) out.add(c.field) }))
+    }
+  }
+  walk(r)
+  return [...out]
+}
+const depsOf = (r) => depCollect(r, new Set())
+const availFields = computed(() => [...new Set([...dsFields[form.dataset], ...derivedNames.value])])
+const depOk = (d) => availFields.value.includes(d)
 const missingDeps = computed(() => {
   const s = new Set()
-  ;[...bindRule.value, ...bindFlow.value].forEach(r => depNamesOf(r).forEach(d => { if (!depOk(d)) s.add(d) }))
+  ;[...bindRule.value, ...bindFlow.value].forEach(r => depCollect(r, new Set()).forEach(d => { if (!depOk(d)) s.add(d) }))
   return [...s]
 })
 
@@ -389,31 +332,23 @@ const pickerKind = ref('rule')
 const sel = ref([])
 const candidates = computed(() => {
   const bound = pickerKind.value === 'rule' ? bindRule.value : bindFlow.value
-  return ruleState.rules.filter(r => (pickerKind.value === 'rule' ? r.kind === 'rule' : r.kind === 'flow') && r.status !== 0 && !bound.some(b => b.id === r.id))
+  return allAssets.value.filter(r => (pickerKind.value === 'rule' ? r.kind === 'rule' : r.kind === 'flow') && r.status !== 0 && !bound.some(b => b.id === r.id))
 })
 const openPicker = (kind) => { pickerKind.value = kind; sel.value = []; pickerOpen.value = true }
 function addPicked() {
   const arr = pickerKind.value === 'rule' ? bindRule.value : bindFlow.value
-  sel.value.forEach(r => arr.push(JSON.parse(JSON.stringify(r))))
-  toast('已绑定 ' + sel.value.length + ' 条' + (pickerKind.value === 'rule' ? '规则(A, 先执行)' : '规则流(B, 后执行)'))
+  sel.value.forEach(r => arr.push({ id: r.id, name: r.name, ver: r.ver, kind: r.kind, def: r.def }))
+  toast('已绑定 ' + sel.value.length + ' 条' + (pickerKind.value === 'rule' ? '规则(A)' : '规则流(B)'))
   pickerOpen.value = false
 }
 
 /* 快速新建规则 */
-const opers = [
-  { v: '==', l: '=' }, { v: '!=', l: '≠' }, { v: '>=', l: '≥' }, { v: '<=', l: '≤' },
-  { v: '>', l: '>' }, { v: '<', l: '<' }, { v: 'in', l: '∈' }, { v: 'like', l: '含' }
-]
+const opers = [{ v: '==', l: '=' }, { v: '!=', l: '≠' }, { v: '>=', l: '≥' }, { v: '<=', l: '≤' }, { v: '>', l: '>' }, { v: '<', l: '<' }, { v: 'like', l: '含' }]
 const quickOpen = ref(false)
 const uq = ref({ mode: 'visual', name: '', field: 'amount', op: '>=', val: '', tag: '', val2: '', buckets: [{ op: '>=', th: '', val: '' }], elseVal: '' })
-const condFields = computed(() => [...new Set([...dsFields[form.dataset], ...derived.value.map(d => d.name)])])
-const badVal2 = computed(() => {
-  const dom = domainOf(uq.value.tag)
-  return !!(dom.length && uq.value.val2 && !dom.includes(uq.value.val2))
-})
 function saveQuick() {
-  const asset = {
-    name: uq.value.name, desc: '任务内快速新建', kind: 'rule', status: 1,
+  const body = {
+    name: uq.value.name, descr: '任务内快速新建', kind: 'rule', status: 1,
     def: {
       mode: uq.value.mode,
       visual: uq.value.mode === 'visual' ? { when: [{ logic: 'AND', conds: [{ field: uq.value.field, op: uq.value.op, val: uq.value.val }] }], actions: [{ type: 'tag', tag: uq.value.tag, val: metaBool(uq.value.tag) ? '' : uq.value.val2 }] } : { when: [], actions: [] },
@@ -421,147 +356,87 @@ function saveQuick() {
       drl: ''
     }
   }
-  const saved = upsertAsset(asset)
-  bindRule.value.push(JSON.parse(JSON.stringify(saved)))
-  quickOpen.value = false
-  toast('规则已保存到规则管理并绑定(A): ' + saved.name)
+  rulesApi.create(body).then((saved) => {
+    bindRule.value.push({ id: saved.id, name: saved.name, ver: 1, kind: 'rule', def: body.def })
+    quickOpen.value = false
+    toast('规则已保存到规则管理并绑定(A): ' + saved.name)
+    allAssets.value.push({ ...saved, def: body.def })
+  }).catch(() => {})
 }
 
 /* 快速新建规则流 */
 const flowQuickOpen = ref(false)
 const fq = ref({ name: '' })
 function saveQuickFlow() {
-  const black = ruleState.rules.find(x => x.id === 'r2')
-  const amt = ruleState.rules.find(x => x.id === 'r1')
-  if (!black || !amt) { toast('规则库缺少示例规则(黑名单/金额档), 请先到规则管理补建', 'warning'); return }
-  const fl = upsertAsset({
-    name: fq.value.name, desc: '任务内快速新建(黑名单 → 金额档)', kind: 'flow', status: 1,
-    steps: [
-      { refId: 'r2', refType: 'rule', hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
-      { refId: 'r1', refType: 'rule', hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
-    ]
-  })
-  bindFlow.value.push(JSON.parse(JSON.stringify(fl)))
-  flowQuickOpen.value = false
-  toast('规则流已保存到规则流管理并绑定(B): ' + fl.name)
+  const black = allAssets.value.find(r => r.kind === 'rule' && r.name.includes('黑名单')) || allAssets.value.find(r => r.kind === 'rule')
+  const amt = allAssets.value.find(r => r.kind === 'rule' && r.def && r.def.mode === 'table') || allAssets.value.find(r => r.kind === 'rule')
+  if (!black || !amt) { toast('规则管理为空, 请先建规则', 'warning'); return }
+  const body = {
+    name: fq.value.name, descr: '任务内快速新建', kind: 'flow', status: 1,
+    def: { steps: [
+      { refId: black.id, hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
+      { refId: amt.id, hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
+    ] }
+  }
+  rulesApi.create(body).then((saved) => {
+    bindFlow.value.push({ id: saved.id, name: saved.name, ver: 1, kind: 'flow', def: body.def })
+    flowQuickOpen.value = false
+    toast('规则流已保存并绑定(B): ' + saved.name)
+    allAssets.value.push({ ...saved, def: body.def })
+  }).catch(() => {})
 }
 
-/* ---------- ③ 试跑 ---------- */
-const testing = ref(false)
-const tested = ref(false)
-const hitRows = ref([])
-const nestedCnt = computed(() => {
-  let n = 0
-  bindFlow.value.forEach(f => (f.steps || []).forEach(s => { if (assetOf(s.refId)?.kind === 'flow') n++ }))
-  return n
-})
-const execPlan = computed(() => {
-  const out = []
-  const pushRule = (r, prefix, depth) => {
-    if (r.kind === 'flow') {
-      ;(r.steps || []).forEach((s2, i) => {
-        const inner = assetOf(s2.refId)
-        if (inner && inner.kind === 'flow') {
-          out.push({ kind: '规则流', rule: (prefix ? prefix + ' › ' : '') + r.name + ' · ' + (i + 1) + '. ⤷' + inner.name, when: '嵌套引用: ' + sumRule(inner), then: stepText(s2), hits: 2600, blocked: '—' })
-          if (depth < 4) pushRule(inner, (prefix ? prefix + ' › ' : '') + r.name, depth + 1)
-        } else {
-          out.push({
-            kind: '规则流', rule: (prefix ? prefix + ' › ' : '') + r.name + ' · ' + (i + 1) + '. ' + (inner ? inner.name : '?'),
-            when: inner ? sumRule(inner) : '规则已删除?', then: stepText(s2), hits: 2600 - i * 300, blocked: '—'
-          })
-        }
-      })
-    } else {
-      out.push({ kind: '规则', rule: r.name, when: sumRule(r), then: r.def.mode === 'table' ? '档位排他打标' : (r.def.mode === 'drl' ? 'DRL 执行' : '打标'), hits: 0, blocked: '—' })
-    }
-  }
-  bindRule.value.forEach(r => pushRule(r, '', 0))
-  bindFlow.value.forEach(r => {
-    out.push({ kind: '规则流', rule: r.name + '(链入口)', when: (r.steps || []).length + ' 步', then: '进入链内', hits: 5000, blocked: '—' })
-    pushRule(r, '', 1)
-  })
-  return out
-})
-function doTest() {
-  if (!execPlan.value.length) { toast('先在②绑定至少一条规则或规则流', 'warning'); return }
-  testing.value = true
-  setTimeout(() => {
-    testing.value = false
-    tested.value = true
-    hitRows.value = execPlan.value.map((p, i) => ({ ...p, hits: p.hits || Math.max(600, 4800 - i * 620) }))
-  }, 800)
-}
-
-/* ---------- ④ 校验 ---------- */
-const allActs = computed(() => {
-  const out = []
-  const add = (r, src) => {
-    if (!r) return
-    if (r.kind === 'flow') (r.steps || []).forEach(s => add(assetOf(s.refId), src + '/' + (assetOf(s.refId)?.name || '?')))
-    else {
-      const d = r.def || {}
-      if (d.mode === 'visual') (d.visual?.actions || []).forEach(a => out.push({ src: src + '/' + r.name, a }))
-      else if (d.mode === 'table') {
-        const t = d.table || {}
-        ;(t.rows || []).forEach(x => out.push({ src: src + '/' + r.name, tag: t.tag, val: x.val }))
-        if (t.elseVal) out.push({ src: src + '/' + r.name, tag: t.tag, val: t.elseVal })
-      }
-      /* drl: 人工保证 */
-    }
-  }
-  bindRule.value.forEach(r => add(r, '规则'))
-  bindFlow.value.forEach(r => add(r, '规则流'))
-  return out
-})
-const ruleChecks = computed(() => {
-  const out = []
-  const walk = (r) => {
-    if (!r) return
-    if (r.kind === 'flow') (r.steps || []).forEach(s => walk(assetOf(s.refId)))
-    else if (r.def?.mode !== 'drl') out.push(r)
-  }
-  bindRule.value.forEach(walk)
-  bindFlow.value.forEach(walk)
-  return out
-})
+/* ---------- ③④ 创建/发布/运行 ---------- */
 const badChecks = computed(() => {
   const out = []
   if (!taskName.value.trim()) out.push('任务名称必填')
   if (!bindRule.value.length && !bindFlow.value.length) out.push('至少绑定一条规则或规则流')
   missingDeps.value.forEach(d => out.push('缺依赖字段: ' + d + '(请在①派生字段定义或换数据集)'))
-  ;[...bindRule.value, ...bindFlow.value].forEach(r => { if (r.status === 0) out.push('绑定了已停用资产: ' + r.name) })
-  if (mode.value === 'online') {
-    allActs.value.forEach(x => {
-      const tag = x.a ? x.a.tag : x.tag
-      if (tag && !metaBool(tag)) out.push('在线模式 ' + x.src + ': 只支持布尔/瞬时标签(' + tag + ')')
-    })
-    ruleChecks.value.forEach(r => {
-      const d = r.def || {}
-      const fields = d.mode === 'table' ? [d.table?.field] : (d.visual?.when || []).flatMap(g => (g.conds || []).map(c => c.field))
-      fields.filter(Boolean).forEach(cf => { if (derivedAggNames.value.includes(cf)) out.push('在线模式 ' + r.name + ': 引用聚合派生 ' + cf + ' 不可用, 请用批/流') })
-    })
-  }
-  if (mode.value === 'stream') {
-    allActs.value.forEach(x => {
-      if (x.a && x.a.type === 'tag' && !metaBool(x.a.tag) && !x.a.val) out.push('流模式 ' + x.src + ': 值型标签需动作带值')
-    })
-  }
-  allActs.value.forEach(x => {
-    const a = x.a || { tag: x.tag, val: x.val }
-    if (!a.tag) return
-    const dom = domainOf(a.tag)
-    if (dom.length && a.val && !dom.includes(a.val)) out.push(x.src + ': 标签值不在注册域(' + dom.join('/') + ')')
-  })
   return [...new Set(out)]
 })
-function publish() {
-  toast('提交审批发布(mock) —— 固化规则/规则流版本快照, 装配后按序跑 规则 → 规则流')
-  router.push('/tagengine2/task')
+const sched = ref('none')
+const cron = ref('0 0 2 * * ?')
+
+const bindingsPayload = computed(() => {
+  const arr = []
+  bindRule.value.forEach(r => arr.push({ kind: 'rule', id: r.id, ver: r.ver, name: r.name }))
+  bindFlow.value.forEach(r => arr.push({ kind: 'flow', id: r.id, ver: r.ver, name: r.name }))
+  return arr
+})
+async function createTask() {
+  if (!taskName.value.trim() || !bindingsPayload.value.length) { toast('先填任务名并绑定资产', 'warning'); return }
+  saving.value = true
+  try {
+    const r = await tasksApi.create({
+      name: taskName.value, mode: mode.value, dataset: form.dataset, entityKey: form.entityKey,
+      datasetFields: dsFields[form.dataset], derived: derived.value.filter(d => d.name),
+      bindings: bindingsPayload.value, schedule: sched.value, cronExpr: sched.value === 'cron' ? cron.value : ''
+    })
+    createdId.value = r.id
+    toast('任务已创建 #' + r.id + '(草稿)')
+    step.value = 3
+  } catch (e) { /* 已提示 */ } finally { saving.value = false }
+}
+async function publishNow() {
+  if (!createdId.value) return
+  try {
+    const r = await tasksApi.publish(createdId.value)
+    taskStatus.value = r.status
+    toast('已发布 v' + r.ver + ' —— 规则版本快照已固化(含定义)')
+  } catch (e) { /* 已提示 */ }
+}
+async function runNow() {
+  if (!createdId.value) return
+  try {
+    const r = await tasksApi.run(createdId.value)
+    lastRun.value = r
+    toast('run #' + r.runId + ' 已触发: ' + r.status + '(task-json 已生成' + (r.payloadPath ? ' @ ' + r.payloadPath : '') + ')')
+  } catch (e) { /* 已提示 */ }
 }
 </script>
 
 <style scoped>
-.sec { min-height: 320px; }
+.sec { min-height: 300px; }
 .sec-title { font-weight: 600; font-size: 15px; margin-bottom: 12px; }
 .flex { display: flex; }
 .cfg-title { font-weight: 600; font-size: 13px; color: #2c3e50; margin: 10px 0 8px; }

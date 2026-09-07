@@ -9,7 +9,7 @@
           <el-input v-model="f.name" style="width:320px" placeholder="如: 金额档 / 黑名单命中" />
         </el-form-item>
         <el-form-item label="说明">
-          <el-input v-model="f.desc" style="width:560px" placeholder="一句话说明(可选)" />
+          <el-input v-model="f.descr" style="width:560px" placeholder="一句话说明(可选)" />
         </el-form-item>
         <el-form-item label="保存为">
           <el-radio-group v-model="mode">
@@ -136,22 +136,32 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { tagOptions, metaBool, domainOf, upsertAsset, assetOf, sumRule, depNamesOf } from './mockLib.js'
+import { rulesApi } from '../../api/tagengine.js'
+import { tagOptions, metaBool, domainOf, sumRule, depNamesOf } from './mockLib.js'
 
 const route = useRoute()
 const router = useRouter()
 const toast = (m) => ElMessage.info(m)
 const isEdit = computed(() => !!route.query.id)
-const src = isEdit.value ? assetOf(route.query.id) : null
 const defDefault = (mode) => ({
   mode, table: { field: 'amount', tag: '订单/金额档', rows: [{ op: '>=', th: '', val: '' }], elseVal: '' },
   visual: { when: [{ logic: 'AND', conds: [{ field: '', op: '==', val: '' }] }], actions: [{ type: 'tag', tag: '', val: '' }] },
   drl: ''
 })
-const f = ref(src ? JSON.parse(JSON.stringify(src)) : { id: undefined, name: '', desc: '', kind: 'rule', status: 1, def: defDefault(route.query.mode || 'visual') })
+const f = ref({ id: undefined, name: '', descr: '', kind: 'rule', status: 1, def: defDefault(route.query.mode || 'visual') })
+onMounted(async () => {
+  if (!isEdit.value) return
+  try {
+    const row = await rulesApi.get(route.query.id)
+    f.value = {
+      id: row.id, name: row.name, descr: row.descr || '', kind: 'rule', status: row.status,
+      ver: row.ver, def: JSON.parse(JSON.stringify(row.def))
+    }
+  } catch (e) { /* 已提示 */ }
+})
 const tab = ref(f.value.def.mode || 'visual')
 const mode = computed({
   get: () => f.value.def.mode || 'visual',
@@ -237,9 +247,16 @@ function doTest() {
   ElMessage.success('试跑(mock): 样本命中 3,842 行 · ' + summary.value)
 }
 function save() {
-  const u = upsertAsset(JSON.parse(JSON.stringify(f.value)))
-  toast('规则已保存: ' + u.name + ' v' + u.ver + (isEdit.value ? '(升版)' : '') + ' —— ' + ({ visual: '可视化', table: '决策表', drl: 'DRL' }[u.def.mode]) + '定义')
-  router.back()
+  const body = { name: f.value.name, descr: f.value.descr || '', status: f.value.status || 1, def: JSON.parse(JSON.stringify(f.value.def)) }
+  const done = (u) => {
+    toast('规则已保存: ' + u.name + ' v' + u.ver + (isEdit.value ? '(升版)' : '') + ' —— ' + ({ visual: '可视化', table: '决策表', drl: 'DRL' }[u.def?.mode || f.value.def.mode]) + '定义')
+    router.back()
+  }
+  if (isEdit.value) {
+    rulesApi.update(route.query.id, body).then(done).catch(() => {})
+  } else {
+    rulesApi.create(body).then(done).catch(() => {})
+  }
 }
 </script>
 

@@ -9,7 +9,7 @@
           <el-input v-model="f.name" style="width:320px" placeholder="如: 风控优先决策链" />
         </el-form-item>
         <el-form-item label="说明">
-          <el-input v-model="f.desc" style="width:560px" placeholder="一句话说明(可选)" />
+          <el-input v-model="f.descr" style="width:560px" placeholder="一句话说明(可选)" />
         </el-form-item>
       </el-form>
 
@@ -149,21 +149,35 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ruleState, assetOf, defLabel, sumRule, stepText, upsertAsset, cycleCheck, depNamesOf } from './mockLib.js'
+import { rulesApi } from '../../api/tagengine.js'
+import { defLabel, sumRule, depNamesOf } from './mockLib.js'
 import { metaBool, tagOptions } from './mockLib.js'
 
 const route = useRoute()
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))
 const isEdit = computed(() => !!route.query.id)
-const src = isEdit.value ? assetOf(route.query.id) : null
-const f = ref(src ? JSON.parse(JSON.stringify(src)) : { id: undefined, name: '', desc: '', kind: 'flow', status: 1, steps: [] })
+const f = ref({ id: undefined, name: '', descr: '', kind: 'flow', status: 1, steps: [] })
 
-const ruleOptions = computed(() => ruleState.rules.filter(r => r.kind === 'rule'))
-const flowOptions = computed(() => ruleState.rules.filter(r => r.kind === 'flow'))
+/* 全量资产(候选 + 步骤引用解析), 来自后端 */
+const allAssets = ref([])
+const allMap = computed(() => new Map(allAssets.value.map(a => [Number(a.id), a])))
+const assetOf = (id) => allMap.value.get(Number(id))
+const ruleOptions = computed(() => allAssets.value.filter(r => r.kind === 'rule'))
+const flowOptions = computed(() => allAssets.value.filter(r => r.kind === 'flow'))
+onMounted(async () => {
+  try {
+    allAssets.value = await rulesApi.list()
+    if (isEdit.value) {
+      const row = await rulesApi.get(route.query.id)
+      f.value = { id: row.id, name: row.name, descr: row.descr || '', kind: 'flow', status: row.status, ver: row.ver, steps: JSON.parse(JSON.stringify((row.def && row.def.steps) || [])) }
+    }
+  } catch (e) { /* 已提示 */ }
+})
+
 const newStep = () => ({ refId: '', refType: '', hit: 'next', hitJump: 1, miss: 'next', missJump: 1 })
 function onRef(i) {
   const a = assetOf(f.value.steps[i].refId)
@@ -177,29 +191,52 @@ function mv(i, d) {
 const stepDeps = (st) => depNamesOf(assetOf(st.refId))
 const drlNote = (st) => {
   const a = assetOf(st.refId)
-  return a && a.kind === 'rule' && a.def.mode === 'drl' ? '(DRL 人工)' : ''
+  return a && a.kind === 'rule' && a.def && a.def.mode === 'drl' ? '(DRL 人工)' : ''
 }
-const deps = computed(() => depNamesOf(f.value))
-const preview = computed(() => (f.value.steps || []).map((s, i) => (i + 1) + '. ' + stepText(s)).join('\n') || '(空链)')
+const deps = computed(() => {
+  const s = new Set()
+  ;(f.value.steps || []).forEach(st => {
+    const a = assetOf(st.refId)
+    if (a) depNamesOf(a).forEach(d => s.add(d))
+  })
+  return [...s]
+})
+const preview = computed(() => {
+  const br = (v, j) => (v === 'jump' ? '跳#' + j : v === 'stop' ? '终止' : v === 'end' ? '结束' : '下一步')
+  return (f.value.steps || []).map((s, i) => {
+    const a = assetOf(s.refId)
+    const n = a ? (a.kind === 'flow' ? '⤷' : '') + a.name : '?' + s.refId
+    return (i + 1) + '. ' + n + ' [命中→' + br(s.hit, s.hitJump) + ' / 未中→' + br(s.miss, s.missJump) + ']'
+  }).join('\n') || '(空链)'
+})
 const okToSave = computed(() => {
   if (!f.value.name.trim() || !f.value.steps.length) return false
   return f.value.steps.every(s => s.refId)
 })
 function fillDemo() {
+  const black = ruleOptions.value.find(r => r.name.includes('黑名单')) || ruleOptions.value[0]
+  const amt = ruleOptions.value.find(r => r.def && r.def.mode === 'table') || ruleOptions.value[ruleOptions.value.length - 1]
+  if (!black && !amt) { toast('规则管理为空, 请先建规则', 'warning'); return }
   f.value.steps = [
-    { refId: 'r2', refType: 'rule', hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
-    { refId: 'r1', refType: 'rule', hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
+    { refId: black ? black.id : '', refType: 'rule', hit: 'stop', hitJump: 0, miss: 'next', missJump: 0 },
+    { refId: amt ? amt.id : '', refType: 'rule', hit: 'next', hitJump: 0, miss: 'end', missJump: 0 }
   ]
 }
 function doTest() {
   if (!okToSave.value) { toast('先选好引用与步骤'); return }
-  ElMessage.success('干跑(mock): 样本 5,000 行 · 黑名单 63 行(整链终止) · 其余进金额档 4,937 行 · 无成环')
+  toast('干跑需 Spark 环境(试跑接口待接): 保存后可在任务详情触发 run', 'warning')
 }
 function save() {
-  if (cycleCheck(f.value)) { toast('成环! 编排链不能直接/间接引用自身', 'error'); return }
-  const fv = upsertAsset(JSON.parse(JSON.stringify(f.value)))
-  toast('规则流已保存: ' + fv.name + ' v' + fv.ver + ' · ' + fv.steps.length + ' 步' + (isEdit.value ? '(升版)' : ''))
-  router.back()
+  const body = {
+    name: f.value.name, descr: f.value.descr || '', status: f.value.status || 1,
+    def: { steps: f.value.steps.map(s => ({ refId: s.refId, hit: s.hit || 'next', hitJump: s.hitJump || 0, miss: s.miss || 'next', missJump: s.missJump || 0 })) }
+  }
+  const done = (fv) => {
+    toast('规则流已保存: ' + fv.name + ' v' + fv.ver + ' · ' + body.def.steps.length + ' 步' + (isEdit.value ? '(升版)' : '') + '(后端环检测通过)')
+    router.back()
+  }
+  if (isEdit.value) rulesApi.update(route.query.id, body).then(done).catch(() => {})
+  else rulesApi.create(body).then(done).catch(() => {})
 }
 
 /* 快速新建并引用(进规则管理) */
@@ -214,8 +251,8 @@ function quickNew(i) {
   quickOpen.value = true
 }
 function saveQuick() {
-  const asset = {
-    name: q.value.name, desc: '规则流内快速新建', kind: 'rule', status: 1,
+  const body = {
+    name: q.value.name, descr: '规则流内快速新建', kind: 'rule', status: 1,
     def: {
       mode: q.value.mode,
       visual: q.value.mode === 'visual' ? { when: [{ logic: 'AND', conds: [{ field: q.value.field, op: q.value.op, val: q.value.val }] }], actions: [{ type: 'tag', tag: q.value.tag, val: metaBool(q.value.tag) ? '' : q.value.val2 }] } : { when: [], actions: [] },
@@ -223,12 +260,17 @@ function saveQuick() {
       drl: ''
     }
   }
-  const saved = upsertAsset(asset)
-  const st = f.value.steps[quickIdx.value]
-  st.refId = saved.id
-  st.refType = 'rule'
-  quickOpen.value = false
-  toast('已保存「' + saved.name + '」(可视化/决策表定义)并作为步骤 ' + (quickIdx.value + 1) + ' 的引用; 完整 DRL 定义可到规则管理改')
+  rulesApi.create(body).then((saved) => {
+    const st = f.value.steps[quickIdx.value]
+    st.refId = saved.id
+    st.refType = 'rule'
+    quickOpen.value = false
+    allAssets.value = awaitReload()
+    toast('已保存「' + saved.name + '」并作为步骤 ' + (quickIdx.value + 1) + ' 的引用')
+  }).catch(() => {})
+}
+async function awaitReload() {
+  try { return await rulesApi.list() } catch (e) { return allAssets.value }
 }
 </script>
 
