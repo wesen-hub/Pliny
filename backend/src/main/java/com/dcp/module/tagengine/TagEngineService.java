@@ -664,6 +664,18 @@ public class TagEngineService {
         return out;
     }
 
+    /** datasetFields: 前端存字符串数组, 执行器契约需 {name} 对象 → 包装 */
+    private static JsonNode wrapFields(JsonNode raw) {
+        ArrayNode out = OM.createArrayNode();
+        if (raw != null && raw.isArray()) {
+            for (JsonNode f : raw) {
+                if (f.isTextual()) out.addObject().put("name", f.asText());
+                else out.add(f);
+            }
+        }
+        return out;
+    }
+
     /* ═══════════ 平台→执行器接线(P0): task-json 生成 + 提交(演练/spark) + tag_run 审计 + cron 自动触发 ═══════════ */
 
     private static String env(String key, String def) {
@@ -692,10 +704,10 @@ public class TagEngineService {
                 .put("catalog", env("DCP_TAGENGINE_CATALOG", "demo"))
                 .put("namespace", env("DCP_TAGENGINE_NAMESPACE", "dcp"))
                 .put("table", env("DCP_TAGENGINE_TAGFACT_TABLE", "tag_fact")));
-        payload.set("datasetFields", (JsonNode) task.get("datasetFields"));
+        payload.set("datasetFields", wrapFields((JsonNode) task.get("datasetFields")));
         payload.set("derived", (JsonNode) task.get("derived"));
         payload.set("bindings", snap.get("bindings"));
-        payload.set("assets", snap.get("assets"));
+        payload.set("rules", snap.get("assets"));   // 执行器契约键名 rules(资产快照自含 def)
         payload.put("icebergConfig", "湖参数待接湖环境(设计 §13): catalog/namespace 现为占位, 湖落地后平台配置下发");
         String json = jstr(payload);
 
