@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -69,6 +70,12 @@ public class TagEngineService {
                 + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 + "update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 + "UNIQUE KEY uk_name (name))");
+        /* 数据集字段清单(逻辑表字段快照; 来源: 前端/逻辑表元数据 API, 用于发布依赖域校验) */
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN dataset_fields_json TEXT NULL AFTER dataset");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
         log.info("[tagengine] schema ensured: tag_rule / tag_task");
     }
 
@@ -402,7 +409,7 @@ public class TagEngineService {
 
     public List<Map<String, Object>> listTasks() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
                         + " FROM tag_task ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) out.add(taskRowToMap(r));
@@ -411,7 +418,7 @@ public class TagEngineService {
 
     public Map<String, Object> getTask(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
                         + " FROM tag_task WHERE id=?", id);
         if (rows.isEmpty()) throw new IllegalArgumentException("任务不存在 id=" + id);
         return taskRowToMap(rows.get(0));
@@ -421,10 +428,12 @@ public class TagEngineService {
         Map<String, Object> out = new LinkedHashMap<>(r);
         out.put("derived", jnode((String) r.get("derived_json")));
         out.put("bindings", jnode((String) r.get("bindings_json")));
+        out.put("datasetFields", jnode((String) r.get("dataset_fields_json")));
         out.put("guard", jnode((String) r.get("guard_json")));
         out.put("snapshot", r.get("snapshot_json") == null ? null : jnode((String) r.get("snapshot_json")));
         out.remove("derived_json");
         out.remove("bindings_json");
+        out.remove("dataset_fields_json");
         out.remove("guard_json");
         out.remove("snapshot_json");
         return out;
@@ -455,6 +464,7 @@ public class TagEngineService {
         Integer cnt = metaJdbc.queryForObject("SELECT COUNT(*) FROM tag_task WHERE name=?", Integer.class, name);
         if (cnt != null && cnt > 0) throw new IllegalArgumentException("任务名已存在: " + name);
         String derived = jstr(body.getOrDefault("derived", new ArrayList<Object>()));
+        String dsFields = jstr(body.getOrDefault("datasetFields", new ArrayList<Object>()));
         String guard = jstr(body.getOrDefault("guard", new LinkedHashMap<String, Object>()));
         String sched = str(body.getOrDefault("schedule", "none"));
         String cron = str(body.get("cronExpr"));
@@ -462,16 +472,17 @@ public class TagEngineService {
         KeyHolder kh = new GeneratedKeyHolder();
         metaJdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO tag_task(name,mode,dataset,derived_json,bindings_json,schedule,cron_expr,guard_json) VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO tag_task(name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json) VALUES(?,?,?,?,?,?,?,?,?)",
                     Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, name);
             ps.setString(2, mode);
             ps.setString(3, dataset);
-            ps.setString(4, derived);
-            ps.setString(5, jstr(bindings));
-            ps.setString(6, sched);
-            ps.setString(7, cron.isEmpty() ? null : cron);
-            ps.setString(8, guard);
+            ps.setString(4, dsFields);
+            ps.setString(5, derived);
+            ps.setString(6, jstr(bindings));
+            ps.setString(7, sched);
+            ps.setString(8, cron.isEmpty() ? null : cron);
+            ps.setString(9, guard);
             return ps;
         }, kh);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -499,8 +510,9 @@ public class TagEngineService {
         if ("cron".equals(sched) && cron.isEmpty()) throw new IllegalArgumentException("定时任务需 cron 表达式");
         String status = str(body.getOrDefault("status", exist.get("status")));
         metaJdbc.update(
-                "UPDATE tag_task SET name=?, dataset=?, derived_json=?, bindings_json=?, schedule=?, cron_expr=?, guard_json=?, status=? WHERE id=?",
+                "UPDATE tag_task SET name=?, dataset=?, dataset_fields_json=?, derived_json=?, bindings_json=?, schedule=?, cron_expr=?, guard_json=?, status=? WHERE id=?",
                 name, dataset,
+                jstr(body.getOrDefault("datasetFields", exist.get("datasetFields"))),
                 jstr(body.getOrDefault("derived", exist.get("derived"))),
                 jstr(bindings), sched, cron.isEmpty() ? null : cron,
                 jstr(body.getOrDefault("guard", exist.get("guard"))),
@@ -518,12 +530,14 @@ public class TagEngineService {
         log.info("[tagengine] task deleted {}", id);
     }
 
-    /** 发布: 校验绑定规则当前均启用 → 固化版本快照(ver+1)。DRL/字段依赖编译校验在下一刀接入。 */
+    /** 发布: 校验绑定规则均启用 + 字段依赖 ⊆ 任务字段域(数据集字段 ∪ 派生字段) → 固化版本快照(ver+1)。
+     *  注: DRL 的类型级编译校验落在 Spark 执行器(driver 侧 schema 可知), 发布阶段以字段依赖域校验为主。 */
     public Map<String, Object> publishTask(long id) {
         Map<String, Object> exist = getTask(id);
         JsonNode bindings = (JsonNode) exist.get("bindings");
         ArrayNode snap = OM.createArrayNode();
-        StringBuilder conflict = new StringBuilder();
+        Set<String> missing = new LinkedHashSet<>();
+        Set<Long> seenRules = new HashSet<>();
         for (JsonNode b : bindings) {
             long refId = b.path("id").asLong(0);
             Map<String, Object> rule = ruleById(refId);
@@ -535,6 +549,21 @@ public class TagEngineService {
                     .put("id", refId)
                     .put("ver", ((Number) rule.get("ver")).intValue())
                     .put("name", (String) rule.get("name"));
+            /* 依赖收集(flow 递归; DRL 规则无自动依赖) */
+            collectDepsOf(rule, seenRules, missing);
+        }
+        /* 字段域 = 数据集字段 ∪ 派生字段名 */
+        Set<String> universe = new HashSet<>();
+        JsonNode ds = (JsonNode) exist.get("datasetFields");
+        if (ds != null && ds.isArray()) ds.forEach(x -> { if (!x.asText("").isEmpty()) universe.add(x.asText()); });
+        JsonNode der = (JsonNode) exist.get("derived");
+        if (der != null && der.isArray()) der.forEach(x -> { if (!x.path("name").asText("").isEmpty()) universe.add(x.path("name").asText()); });
+        if (!missing.isEmpty()) {
+            List<String> unknown = missing.stream().filter(f -> !universe.contains(f)).toList();
+            if (!unknown.isEmpty()) {
+                throw new IllegalArgumentException("字段依赖超出任务字段域: " + String.join("、", unknown)
+                        + " —— 请补数据集字段清单(datasetFields)或在派生字段中定义(DRL 规则的引用字段无法自动收集, 请人工核对)");
+            }
         }
         int newVer = ((Number) exist.get("ver")).intValue() + 1;
         metaJdbc.update("UPDATE tag_task SET status='published', ver=?, snapshot_json=? WHERE id=?",
@@ -544,8 +573,33 @@ public class TagEngineService {
         out.put("status", "published");
         out.put("ver", newVer);
         out.put("snapshot", snap);
-        log.info("[tagengine] task {} published v{} (P0: 快照固化; DRL/字段编译校验后续刀接入)", id, newVer);
+        log.info("[tagengine] task {} published v{} (快照固化 + 字段依赖域校验; DRL 类型编译在执行器)", id, newVer);
         return out;
+    }
+
+    private void collectDepsOf(Map<String, Object> rule, Set<Long> seen, Set<String> out) {
+        long id = ((Number) rule.get("id")).longValue();
+        if (!seen.add(id)) return;
+        JsonNode def = jnode((String) rule.get("def_json"));
+        if ("flow".equals(rule.get("kind"))) {
+            JsonNode steps = def.path("steps");
+            for (JsonNode st : steps) {
+                Map<String, Object> ref = ruleById(st.path("refId").asLong(0));
+                if (ref != null) collectDepsOf(ref, seen, out);
+            }
+        } else {
+            String mode = def.path("mode").asText("visual");
+            if ("visual".equals(mode)) {
+                JsonNode when = def.path("visual").path("when");
+                for (JsonNode g : when) for (JsonNode c : g.path("conds")) {
+                    String f = c.path("field").asText("");
+                    if (!f.isEmpty()) out.add(f);
+                }
+            } else if ("table".equals(mode)) {
+                String f = def.path("table").path("field").asText("");
+                if (!f.isEmpty()) out.add(f);
+            }
+        }
     }
 
     private static String str(Object o) {
