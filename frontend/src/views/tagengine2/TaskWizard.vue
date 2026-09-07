@@ -24,10 +24,12 @@
         </div>
         <div class="flex" style="gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
           <el-select v-model="form.dataset" style="width:230px" @change="onDs">
-            <el-option v-for="d in dsList" :key="d.name" :value="d.name" :label="d.name + ' · ' + d.rows" />
+            <el-option v-for="d in dsList" :key="d.tableName" :value="d.tableName" :label="d.tableName + ' · 分片' + (d.shards || '?') + ' (字段来自后端元数据)'" />
           </el-select>
           <el-text size="small" type="info">实体键</el-text>
-          <el-select v-model="form.entityKey" style="width:150px"><el-option v-for="k in pksOf" :key="k" :value="k" :label="k" /></el-select>
+          <el-select v-model="form.entityKey" style="width:150px">
+            <el-option v-if="!pksOf.length" value="" label="(未探测到主键, 可手填)" />
+            <el-option v-for="k in pksOf" :key="k" :value="k" :label="k" /></el-select>
           <el-text size="small" type="success">每行 = 一个 Fact, 规则逐行求值; 源 = 逻辑表的 Iceberg 湖表(湖落地外部推进, task-json 湖参数由平台配置)</el-text>
         </div>
 
@@ -240,7 +242,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { rulesApi, tasksApi } from '../../api/tagengine.js'
+import { rulesApi, tasksApi, datasetsApi } from '../../api/tagengine.js'
 import { tagOptions, metaBool, defLabel } from './mockLib.js'
 
 const router = useRouter()
@@ -252,25 +254,47 @@ const createdId = ref(null)
 const taskStatus = ref('draft')
 const lastRun = ref(null)
 
-/* ---------- ① 形态/装配 ---------- */
+/* ---------- ① 形态/装配(数据集与字段来自后端元数据 /api/tagengine/datasets) ---------- */
 const mode = ref('batch')
-const dsList = [
-  { name: 'order_wide', rows: '412 万' },
-  { name: 'customer_wide', rows: '36.2 万' }
-]
-const dsFields = {
-  order_wide: ['order_id', 'customer_id', 'amount', 'coupon_amount', 'quantity', 'pay_amount', 'region', 'status', 'order_date'],
-  customer_wide: ['customer_id', 'name', 'region', 'data_secret', 'status', 'last_active_at']
+const dsList = ref([])          // [{tableName, tablePrefix, shards}]
+const dsFields = ref({})        // dataset → 字段名数组
+const pks = ref({})             // dataset → 主键候选
+const form = ref({ dataset: '', entityKey: '' })
+const pksOf = computed(() => (form.dataset && pks.value[form.dataset]) || [])
+async function onDs() {
+  form.entityKey = ''
+  await loadDataset(form.dataset)
+  const pk = pksOf.value
+  const fs = dsFields.value[form.dataset] || []
+  form.entityKey = pk.length ? pk[0] : (fs.includes('id') ? 'id' : (form.dataset + '_id' && fs.includes(form.dataset + '_id') ? form.dataset + '_id' : ''))
 }
-const pks = { order_wide: ['order_id'], customer_wide: ['customer_id'] }
-const form = ref({ dataset: 'order_wide', entityKey: 'order_id' })
-const pksOf = computed(() => pks[form.dataset] || ['id'])
-function onDs() {
-  form.entityKey = pks[form.dataset][0]
+async function loadDataset(name) {
+  if (!name || dsFields.value[name]) return
+  try {
+    const meta = await datasetsApi.fields(name)
+    dsFields.value[name] = (meta.fields || []).map(f => f.name)
+    pks.value[name] = (meta.pkCandidates && meta.pkCandidates.length) ? meta.pkCandidates : []
+    if (!pks.value[name].length) {
+      // 无主键信息: 优先常见 {表名}_id/id
+      const fs = dsFields.value[name]
+      ;['id', name + '_id'].forEach(c => { if (fs.includes(c) && !pks.value[name].length) pks.value[name] = [c] })
+    }
+    if (form.dataset === name && !form.entityKey && pksOf.value.length) form.entityKey = pksOf.value[0]
+  } catch (e) { /* 已提示 */ }
 }
+onMounted(async () => {
+  try {
+    dsList.value = await datasetsApi.list()
+    if (dsList.value.length && !form.dataset) {
+      form.dataset = dsList.value[0].tableName
+      await loadDataset(form.dataset)
+      if (pksOf.value.length) form.entityKey = pksOf.value[0]
+    }
+  } catch (e) { /* 已提示 */ }
+})
 const derived = ref([])
 const derivedNames = computed(() => derived.value.map(d => d.name).filter(Boolean))
-const condFields = computed(() => [...new Set([...dsFields[form.dataset], ...derivedNames.value])])
+const condFields = computed(() => [...new Set([...(dsFields.value[form.dataset] || []), ...derivedNames.value])])
 
 /* ---------- ② 绑定(资产来自后端) ---------- */
 const allAssets = ref([])
@@ -318,7 +342,7 @@ function depCollect(r, seen) {
   return [...out]
 }
 const depsOf = (r) => depCollect(r, new Set())
-const availFields = computed(() => [...new Set([...dsFields[form.dataset], ...derivedNames.value])])
+const availFields = computed(() => [...new Set([...(dsFields.value[form.dataset] || []), ...derivedNames.value])])
 const depOk = (d) => availFields.value.includes(d)
 const missingDeps = computed(() => {
   const s = new Set()
@@ -409,7 +433,7 @@ async function createTask() {
   try {
     const r = await tasksApi.create({
       name: taskName.value, mode: mode.value, dataset: form.dataset, entityKey: form.entityKey,
-      datasetFields: dsFields[form.dataset], derived: derived.value.filter(d => d.name),
+      datasetFields: dsFields.value[form.dataset] || [], derived: derived.value.filter(d => d.name),
       bindings: bindingsPayload.value, schedule: sched.value, cronExpr: sched.value === 'cron' ? cron.value : ''
     })
     createdId.value = r.id

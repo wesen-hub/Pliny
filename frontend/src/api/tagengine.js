@@ -32,6 +32,12 @@ export const runsApi = {
   get: (id) => request.get(`/tagengine/runs/${id}`)
 }
 
+// 数据集元数据(逻辑表列表/字段; 生产为湖 schema, 当前代理目标库权威/分片表)
+export const datasetsApi = {
+  list: () => request.get('/tagengine/datasets'),
+  fields: (name) => request.get(`/tagengine/datasets/${encodeURIComponent(name)}/fields`)
+}
+
 // 标签字典树(tag_dict, 注册表挂节点用): GET /api/tags/tree
 export const tagTreeApi = {
   tree: () => request.get('/tags/tree'),
