@@ -35,7 +35,9 @@
           <template #title><el-icon><Management /></el-icon><span>数据管控</span></template>
           <el-menu-item index="/tag">标签管理</el-menu-item>
           <el-menu-item index="/tagengine/task">打标引擎 V1</el-menu-item>
-          <el-menu-item index="/tagengine2/tag">打标引擎 V2</el-menu-item>
+          <el-menu-item index="/tagengine2/tag">标签注册表 V2</el-menu-item>
+          <el-menu-item index="/tagengine2/rule">规则库 V2</el-menu-item>
+          <el-menu-item index="/tagengine2/task">打标任务 V2</el-menu-item>
           <el-menu-item index="/tagengine/rule">规则打标(快捷)</el-menu-item>
           <el-menu-item v-if="userStore.isAdmin" index="/system/permission">权限管理</el-menu-item>
         </el-sub-menu>
