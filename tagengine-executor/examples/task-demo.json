@@ -1,0 +1,44 @@
+{
+  "taskId": 1,
+  "taskVer": 2,
+  "dataset": "customer_wide",
+  "entityKey": "customer_id",
+  "iceberg": { "catalog": "demo", "namespace": "dcp", "table": "customer_wide" },
+  "datasetFields": [
+    { "name": "customer_id", "type": "long" },
+    { "name": "status", "type": "string" },
+    { "name": "region", "type": "string" },
+    { "name": "amount", "type": "double" },
+    { "name": "pay_amount", "type": "double" },
+    { "name": "coupon_amount", "type": "double" },
+    { "name": "order_date", "type": "date" }
+  ],
+  "derived": [
+    { "name": "pay7d", "func": "SUM", "field": "amount", "windowDays": 7, "windowColumn": "order_date" },
+    { "name": "net_amt", "expr": "pay_amount - coupon_amount" }
+  ],
+  "bindings": [
+    { "kind": "rule", "id": 1, "ver": 2, "name": "金额档" },
+    { "kind": "rule", "id": 2, "ver": 1, "name": "黑名单命中" },
+    { "kind": "rule", "id": 4, "ver": 1, "name": "净支付超限(DRL)" },
+    { "kind": "flow", "id": 3, "ver": 1, "name": "风控优先决策链" }
+  ],
+  "rules": [
+    { "id": 1, "kind": "rule", "name": "金额档", "ver": 2,
+      "def": { "mode": "table", "table": { "field": "amount", "tag": "订单/金额档",
+        "rows": [ { "op": ">=", "th": "10000", "val": "大额" }, { "op": ">=", "th": "1000", "val": "中额" } ],
+        "elseVal": "小额" } } },
+    { "id": 2, "kind": "rule", "name": "黑名单命中", "ver": 1,
+      "def": { "mode": "visual", "visual": {
+        "when": [ { "logic": "AND", "conds": [ { "field": "status", "op": "==", "val": "black" } ] } ],
+        "actions": [ { "type": "tag", "tag": "风控/黑名单", "val": "" } ] } } },
+    { "id": 3, "kind": "flow", "name": "风控优先决策链", "ver": 1,
+      "steps": [
+        { "refType": "rule", "refId": 2, "hit": "stop", "hitJump": 0, "miss": "next", "missJump": 0 },
+        { "refType": "rule", "refId": 1, "hit": "next", "hitJump": 0, "miss": "end", "missJump": 0 }
+      ] },
+    { "id": 4, "kind": "rule", "name": "净支付超限(DRL)", "ver": 1,
+      "def": { "mode": "drl", "drl": "rule \"净支付超限\"\n  when\n    $f : Fact(net_amt > 50000 && status != \"black\")\n  then\n    tag($f, \"订单/净支付额\", \"超限\");\nend" } }
+  ],
+  "tagFact": { "catalog": "demo", "namespace": "dcp", "table": "tag_fact", "partitionByTask": true }
+}

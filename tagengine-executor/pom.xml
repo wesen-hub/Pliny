@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tagengine-executor —— 打标引擎 P0 批执行器(独立 Spark 工程, 与 agent/ 平级, 非 Spring)
+
+  依赖策略(设计文档 2026-09-08 §12 细化):
+    spark-sql_2.12 3.5.x          scope=provided —— 标准 spark 作业做法, 运行时由 spark-submit/集群提供
+    iceberg-spark-runtime-3.5_2.12 scope=provided —— 运行期由 spark-submit packages/jars 装配提供;
+                                 本模块只用 spark.table/spark.read/DataSourceV2 writer 等字符串级抽象,
+                                 不直接 import iceberg 类, 接湖语义由运行时 provider 决定(接口注释见 TagBatchJob)
+    drools-engine 8.44.x(Java17 兼容版, javax 系)  scope=compile —— 打进 shade jar
+    jackson-databind                              scope=compile —— 任务 JSON 解析
+    mysql-connector-j —— 本期不做(run 记录回写留 TODO, 见 README 遗留清单)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>tagengine-executor</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spark.version>3.5.3</spark.version>
+        <scala.binary>2.12</scala.binary>
+        <iceberg.version>1.7.1</iceberg.version>
+        <drools.version>8.44.1.Final</drools.version>
+        <jackson.version>2.17.2</jackson.version>
+    </properties>
+
+    <dependencies>
+        <!-- Spark: 仅编译期; 运行由 spark-submit 提供(本地联调 local[*] 时亦走 spark-submit) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary}</artifactId>
+            <version>${spark.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Iceberg Spark runtime(Spark 3.5 / Scala 2.12): 湖表 catalog 读写由运行时 provider 提供;
+             模块内不直接 import org.apache.iceberg.*, 见 TagBatchJob.readDataset / TagFactWriter 注释 -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-3.5_${scala.binary}</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Drools 8.44.x: Java 17 兼容(javax 系); KieBase 在 driver 校验编译、executor 本地重建 -->
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-engine</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-core</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-compiler</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-mvel</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+
+        <!-- Jackson: 任务执行配置 JSON 解析 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>tagengine-executor</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.dcp.tagjob.TagBatchJob</mainClass>
+                                </transformer>
+                                <!-- drools/jackson 的 JDK ServiceLoader 服务声明需要合并, 否则单 jar 运行发现不到实现 -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
