@@ -43,7 +43,7 @@ const routes = [
       // ---------- 打标引擎 V2(注册表+规则库+任务, 页面设计稿 mock; 规则库与任务分离, 单元/流两级资产) ----------
       { path: 'tagengine2/tag', name: 'tagengine2-tag', component: () => import('../views/tagengine2/Registry.vue'), meta: { title: '标签注册表(V2)', active: '/tagengine2/tag' } },
       { path: 'tagengine2/rule', name: 'tagengine2-rule-lib', component: () => import('../views/tagengine2/RuleLibrary.vue'), meta: { title: '规则库(V2)', active: '/tagengine2/rule' } },
-      { path: 'tagengine2/rule/simple', name: 'tagengine2-rule-simple', component: () => import('../views/tagengine2/RuleEdit.vue'), meta: { title: '基础规则编辑(V2)', active: '/tagengine2/rule' } },
+      { path: 'tagengine2/rule/edit', name: 'tagengine2-rule-edit', component: () => import('../views/tagengine2/RuleEdit.vue'), meta: { title: '规则编辑(V2)', active: '/tagengine2/rule' } },
       { path: 'tagengine2/rule/flow', name: 'tagengine2-rule-flow', component: () => import('../views/tagengine2/RuleFlowEdit.vue'), meta: { title: '规则流编辑(V2)', active: '/tagengine2/rule' } },
       { path: 'tagengine2/task', name: 'tagengine2-task-list', component: () => import('../views/tagengine2/TaskList.vue'), meta: { title: '打标任务(V2)', active: '/tagengine2/task' } },
       { path: 'tagengine2/task/create', name: 'tagengine2-create', component: () => import('../views/tagengine2/TaskWizard.vue'), meta: { title: '新建打标任务(V2)', active: '/tagengine2/task' } },

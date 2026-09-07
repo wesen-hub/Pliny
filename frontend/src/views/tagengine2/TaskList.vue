@@ -25,9 +25,9 @@
           <template #default="{ row }">
             <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
               <el-tag v-for="(b, i) in row.bound" :key="i" size="small" :type="b.kind === 'flow' ? 'warning' : 'primary'" effect="plain">
-                {{ b.kind === 'flow' ? '编排' : '基础·' + b.style }}:{{ b.name }} v{{ b.ver }}
+                {{ b.kind === 'flow' ? '规则流' : '规则·' + modeName(b) }}:{{ b.name }} v{{ b.ver }}
               </el-tag>
-              <el-text size="small" type="info" style="margin-left:2px">(先 {{ row.bound.filter(b => b.kind !== 'flow').length }} 基础 → 后 {{ row.bound.filter(b => b.kind === 'flow').length }} 编排)</el-text>
+              <el-text size="small" type="info" style="margin-left:2px">(先 {{ row.bound.filter(b => b.kind !== 'flow').length }} 规则 → 后 {{ row.bound.filter(b => b.kind === 'flow').length }} 规则流)</el-text>
             </div>
           </template>
         </el-table-column>
@@ -56,25 +56,26 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const toast = (m) => ElMessage.info(m)
+const modeName = (b) => ((b.def || {}).mode === 'table' ? '决策表' : (b.def || {}).mode === 'drl' ? 'DRL' : '可视化')
 const tasks = ref([
   {
     id: 't1', name: '客户价值分层批任务', mode: 'batch', fact: 'customer_wide(36.2 万) · 派生 2', sched: '每日 02:00',
     status: '运行中',
     bound: [
-      { kind: 'simple', style: 'cond', name: '黑名单命中', ver: 1 },
+      { kind: 'rule', def: { mode: 'visual' }, name: '黑名单命中', ver: 1 },
       { kind: 'flow', name: '风控优先决策链', ver: 1 },
-      { kind: 'simple', style: 'bucket', name: '金额档', ver: 1 }
+      { kind: 'rule', def: { mode: 'table' }, name: '金额档', ver: 1 }
     ]
   },
   {
     id: 't2', name: '支付事件实时打标', mode: 'stream', fact: 'pay-events · 5 分钟滑动窗 · 派生 1', sched: '常驻',
     status: '运行中',
-    bound: [{ kind: 'simple', style: 'bucket', name: '金额档', ver: 1 }]
+    bound: [{ kind: 'rule', def: { mode: 'table' }, name: '金额档', ver: 1 }]
   },
   {
     id: 't3', name: '在线风控瞬时置位', mode: 'online', fact: 'Kafka 事件 → Redis TTL', sched: '常驻',
     status: '已停',
-    bound: [{ kind: 'simple', style: 'cond', name: '黑名单命中', ver: 1 }]
+    bound: [{ kind: 'rule', def: { mode: 'visual' }, name: '黑名单命中', ver: 1 }]
   }
 ])
 const edit = (row) => { toast('演示: 任务编辑向导中规则为「绑定/新增」, 规则本体在规则库维护'); router.push('/tagengine2/task/create') }
