@@ -3,16 +3,26 @@ package com.dcp.module.tagengine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -33,6 +43,17 @@ public class TagEngineService {
     private static final ObjectMapper OM = new ObjectMapper();
 
     private final JdbcTemplate metaJdbc;
+
+    @Value("${dcp.tagengine.runner-mode:simulate}")
+    private String runnerMode;          // simulate(演练: 生成 task-json/命令不下发) | spark(真实 spark-submit)
+    @Value("${dcp.tagengine.executor-jar:}")
+    private String executorJar;         // 执行器 jar 绝对路径(容器内/spark 节点可见)
+    @Value("${dcp.tagengine.spark-submit:spark-submit}")
+    private String sparkSubmitBin;
+    @Value("${dcp.tagengine.runs-dir:/tmp/dcp-tagengine}")
+    private String runsDir;
+    @Value("${dcp.tagengine.auto-run:false}")
+    private boolean autoRun;            // cron 自动触发开关(真实环境才开, 避免演练噪音)
 
     public TagEngineService(JdbcTemplate metaJdbc) {
         this.metaJdbc = metaJdbc;
@@ -76,7 +97,31 @@ public class TagEngineService {
         } catch (DataAccessException ignored) {
             /* 已存在 */
         }
-        log.info("[tagengine] schema ensured: tag_rule / tag_task");
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN entity_key VARCHAR(64) NOT NULL DEFAULT 'id' AFTER dataset");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN last_auto_run_at DATETIME NULL");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
+        metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_run ("
+                + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                + "task_id BIGINT NOT NULL,"
+                + "task_name VARCHAR(128),"
+                + "trigger_type VARCHAR(16) NOT NULL DEFAULT 'manual' COMMENT 'manual|cron',"
+                + "status VARCHAR(16) NOT NULL DEFAULT 'submitted' COMMENT 'submitted|running|succeeded|failed',"
+                + "payload_path VARCHAR(512),"
+                + "submit_cmd VARCHAR(1024),"
+                + "exit_code INT NULL,"
+                + "summary_json TEXT NULL COMMENT 'run 摘要(总行数/标签行/每资产命中), 回写待接',"
+                + "error_msg VARCHAR(2048),"
+                + "started_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                + "finished_at DATETIME NULL,"
+                + "KEY idx_task (task_id))");
+        log.info("[tagengine] schema ensured: tag_rule / tag_task / tag_run");
     }
 
     /* ═══════════════════ 内部工具 ═══════════════════ */
@@ -409,7 +454,7 @@ public class TagEngineService {
 
     public List<Map<String, Object>> listTasks() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
                         + " FROM tag_task ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) out.add(taskRowToMap(r));
@@ -418,7 +463,7 @@ public class TagEngineService {
 
     public Map<String, Object> getTask(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
                         + " FROM tag_task WHERE id=?", id);
         if (rows.isEmpty()) throw new IllegalArgumentException("任务不存在 id=" + id);
         return taskRowToMap(rows.get(0));
@@ -426,6 +471,7 @@ public class TagEngineService {
 
     private Map<String, Object> taskRowToMap(Map<String, Object> r) {
         Map<String, Object> out = new LinkedHashMap<>(r);
+        out.put("entityKey", out.remove("entity_key"));
         out.put("derived", jnode((String) r.get("derived_json")));
         out.put("bindings", jnode((String) r.get("bindings_json")));
         out.put("datasetFields", jnode((String) r.get("dataset_fields_json")));
@@ -459,6 +505,8 @@ public class TagEngineService {
         if (name.isEmpty()) throw new IllegalArgumentException("任务名称必填");
         if (!"batch".equals(mode)) throw new IllegalArgumentException("P0 仅支持批模式(batch); 流/在线 P1 开放");
         if (dataset.isEmpty()) throw new IllegalArgumentException("数据集(逻辑表)必填");
+        String rawKey = str(body.getOrDefault("entityKey", "id")).trim();
+        final String entityKey = rawKey.isEmpty() ? "id" : rawKey;
         JsonNode bindings = toNode(body.get("bindings"));
         assertBindingsOk(bindings);
         Integer cnt = metaJdbc.queryForObject("SELECT COUNT(*) FROM tag_task WHERE name=?", Integer.class, name);
@@ -472,17 +520,18 @@ public class TagEngineService {
         KeyHolder kh = new GeneratedKeyHolder();
         metaJdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO tag_task(name,mode,dataset,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json) VALUES(?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO tag_task(name,mode,dataset,entity_key,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, name);
             ps.setString(2, mode);
             ps.setString(3, dataset);
-            ps.setString(4, dsFields);
-            ps.setString(5, derived);
-            ps.setString(6, jstr(bindings));
-            ps.setString(7, sched);
-            ps.setString(8, cron.isEmpty() ? null : cron);
-            ps.setString(9, guard);
+            ps.setString(4, entityKey);
+            ps.setString(5, dsFields);
+            ps.setString(6, derived);
+            ps.setString(7, jstr(bindings));
+            ps.setString(8, sched);
+            ps.setString(9, cron.isEmpty() ? null : cron);
+            ps.setString(10, guard);
             return ps;
         }, kh);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -501,6 +550,8 @@ public class TagEngineService {
         String mode = str(body.getOrDefault("mode", exist.get("mode")));
         String dataset = str(body.getOrDefault("dataset", exist.get("dataset")));
         if (!"batch".equals(mode)) throw new IllegalArgumentException("P0 仅支持批模式(batch); 流/在线 P1 开放");
+        String entityKey = str(body.getOrDefault("entityKey", exist.get("entityKey"))).trim();
+        if (entityKey.isEmpty()) entityKey = "id";
         JsonNode bindings = toNode(body.get("bindings"));
         assertBindingsOk(bindings);
         Integer dup = metaJdbc.queryForObject("SELECT COUNT(*) FROM tag_task WHERE name=? AND id<>?", Integer.class, name, id);
@@ -510,8 +561,8 @@ public class TagEngineService {
         if ("cron".equals(sched) && cron.isEmpty()) throw new IllegalArgumentException("定时任务需 cron 表达式");
         String status = str(body.getOrDefault("status", exist.get("status")));
         metaJdbc.update(
-                "UPDATE tag_task SET name=?, dataset=?, dataset_fields_json=?, derived_json=?, bindings_json=?, schedule=?, cron_expr=?, guard_json=?, status=? WHERE id=?",
-                name, dataset,
+                "UPDATE tag_task SET name=?, dataset=?, entity_key=?, dataset_fields_json=?, derived_json=?, bindings_json=?, schedule=?, cron_expr=?, guard_json=?, status=? WHERE id=?",
+                name, dataset, entityKey,
                 jstr(body.getOrDefault("datasetFields", exist.get("datasetFields"))),
                 jstr(body.getOrDefault("derived", exist.get("derived"))),
                 jstr(bindings), sched, cron.isEmpty() ? null : cron,
@@ -531,26 +582,62 @@ public class TagEngineService {
     }
 
     /** 发布: 校验绑定规则均启用 + 字段依赖 ⊆ 任务字段域(数据集字段 ∪ 派生字段) → 固化版本快照(ver+1)。
+     *  快照含资产定义(规则库升版后旧版定义靠快照还原执行), 供执行器生成 task-json。
      *  注: DRL 的类型级编译校验落在 Spark 执行器(driver 侧 schema 可知), 发布阶段以字段依赖域校验为主。 */
     public Map<String, Object> publishTask(long id) {
         Map<String, Object> exist = getTask(id);
         JsonNode bindings = (JsonNode) exist.get("bindings");
-        ArrayNode snap = OM.createArrayNode();
+        // 有序收录: 绑定资产 → 规则流步骤引用的资产(递归闭包, 含嵌套流), 快照自含执行所需全部定义
+        List<Map<String, Object>> ordered = new ArrayList<>();
+        Map<Long, Integer> seenIdx = new HashMap<>();
+        List<Map<String, Object>> binds = new ArrayList<>();
         Set<String> missing = new LinkedHashSet<>();
         Set<Long> seenRules = new HashSet<>();
         for (JsonNode b : bindings) {
             long refId = b.path("id").asLong(0);
             Map<String, Object> rule = ruleById(refId);
             if (rule == null) throw new IllegalArgumentException("绑定规则已被删除 id=" + refId);
-            int st = ((Number) rule.get("status")).intValue();
-            if (st != 1) throw new IllegalArgumentException("绑定规则已停用: " + rule.get("name"));
-            snap.addObject()
-                    .put("kind", (String) rule.get("kind"))
-                    .put("id", refId)
-                    .put("ver", ((Number) rule.get("ver")).intValue())
-                    .put("name", (String) rule.get("name"));
-            /* 依赖收集(flow 递归; DRL 规则无自动依赖) */
-            collectDepsOf(rule, seenRules, missing);
+            if (((Number) rule.get("status")).intValue() != 1) {
+                throw new IllegalArgumentException("绑定规则已停用: " + rule.get("name"));
+            }
+            binds.add(rule);
+            if (!seenIdx.containsKey(refId)) {
+                seenIdx.put(refId, ordered.size());
+                ordered.add(rule);
+            }
+        }
+        // 闭包展开(顺序稳定: 绑定在前, 引用随后; 防御环 seen 已挡, 双保险深度上限)
+        for (int pos = 0; pos < ordered.size() && pos < 512; pos++) {
+            Map<String, Object> r = ordered.get(pos);
+            if (!"flow".equals(r.get("kind"))) continue;
+            JsonNode steps = jnode((String) r.get("def_json")).path("steps");
+            for (JsonNode st : steps) {
+                long refId = st.path("refId").asLong(0);
+                if (refId <= 0 || seenIdx.containsKey(refId)) continue;
+                Map<String, Object> ref = ruleById(refId);
+                if (ref != null) {
+                    seenIdx.put(refId, ordered.size());
+                    ordered.add(ref);
+                }
+            }
+        }
+        if (binds.isEmpty() && ordered.isEmpty()) throw new IllegalArgumentException("任务未绑定任何规则/规则流");
+        ObjectNode snap = OM.createObjectNode();
+        ArrayNode bindArr = snap.putArray("bindings");
+        ArrayNode assetArr = snap.putArray("assets");
+        for (Map<String, Object> rb : binds) {
+            long refId = ((Number) rb.get("id")).longValue();
+            bindArr.addObject().put("kind", (String) rb.get("kind")).put("id", refId)
+                    .put("ver", ((Number) rb.get("ver")).intValue()).put("name", (String) rb.get("name"));
+        }
+        for (Map<String, Object> r : ordered) {
+            ObjectNode ab = assetArr.addObject()
+                    .put("kind", (String) r.get("kind"))
+                    .put("id", ((Number) r.get("id")).longValue())
+                    .put("ver", ((Number) r.get("ver")).intValue())
+                    .put("name", (String) r.get("name"));
+            ab.set("def", jnode((String) r.get("def_json")));   // 固化资产定义(按当前版本冻结)
+            collectDepsOf(r, seenRules, missing);
         }
         /* 字段域 = 数据集字段 ∪ 派生字段名 */
         Set<String> universe = new HashSet<>();
@@ -575,6 +662,194 @@ public class TagEngineService {
         out.put("snapshot", snap);
         log.info("[tagengine] task {} published v{} (快照固化 + 字段依赖域校验; DRL 类型编译在执行器)", id, newVer);
         return out;
+    }
+
+    /* ═══════════ 平台→执行器接线(P0): task-json 生成 + 提交(演练/spark) + tag_run 审计 + cron 自动触发 ═══════════ */
+
+    private static String env(String key, String def) {
+        String v = System.getenv(key);
+        return v == null || v.isBlank() ? def : v;
+    }
+
+    /** 触发一次批运行: 生成 task-json(发布快照自含资产定义) → 落 runs 目录 → 记 tag_run → 按 runner-mode 演练/提交 */
+    public Map<String, Object> startRun(long taskId, String trigger) {
+        Map<String, Object> task = getTask(taskId);
+        if (!"published".equals(task.get("status"))) throw new IllegalArgumentException("任务未发布, 请先 publish");
+        JsonNode snap = (JsonNode) task.get("snapshot");
+        if (snap == null || !snap.has("assets") || !snap.get("assets").isArray() || snap.get("assets").isEmpty()) {
+            throw new IllegalArgumentException("任务快照为旧版(缺资产定义), 请重新发布");
+        }
+        ObjectNode payload = OM.createObjectNode();
+        payload.put("taskId", taskId);
+        payload.put("taskVer", ((Number) task.get("ver")).intValue());
+        payload.put("dataset", (String) task.get("dataset"));
+        payload.put("entityKey", str(task.get("entityKey")));
+        payload.set("iceberg", OM.createObjectNode()
+                .put("catalog", env("DCP_TAGENGINE_CATALOG", "demo"))
+                .put("namespace", env("DCP_TAGENGINE_NAMESPACE", "dcp"))
+                .put("table", (String) task.get("dataset")));
+        payload.set("tagFact", OM.createObjectNode()
+                .put("catalog", env("DCP_TAGENGINE_CATALOG", "demo"))
+                .put("namespace", env("DCP_TAGENGINE_NAMESPACE", "dcp"))
+                .put("table", env("DCP_TAGENGINE_TAGFACT_TABLE", "tag_fact")));
+        payload.set("datasetFields", (JsonNode) task.get("datasetFields"));
+        payload.set("derived", (JsonNode) task.get("derived"));
+        payload.set("bindings", snap.get("bindings"));
+        payload.set("assets", snap.get("assets"));
+        payload.put("icebergConfig", "湖参数待接湖环境(设计 §13): catalog/namespace 现为占位, 湖落地后平台配置下发");
+        String json = jstr(payload);
+
+        // 落 runs 目录 + tag_run 记录
+        try {
+            Path dir = Paths.get(runsDir);
+            Files.createDirectories(dir);
+            KeyHolder kh = new GeneratedKeyHolder();
+            metaJdbc.update(con -> {
+                PreparedStatement ps = con.prepareStatement(
+                        "INSERT INTO tag_run(task_id,task_name,trigger_type,status) VALUES(?,?,?,'submitted')",
+                        Statement.RETURN_GENERATED_KEYS);
+                ps.setLong(1, taskId);
+                ps.setString(2, (String) task.get("name"));
+                ps.setString(3, trigger == null || trigger.isBlank() ? "manual" : trigger);
+                return ps;
+            }, kh);
+            long runId = ((Number) kh.getKey()).longValue();
+            Path file = dir.resolve("task-" + taskId + "-run-" + runId + ".json");
+            Files.writeString(file, json, StandardCharsets.UTF_8);
+
+            // 提交命令(演练模式不真正执行; spark 模式尝试启动, 失败置 failed)
+            String submitCmd = "(未配置)";
+            String status = "submitted";
+            String err = null;
+            if ("spark".equalsIgnoreCase(runnerMode) && !executorJar.isBlank()) {
+                submitCmd = sparkSubmitBin + " --class com.dcp.tagjob.TagBatchJob "
+                        + env("DCP_TAGENGINE_SPARK_MASTER", "local[*]") + " --task-json " + file;
+                try {
+                    Process p = new ProcessBuilder(submitCmd.split(" ")).redirectErrorStream(true).start();
+                    status = "running";
+                    log.info("[tagengine] run#{} spark-submit 已启动 pid={}", runId, p.pid());
+                } catch (IOException ex) {
+                    status = "failed";
+                    err = "spark-submit 不可用: " + ex.getMessage();
+                    log.warn("[tagengine] run#{} 提交失败: {}", runId, err);
+                }
+            } else {
+                submitCmd = "演练(simulate): java -cp " + executorJar + " com.dcp.tagjob.TagBatchJob --task-json " + file
+                        + " | runner-mode=" + runnerMode + "(spark 模式 + executor-jar 配置后自动切换真实提交)";
+                log.info("[tagengine] run#{} 演练: task-json 已生成 {}", runId, file);
+            }
+            metaJdbc.update("UPDATE tag_run SET status=?, payload_path=?, submit_cmd=?, error_msg=? WHERE id=?",
+                    status, file.toString(), submitCmd, err, runId);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("runId", runId);
+            out.put("taskId", taskId);
+            out.put("status", status);
+            out.put("trigger", trigger == null ? "manual" : trigger);
+            out.put("payloadPath", file.toString());
+            out.put("submitCmd", submitCmd);
+            out.put("payload", payload);
+            return out;
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("runs 目录写入失败: " + e.getMessage());
+        }
+    }
+
+    public List<Map<String, Object>> listRuns(Long taskId, int limit) {
+        String sql = "SELECT id,task_id,task_name,trigger_type,status,payload_path,submit_cmd,exit_code,summary_json,error_msg,started_at,finished_at FROM tag_run";
+        List<Object> args = new ArrayList<>();
+        if (taskId != null) {
+            sql += " WHERE task_id=?";
+            args.add(taskId);
+        }
+        sql += " ORDER BY id DESC LIMIT ?";
+        args.add(Math.min(Math.max(limit, 1), 200));
+        List<Map<String, Object>> rows = metaJdbc.queryForList(sql, args.toArray());
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            Map<String, Object> m = new LinkedHashMap<>(r);
+            m.put("summary", r.get("summary_json") == null ? null : jnode((String) r.get("summary_json")));
+            m.remove("summary_json");
+            out.add(m);
+        }
+        return out;
+    }
+
+    public Map<String, Object> getRun(long runId) {
+        List<Map<String, Object>> rows = metaJdbc.queryForList(
+                "SELECT id,task_id,task_name,trigger_type,status,payload_path,submit_cmd,exit_code,summary_json,error_msg,started_at,finished_at FROM tag_run WHERE id=?",
+                runId);
+        if (rows.isEmpty()) throw new IllegalArgumentException("run 不存在 id=" + runId);
+        Map<String, Object> m = new LinkedHashMap<>(rows.get(0));
+        m.put("summary", m.get("summary_json") == null ? null : jnode((String) m.get("summary_json")));
+        m.remove("summary_json");
+        String path = (String) m.get("payload_path");
+        if (path != null) {
+            try {
+                String txt = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
+                if (txt.length() > 300000) txt = txt.substring(0, 300000) + "...(截断)";
+                m.put("payloadText", txt);
+            } catch (IOException ignore) {
+                m.put("payloadText", null);
+            }
+        }
+        return m;
+    }
+
+    /** 执行器回写 run 结果(状态/exit/summary/错误); 命中矩阵回写待 E2E 接线 */
+    public Map<String, Object> finishRun(long runId, Map<String, Object> body) {
+        getRun(runId);
+        String status = str(body.getOrDefault("status", "failed"));
+        if (!List.of("succeeded", "failed", "running").contains(status)) {
+            throw new IllegalArgumentException("status 须为 succeeded|failed|running");
+        }
+        metaJdbc.update("UPDATE tag_run SET status=?, exit_code=?, summary_json=?, error_msg=?, finished_at=NOW() WHERE id=?",
+                status,
+                body.get("exitCode") == null ? null : ((Number) body.get("exitCode")).intValue(),
+                jstr(body.getOrDefault("summary", new LinkedHashMap<String, Object>())),
+                str(body.get("error")).isEmpty() ? null : str(body.get("error")),
+                runId);
+        return Map.of("runId", runId, "status", status);
+    }
+
+    /** 15s tick: cron 定时任务自动触发(需 dcp.tagengine.auto-run=true; 每分钟至多一次, 秒字段按整分匹配) */
+    @Scheduled(fixedDelay = 15000)
+    public void autoTick() {
+        if (!autoRun) return;
+        List<Map<String, Object>> due = metaJdbc.queryForList(
+                "SELECT id, cron_expr, last_auto_run_at FROM tag_task WHERE status='published' AND schedule='cron' AND cron_expr IS NOT NULL");
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime minuteStart = now.withSecond(0).withNano(0);
+        for (Map<String, Object> t : due) {
+            long taskId = ((Number) t.get("id")).longValue();
+            if (!cronMatch(str(t.get("cron_expr")), now)) continue;
+            java.sql.Timestamp last = (java.sql.Timestamp) t.get("last_auto_run_at");
+            if (last != null && !last.toLocalDateTime().isBefore(minuteStart)) continue;   // 本分钟已触发
+            try {
+                startRun(taskId, "cron");
+                metaJdbc.update("UPDATE tag_task SET last_auto_run_at=NOW() WHERE id=?", taskId);
+                log.info("[tagengine] cron 自动触发任务#{} 成功", taskId);
+            } catch (Exception e) {
+                log.warn("[tagengine] cron 自动触发任务#{} 失败: {}", taskId, e.getMessage());
+            }
+        }
+    }
+
+    /** 极简 cron 匹配(6-7 段: 秒 分 时 日 月 周 [年]): 支持 * 与单值; 秒/日/月忽略, 周支持 * 或数字(Spring 语义 1=周日? 保守: 仅当 token 为 * 或等于当前 dayOfWeek.getValue()+1 对齐按 1=周一记, 见注释) */
+    private boolean cronMatch(String expr, LocalDateTime now) {
+        try {
+            String[] f = expr.trim().split("\\s+");
+            if (f.length < 6) return false;
+            if (!"*".equals(f[1]) && Integer.parseInt(f[1]) != now.getMinute()) return false;
+            if (!"*".equals(f[2]) && Integer.parseInt(f[2]) != now.getHour()) return false;
+            String dow = f[5];
+            if (!"*".equals(dow)) {
+                int cur = now.getDayOfWeek().getValue();   // 1=周一..7=周日
+                if (!List.of(String.valueOf(cur), String.valueOf(cur % 7)).contains(dow)) return false; // 兼容 0/7=周日
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void collectDepsOf(Map<String, Object> rule, Set<Long> seen, Set<String> out) {
