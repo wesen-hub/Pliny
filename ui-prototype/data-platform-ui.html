@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>统一数据管理平台 · UI 原型</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --sidebar:#001529; --sidebar-sub:#000c17;
+  --bg:#f0f2f5; --card:#fff; --border:#e8e8e8; --text:#1f2329; --text-2:#646a73; --text-3:#8f959e;
+  --green:#52c41a; --orange:#fa8c16; --red:#f5222d; --blue:#1677ff; --purple:#722ed1;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.layout{display:flex;min-height:100vh}
+/* ===== Sidebar ===== */
+.sidebar{width:216px;background:var(--sidebar);color:#c9d4e0;flex-shrink:0;display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;z-index:10}
+.logo{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+.logo-icon{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#1677ff,#36cfc9);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px}
+.logo-name{color:#fff;font-size:15px;font-weight:600;line-height:1.2}
+.logo-sub{font-size:11px;color:#5f6d7c}
+.menu{padding:10px 0;flex:1;overflow-y:auto}
+.menu-group{padding:8px 18px 4px;font-size:11px;color:#5f6d7c}
+.menu-item{display:flex;align-items:center;gap:9px;padding:9px 18px;cursor:pointer;color:#c9d4e0;font-size:13px;border-left:3px solid transparent}
+.menu-item:hover{background:rgba(255,255,255,.06);color:#fff}
+.menu-item.active{background:var(--primary);color:#fff;border-left-color:#69b1ff}
+.menu-item .ic{width:16px;text-align:center;font-size:14px}
+.sidebar-foot{padding:12px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#5f6d7c}
+/* ===== Main ===== */
+.main{flex:1;margin-left:216px;display:flex;flex-direction:column;min-height:100vh}
+.topbar{height:52px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;position:sticky;top:0;z-index:5}
+.crumb{font-size:14px;font-weight:600}
+.crumb small{color:var(--text-3);font-weight:400;margin-left:8px}
+.top-right{display:flex;align-items:center;gap:14px;color:var(--text-2)}
+.top-right .env{padding:2px 10px;border-radius:10px;background:var(--primary-weak);color:var(--primary);font-size:12px}
+.avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#722ed1,#1677ff);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.content{padding:20px;flex:1}
+.page{display:none}
+.page.active{display:block}
+/* ===== Cards / common ===== */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.card-title .more{font-size:12px;color:var(--primary);cursor:pointer;font-weight:400}
+.row{display:flex;gap:16px}
+.col{flex:1}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.stat .v{font-size:26px;font-weight:700;margin-top:4px}
+.stat .l{color:var(--text-2);font-size:12px}
+.stat .d{font-size:12px;color:var(--text-3);margin-top:6px}
+.tag{display:inline-flex;align-items:center;padding:1px 8px;border-radius:4px;font-size:12px;line-height:18px;margin-right:6px}
+.tag-blue{background:#e6f4ff;color:#0958d9}
+.tag-green{background:#f6ffed;color:#389e0d}
+.tag-orange{background:#fff7e6;color:#d46b08}
+.tag-red{background:#fff1f0;color:#cf1322}
+.tag-purple{background:#f9f0ff;color:#531dab}
+.tag-gray{background:#f5f5f5;color:#595959}
+.tag-cyan{background:#e6fffb;color:#08979c}
+.secret{display:inline-flex;align-items:center;padding:1px 8px;border-radius:4px;font-size:12px;line-height:18px;font-weight:600}
+.sec-1{background:#f6ffed;color:#389e0d}.sec-2{background:#e6f4ff;color:#0958d9}.sec-3{background:#fff7e6;color:#d46b08}.sec-4{background:#fff1f0;color:#cf1322}
+table{width:100%;border-collapse:collapse}
+th{background:#fafafa;text-align:left;padding:9px 12px;font-weight:600;color:var(--text-2);font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+tr:hover td{background:#fafcff}
+.link{color:var(--primary);cursor:pointer}
+.link:hover{text-decoration:underline}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.s-run{background:#52c41a}.s-pause{background:#faad14}.s-pending{background:#1677ff}.s-down{background:#8c8c8c}.s-err{background:#f5222d}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid transparent;background:var(--primary);color:#fff;font-weight:500}
+.btn:hover{opacity:.88}
+.btn-ghost{background:#fff;border-color:#d9d9d9;color:var(--text)}
+.btn-ghost:hover{border-color:var(--primary);color:var(--primary)}
+.btn-sm{padding:3px 10px;font-size:12px;border-radius:4px}
+.input,select{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 10px;font-size:13px;outline:none;background:#fff;color:var(--text)}
+.input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.12)}
+.searchbox{display:flex;gap:10px;margin-bottom:14px}
+.pager{display:flex;justify-content:space-between;align-items:center;padding-top:12px;color:var(--text-3);font-size:12px}
+/* ===== Tree ===== */
+.tree{font-size:13px}
+.tree-node{padding:5px 0}
+.tree-row{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer}
+.tree-row:hover{background:#f5f7fa}
+.tree-row.active{background:var(--primary-weak);color:var(--primary);font-weight:600}
+.tree-row .arrow{width:14px;text-align:center;color:var(--text-3);font-size:11px;transition:transform .15s}
+.tree-row .arrow.open{transform:rotate(90deg)}
+.tree-children{margin-left:20px;border-left:1px dashed #e0e0e0;padding-left:6px;display:none}
+.tree-children.open{display:block}
+.tree-count{color:var(--text-3);font-size:11px;margin-left:auto}
+/* ===== Tabs ===== */
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px;gap:4px}
+.tab{padding:8px 16px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;font-size:13px}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+/* ===== Wizard ===== */
+.steps{display:flex;margin-bottom:20px;align-items:center}
+.step{display:flex;align-items:center;gap:8px;color:var(--text-3)}
+.step .num{width:24px;height:24px;border-radius:50%;background:#e8e8e8;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.step.active{color:var(--text)}
+.step.active .num{background:var(--primary);color:#fff}
+.step.done .num{background:#52c41a;color:#fff}
+.step-line{width:60px;height:2px;background:#e8e8e8;margin:0 12px}
+.cond-row{display:flex;align-items:center;gap:8px;padding:10px;background:#fafafa;border:1px solid #f0f0f0;border-radius:8px;margin-bottom:8px}
+.cond-row .logic{font-weight:600;color:var(--primary);font-size:12px;width:36px;text-align:center}
+.expr-box{background:#f7f9fc;border:1px dashed #d9d9d9;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#1f2329;line-height:1.8}
+.expr-box b{color:var(--primary)}
+.expr-hit{background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:12px;font-size:12.5px;color:#389e0d}
+.radio-card{display:flex;gap:14px;margin-top:6px}
+.rcard{flex:1;border:1px solid #d9d9d9;border-radius:10px;padding:16px;cursor:pointer;position:relative}
+.rcard:hover{border-color:var(--primary)}
+.rcard.sel{border-color:var(--primary);background:var(--primary-weak);box-shadow:0 0 0 2px rgba(22,119,255,.12)}
+.rcard .t{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.rcard .d{color:var(--text-2);font-size:12px;margin-top:6px;line-height:1.7}
+.rcard .check{position:absolute;top:12px;right:12px;width:16px;height:16px;border-radius:50%;border:2px solid #d9d9d9}
+.rcard.sel .check{border-color:var(--primary);background:var(--primary)}
+.rcard.sel .check::after{content:"";position:absolute;top:2px;left:5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.form-item{margin-bottom:14px}
+.form-item label{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px}
+/* ===== Lineage ===== */
+.lineage{background:#fafcff;border:1px solid #f0f0f0;border-radius:10px;padding:24px;overflow-x:auto}
+.lg{display:flex;align-items:center;gap:0;min-width:820px}
+.lg-node{background:#fff;border:1px solid #d9d9d9;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.lg-node .n{font-weight:600;font-size:12.5px}
+.lg-node .s{font-size:11px;color:var(--text-3);margin-top:3px}
+.lg-node.src{border-color:#faad14}.lg-node.src .n{color:#d46b08}
+.lg-node.ods{border-color:#13c2c2}.lg-node.ods .n{color:#08979c}
+.lg-node.dwd{border-color:var(--primary)}.lg-node.dwd .n{color:var(--primary)}
+.lg-node.down{border-color:#722ed1}.lg-node.down .n{color:#531dab}
+.lg-arrow{color:#bbb;font-size:16px;padding:0 8px}
+/* ===== Misc ===== */
+.meter{display:flex;align-items:center;gap:8px}
+.meter .bar{width:90px;height:6px;background:#f0f0f0;border-radius:3px;overflow:hidden}
+.meter .fill{height:100%;border-radius:3px}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:#f0f0f0;color:var(--text-2)}
+.badge-new{position:relative}
+.badge-new::after{content:"3";position:absolute;top:-6px;right:-10px;background:var(--red);color:#fff;font-size:10px;border-radius:8px;padding:0 4px;line-height:14px}
+.notice-item{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid #f5f5f5;font-size:12.5px;align-items:flex-start}
+.notice-item:last-child{border-bottom:none}
+.notice-item .t{color:var(--text-3);white-space:nowrap;font-size:11px;padding-top:2px}
+.kv{display:flex;justify-content:space-between;padding:7px 0;font-size:12.5px;border-bottom:1px dashed #f0f0f0}
+.kv:last-child{border-bottom:none}
+.kv .k{color:var(--text-2)}.kv .v{font-weight:500}
+.mt8{margin-top:8px}.mt16{margin-top:16px}
+.flex-between{display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">数</div>
+      <div>
+        <div class="logo-name">数据管理平台</div>
+        <div class="logo-sub">Data Management Platform</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <div class="menu-group">总览</div>
+      <div class="menu-item active" data-page="p-overview"><span class="ic">◫</span>平台总览</div>
+      <div class="menu-group">数据资产</div>
+      <div class="menu-item" data-page="p-catalog"><span class="ic">▤</span>资产目录</div>
+      <div class="menu-item" data-page="p-asset"><span class="ic">▣</span>资产详情</div>
+      <div class="menu-item" data-page="p-lineage"><span class="ic">⛓</span>数据血缘</div>
+      <div class="menu-group">数据管理</div>
+      <div class="menu-item" data-page="p-model"><span class="ic">◧</span>模型管理</div>
+      <div class="menu-item" data-page="p-tag"><span class="ic">#</span>标签管理</div>
+      <div class="menu-group">订阅与分发</div>
+      <div class="menu-item badge-new" data-page="p-sub"><span class="ic">⇄</span>订阅中心</div>
+      <div class="menu-item" data-page="p-sub-create"><span class="ic">＋</span>新建订阅</div>
+      <div class="menu-item" data-page="p-sub-detail"><span class="ic">⇢</span>订阅详情</div>
+      <div class="menu-group">管控</div>
+      <div class="menu-item" data-page="p-perm"><span class="ic">⚿</span>权限管理</div>
+      <div class="menu-item" data-page="p-task"><span class="ic">⚙</span>采集任务</div>
+    </nav>
+    <div class="sidebar-foot">运行环境: 生产 · v3.0<br>中央节点 · 湖仓 Iceberg</div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb" id="crumb">平台总览 <small>Central Node / 中央节点</small></div>
+      <div class="top-right">
+        <span class="env">中央节点</span>
+        <span>🔔</span>
+        <div class="avatar">管</div>
+      </div>
+    </div>
+    <div class="content">
+
+    <!-- ================= 总览 ================= -->
+    <div class="page active" id="p-overview">
+      <div class="stat-grid">
+        <div class="stat"><div class="l">已接入数据源</div><div class="v">24</div><div class="d">ERP / CRM / SCM / HRM / MES…</div></div>
+        <div class="stat"><div class="l">标准模型</div><div class="v">56</div><div class="d">ODS 28 · DWD 16 · DWS 9 · ADS 3</div></div>
+        <div class="stat"><div class="l">数据资产</div><div class="v">328</div><div class="d">已激活 312 · 占位 16</div></div>
+        <div class="stat"><div class="l">活跃订阅</div><div class="v">47</div><div class="d">Push 18 · Pull 23 · 视图 6</div></div>
+      </div>
+      <div class="row">
+        <div class="col" style="flex:2">
+          <div class="card">
+            <div class="card-title">端到端数据流状态 <span class="more">查看全部 →</span></div>
+            <table>
+              <tr><th>链路</th><th>延迟</th><th>状态</th><th>吞吐(近1h)</th><th>趋势</th></tr>
+              <tr><td>ERP → SeaTunnel CDC → MySQL 缓冲</td><td><span class="tag tag-green">1.8s</span></td><td><span class="status-dot s-run"></span>正常</td><td>12,480 条/分</td><td>↗</td></tr>
+              <tr><td>MySQL 缓冲 → Iceberg(DWD 订单明细)</td><td><span class="tag tag-blue">7.2min</span></td><td><span class="status-dot s-run"></span>正常</td><td>3.2 GB/批</td><td>→</td></tr>
+              <tr><td>订阅 Push: sub-erp-trade → 华东子节点</td><td><span class="tag tag-blue">8.5min</span></td><td><span class="status-dot s-run"></span>正常</td><td>1,024 条/批</td><td>→</td></tr>
+              <tr><td>订阅 Pull: sub-stock-batch ← 华南子节点</td><td><span class="tag tag-gray">按需</span></td><td><span class="status-dot s-pause"></span>上次 12:30 拉取</td><td>—</td><td>—</td></tr>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-title">最近订阅投递 <span class="more">订阅中心 →</span></div>
+            <table>
+              <tr><th>时间</th><th>订阅</th><th>逻辑表</th><th>水位区间</th><th>结果</th><th>耗时</th></tr>
+              <tr><td>13:35:02</td><td><span class="link" onclick="go('p-sub-detail')">sub-erp-trade</span></td><td>DWD_订单明细</td><td>seq 18,240,011 → 18,241,035</td><td><span class="tag tag-green">成功</span></td><td>2.3s</td></tr>
+              <tr><td>13:30:00</td><td><span class="link">sub-erp-trade</span></td><td>DWD_订单明细</td><td>seq 18,238,990 → 18,240,010</td><td><span class="tag tag-green">成功</span></td><td>2.1s</td></tr>
+              <tr><td>13:25:03</td><td><span class="link">sub-crm-view</span></td><td>DWD_客户主数据</td><td>— (逻辑视图)</td><td><span class="tag tag-gray">视图访问</span></td><td>—</td></tr>
+              <tr><td>13:15:40</td><td><span class="link">sub-stock-batch</span></td><td>DWS_库存汇总</td><td>拉取位点(子节点维护)</td><td><span class="tag tag-orange">重试1次后成功</span></td><td>11.4s</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          <div class="card">
+            <div class="card-title">平台健康度</div>
+            <div class="kv"><span class="k">采集成功率 (30d)</span><span class="v">99.995%</span></div>
+            <div class="kv"><span class="k">湖仓可见延迟</span><span class="v">≤ 15 min</span></div>
+            <div class="kv"><span class="k">查询 P99</span><span class="v">1.2s</span></div>
+            <div class="kv"><span class="k">订阅投递成功率</span><span class="v">99.97%</span></div>
+            <div class="kv"><span class="k">存储占用 (MinIO)</span><span class="v">18.6 TB</span></div>
+            <div class="kv"><span class="k">当前并发查询</span><span class="v">23 / 100</span></div>
+          </div>
+          <div class="card">
+            <div class="card-title">待办与告警 <span class="more">全部</span></div>
+            <div class="notice-item"><span class="t">审批</span>订阅申请 <b class="link">sub-fin-cn</b> 等待审批(密级上限:内部)</div>
+            <div class="notice-item"><span class="t">告警</span>华南子节点 HTTP 接口 13:15 超时重试(已恢复)</div>
+            <div class="notice-item"><span class="t">待办</span>3 个源表映射待确认(SCM 物料主数据)</div>
+            <div class="notice-item"><span class="t">漂移</span>标签「业务域=交易」变更,影响 4 个订阅,待确认</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 资产目录 ================= -->
+    <div class="page" id="p-catalog">
+      <div class="card">
+        <div class="card-title">数据资产目录 <span class="more">目录 = 编目规则(标签表达式),动态生成,多视图挂载零复制</span></div>
+        <div class="row">
+          <div class="col" style="flex:1;max-width:300px">
+            <div style="display:flex;gap:6px;margin-bottom:12px">
+              <span class="pill" style="background:var(--primary);color:#fff" id="view-biz">业务视图</span>
+              <span class="pill" onclick="switchView('src')" id="view-src">来源视图</span>
+              <span class="pill" onclick="switchView('sec')" id="view-sec">密级视图</span>
+            </div>
+            <div class="tree" id="tree-biz">
+              <div class="tree-node">
+                <div class="tree-row active"><span class="arrow open">▶</span><span>📁</span>交易域 <span class="tree-count">128</span></div>
+                <div class="tree-children open">
+                  <div class="tree-node">
+                    <div class="tree-row"><span class="arrow open">▶</span><span>📁</span>订单主题 <span class="tree-count">64</span></div>
+                    <div class="tree-children open">
+                      <div class="tree-node"><div class="tree-row"><span class="arrow">·</span><span>📄</span>订单明细 DWD <span class="tree-count">1</span></div></div>
+                      <div class="tree-node"><div class="tree-row"><span class="arrow">·</span><span>📄</span>订单汇总 DWS <span class="tree-count">1</span></div></div>
+                      <div class="tree-node"><div class="tree-row"><span class="arrow">·</span><span>📄</span>订单 ODS <span class="tree-count">6</span></div></div>
+                    </div>
+                  </div>
+                  <div class="tree-node">
+                    <div class="tree-row"><span class="arrow">▶</span><span>📁</span>支付主题 <span class="tree-count">32</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-row"><span class="arrow">▶</span><span>📁</span>财务域 <span class="tree-count">76</span></div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-row"><span class="arrow">▶</span><span>📁</span>供应链域 <span class="tree-count">54</span></div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-row"><span class="arrow">▶</span><span>📁</span>人力域 <span class="tree-count">30</span></div>
+              </div>
+            </div>
+            <div class="tree" id="tree-src" style="display:none">
+              <div class="tree-node"><div class="tree-row"><span class="arrow open">▶</span><span>📁</span>ERP <span class="tree-count">86</span></div><div class="tree-children open"><div class="tree-node"><div class="tree-row"><span class="arrow">·</span><span>📄</span>t_order 订单表 <span class="tree-count">1</span></div></div><div class="tree-node"><div class="tree-row"><span class="arrow">·</span><span>📄</span>t_payment 支付表 <span class="tree-count">1</span></div></div></div></div>
+              <div class="tree-node"><div class="tree-row"><span class="arrow">▶</span><span>📁</span>CRM <span class="tree-count">42</span></div></div>
+              <div class="tree-node"><div class="tree-row"><span class="arrow">▶</span><span>📁</span>SCM <span class="tree-count">38</span></div></div>
+            </div>
+            <div class="tree" id="tree-sec" style="display:none">
+              <div class="tree-node"><div class="tree-row"><span class="arrow open">▶</span><span>📁</span>公开 <span class="tree-count">96</span></div></div>
+              <div class="tree-node"><div class="tree-row"><span class="arrow open">▶</span><span>📁</span>内部 <span class="tree-count">150</span></div></div>
+              <div class="tree-node"><div class="tree-row"><span class="arrow open">▶</span><span>📁</span>机密 <span class="tree-count">74</span></div></div>
+              <div class="tree-node"><div class="tree-row"><span class="arrow open">▶</span><span>📁</span>绝密 <span class="tree-count">8</span></div></div>
+            </div>
+          </div>
+          <div class="col" style="flex:2.4">
+            <div class="searchbox">
+              <input class="input" style="flex:1" placeholder="搜索资产名称 / 字段 / 标签… (ES 检索)">
+              <select class="input"><option>全部密级</option><option>公开</option><option>内部</option><option>机密</option><option>绝密</option></select>
+              <select class="input"><option>全部分层</option><option>ODS</option><option>DWD</option><option>DWS</option><option>ADS</option></select>
+              <button class="btn btn-ghost">重置</button>
+            </div>
+            <div style="margin-bottom:12px">
+              <span class="tag tag-blue">业务域=交易</span><span class="tag tag-orange">密级≤内部</span><span class="tag tag-gray" style="cursor:pointer">✕ 清除全部</span>
+            </div>
+            <table>
+              <tr><th>资产名称</th><th>业务域</th><th>来源系统</th><th>分层</th><th>密级</th><th>质量</th><th>更新</th><th>状态</th><th>操作</th></tr>
+              <tr>
+                <td><span class="link" onclick="go('p-asset')">订单明细</span><div style="color:var(--text-3);font-size:11px">dwd_order_detail</div></td>
+                <td>交易</td><td>ERP</td><td><span class="tag tag-blue">DWD</span></td>
+                <td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">A</span></td><td>13:36</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">订单汇总</span><div style="color:var(--text-3);font-size:11px">dws_order_summary</div></td>
+                <td>交易</td><td>ERP+CRM</td><td><span class="tag tag-purple">DWS</span></td>
+                <td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">A</span></td><td>13:30</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">客户主数据</span><div style="color:var(--text-3);font-size:11px">dwd_customer_master</div></td>
+                <td>交易</td><td>CRM</td><td><span class="tag tag-blue">DWD</span></td>
+                <td><span class="secret sec-3">机密</span></td><td><span class="tag tag-green">A</span></td><td>13:28</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">库存汇总</span><div style="color:var(--text-3);font-size:11px">dws_stock_summary</div></td>
+                <td>供应链</td><td>SCM</td><td><span class="tag tag-purple">DWS</span></td>
+                <td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">A</span></td><td>13:25</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">员工信息 ODS</span><div style="color:var(--text-3);font-size:11px">ods_hr_employee</div></td>
+                <td>人力</td><td>HRM</td><td><span class="tag tag-cyan">ODS</span></td>
+                <td><span class="secret sec-4">绝密</span></td><td><span class="tag tag-orange">B</span></td><td>13:20</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">销售日报 ADS</span><div style="color:var(--text-3);font-size:11px">ads_sales_daily</div></td>
+                <td>交易</td><td>ERP</td><td><span class="tag tag-green">ADS</span></td>
+                <td><span class="secret sec-1">公开</span></td><td><span class="tag tag-green">A</span></td><td>12:00</td>
+                <td><span class="status-dot s-run"></span>就绪</td>
+                <td><span class="link">详情</span> · <span class="link">订阅</span></td>
+              </tr>
+              <tr>
+                <td><span class="link">供应商主数据</span><div style="color:var(--text-3);font-size:11px">dwd_supplier_master</div></td>
+                <td>供应链</td><td>SCM</td><td><span class="tag tag-blue">DWD</span></td>
+                <td><span class="secret sec-3">机密</span></td><td><span class="tag tag-green">A</span></td><td>13:10</td>
+                <td><span class="status-dot s-pending"></span>占位</td>
+                <td><span class="link">详情</span></td>
+              </tr>
+            </table>
+            <div class="pager"><span>共 328 个资产 · 当前第 1/47 页</span><span><span class="link">‹ 上一页</span> <span class="link">下一页 ›</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 资产详情 ================= -->
+    <div class="page" id="p-asset">
+      <div class="card">
+        <div class="flex-between">
+          <div>
+            <div style="font-size:18px;font-weight:700">订单明细 <span class="tag tag-blue" style="vertical-align:middle">DWD</span> <span class="secret sec-2" style="vertical-align:middle">内部</span></div>
+            <div style="color:var(--text-3);font-size:12px;margin-top:4px">dwd_order_detail · 模型版本 v3.2 · Owner: 数据治理委员会-交易组</div>
+            <div style="margin-top:10px">
+              <span class="tag tag-blue">业务域=交易</span><span class="tag tag-blue">主题=订单</span>
+              <span class="tag tag-cyan">来源系统=ERP</span><span class="tag tag-cyan">来源系统=CRM</span>
+              <span class="tag tag-green">质量=A</span><span class="tag tag-orange">敏感:手机号</span>
+              <span class="tag tag-gray">规则打标:高频访问</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-ghost">编辑编目</button>
+            <button class="btn" onclick="go('p-sub-create')">＋ 订阅此资产</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active" data-tab="t1">字段 Schema</div>
+          <div class="tab" data-tab="t2">标签体系</div>
+          <div class="tab" data-tab="t3">数据血缘</div>
+          <div class="tab" data-tab="t4">数据预览</div>
+          <div class="tab" data-tab="t5">订阅关系</div>
+        </div>
+        <div id="t1">
+          <table>
+            <tr><th>字段</th><th>类型</th><th>可空</th><th>来源字段(血缘)</th><th>转换</th><th>描述</th><th>敏感</th></tr>
+            <tr><td>order_id</td><td>BIGINT</td><td>否</td><td>t_order.order_id (ERP)</td><td>直接映射</td><td>订单ID</td><td>—</td></tr>
+            <tr><td>order_no</td><td>VARCHAR(32)</td><td>否</td><td>t_order.order_no (ERP)</td><td>直接映射</td><td>订单编号</td><td>—</td></tr>
+            <tr><td>customer_id</td><td>BIGINT</td><td>否</td><td>t_order.customer_id</td><td>直接映射</td><td>客户ID</td><td>—</td></tr>
+            <tr><td>customer_mobile</td><td>VARCHAR(16)</td><td>是</td><td>t_order.mobile</td><td>类型转换</td><td>客户手机号</td><td><span class="tag tag-orange">脱敏</span></td></tr>
+            <tr><td>amount</td><td>DECIMAL(18,2)</td><td>否</td><td>t_order.amount</td><td>类型转换</td><td>订单金额</td><td><span class="tag tag-orange">脱敏</span></td></tr>
+            <tr><td>status</td><td>INT</td><td>否</td><td>t_order.status</td><td>枚举映射</td><td>订单状态(1待支付/2已支付…)</td><td>—</td></tr>
+            <tr><td>order_ts</td><td>TIMESTAMP</td><td>否</td><td>t_order.create_time</td><td>表达式: date_format</td><td>下单时间</td><td>—</td></tr>
+            <tr><td>seq</td><td>BIGINT</td><td>否</td><td>系统生成</td><td>—</td><td>全局序号(幂等/水位)</td><td>—</td></tr>
+          </table>
+        </div>
+        <div id="t2" style="display:none">
+          <div class="kv"><span class="k">系统标签(采集自动继承)</span><span class="v"><span class="tag tag-cyan">来源系统=ERP</span><span class="tag tag-cyan">来源系统=CRM</span><span class="tag tag-gray">采集方式=CDC</span></span></div>
+          <div class="kv"><span class="k">业务标签(模型定义)</span><span class="v"><span class="tag tag-blue">业务域=交易</span><span class="tag tag-blue">主题=订单</span><span class="tag tag-blue">分层=DWD</span></span></div>
+          <div class="kv"><span class="k">质量标签(质量探针)</span><span class="v"><span class="tag tag-green">质量=A</span><span class="tag tag-green">完整率=99.8%</span></span></div>
+          <div class="kv"><span class="k">敏感标签(ML检测)</span><span class="v"><span class="tag tag-orange">敏感字段:手机号</span><span class="tag tag-orange">敏感字段:金额</span></span></div>
+          <div class="kv"><span class="k">自定义标签(规则引擎)</span><span class="v"><span class="tag tag-purple">规则:高频访问</span><span class="tag tag-purple">规则:大促核心</span></span></div>
+          <div style="margin-top:12px;font-size:12px;color:var(--text-2)">记录级标签示例:<span class="tag tag-purple mt8">订单金额&gt;1万(规则引擎)</span><span class="tag tag-orange">疑似PII(ML)</span> — 异步队列打标,不阻塞主链路</div>
+        </div>
+        <div id="t3" style="display:none">
+          <div class="lineage">
+            <div class="lg">
+              <div class="lg-node src"><div class="n">t_order</div><div class="s">ERP · MySQL</div></div>
+              <div class="lg-arrow">→</div>
+              <div class="lg-node src"><div class="n">t_payment</div><div class="s">ERP · MySQL</div></div>
+              <div class="lg-arrow">→</div>
+              <div class="lg-node ods"><div class="n">ODS_订单</div><div class="s">MySQL 缓冲 → Iceberg</div></div>
+              <div class="lg-arrow">→</div>
+              <div class="lg-node dwd"><div class="n">DWD_订单明细</div><div class="s">MERGE INTO · 当前资产</div></div>
+              <div class="lg-arrow">→</div>
+              <div class="lg-node down"><div class="n">sub-erp-trade</div><div class="s">订阅 · 华东子节点</div></div>
+              <div class="lg-arrow">→</div>
+              <div class="lg-node down"><div class="n">销售日报 ADS</div><div class="s">下游报表</div></div>
+            </div>
+          </div>
+          <div style="margin-top:12px;font-size:12px;color:var(--text-2)">字段级血缘: order_id ← t_order.order_id;amount ← t_order.amount(类型转换);order_ts ← t_order.create_time(date_format) <span class="link">影响分析 →</span></div>
+        </div>
+        <div id="t4" style="display:none">
+          <table>
+            <tr><th>order_id</th><th>order_no</th><th>customer_id</th><th>customer_mobile</th><th>amount</th><th>status</th><th>order_ts</th><th>seq</th></tr>
+            <tr><td>100231</td><td>SO20260829001</td><td>8821</td><td>138****2210</td><td>2,399.00</td><td>2</td><td>2026-08-29 13:20:11</td><td>18241001</td></tr>
+            <tr><td>100232</td><td>SO20260829002</td><td>7754</td><td>139****8821</td><td>8,650.50</td><td>1</td><td>2026-08-29 13:22:47</td><td>18241002</td></tr>
+            <tr><td>100233</td><td>SO20260829003</td><td>9902</td><td>136****4470</td><td>156.00</td><td>2</td><td>2026-08-29 13:25:03</td><td>18241003</td></tr>
+          </table>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-3)">脱敏生效:手机号已掩码展示(Ranger 动态脱敏策略)</div>
+        </div>
+        <div id="t5" style="display:none">
+          <table>
+            <tr><th>订阅</th><th>子节点/对象</th><th>形态</th><th>模式</th><th>密级上限</th><th>状态</th></tr>
+            <tr><td><span class="link" onclick="go('p-sub-detail')">sub-erp-trade</span></td><td>华东子节点</td><td>物理同步</td><td><span class="tag tag-blue">Push</span></td><td><span class="secret sec-2">内部</span></td><td><span class="status-dot s-run"></span>运行中</td></tr>
+            <tr><td>sub-crm-view</td><td>华南子节点</td><td>逻辑视图</td><td><span class="tag tag-gray">Trino</span></td><td><span class="secret sec-2">内部</span></td><td><span class="status-dot s-run"></span>运行中</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <div class="card"><div class="card-title">基本信息</div>
+            <div class="kv"><span class="k">模型版本</span><span class="v">v3.2</span></div>
+            <div class="kv"><span class="k">更新频率</span><span class="v">5–15 min 批量</span></div>
+            <div class="kv"><span class="k">湖可见延迟</span><span class="v">≤ 15 min</span></div>
+            <div class="kv"><span class="k">数据量</span><span class="v">1.2 亿行 / 86 GB</span></div>
+            <div class="kv"><span class="k">物理表分片</span><span class="v">8 片(hash 来源系统)</span></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card"><div class="card-title">目录挂载位置 <span class="more">+ 手动挂载</span></div>
+            <div style="font-size:12.5px;line-height:2">
+              📁 业务视图 / 交易域 / 订单主题<br>
+              📁 来源视图 / ERP / 订单表<br>
+              📁 来源视图 / CRM / 订单表<br>
+              📁 密级视图 / 内部
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:var(--text-3)">挂载 = 引用关系,零物理复制;标签变更自动重挂载</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 血缘 ================= -->
+    <div class="page" id="p-lineage">
+      <div class="card">
+        <div class="card-title">血缘检索 <span class="more">影响分析 / 溯源分析 / 字段级</span></div>
+        <div class="searchbox">
+          <input class="input" style="flex:1" placeholder="输入表名 / 字段名,查询上下游影响(如: dwd_order_detail)">
+          <select class="input"><option>影响分析(下游)</option><option>溯源分析(上游)</option></select>
+          <button class="btn">查询</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">DWD_订单明细 · 全链路血缘(DAG,存储于 Neo4j)</div>
+        <div class="lineage">
+          <div class="lg">
+            <div class="lg-node src"><div class="n">t_order</div><div class="s">ERP</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node src"><div class="n">t_payment</div><div class="s">ERP</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node ods"><div class="n">ODS_订单</div><div class="s">CDC 采集</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node dwd"><div class="n">DWD_订单明细</div><div class="s">MERGE INTO</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node down"><div class="n">sub-erp-trade</div><div class="s">订阅·Push</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node down"><div class="n">ads_sales_daily</div><div class="s">报表</div></div>
+            <div class="lg-arrow">→</div>
+            <div class="lg-node down"><div class="n">BI 看板</div><div class="s">下游应用</div></div>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div class="kv"><span class="k">影响分析结果(下游)</span><span class="v">2 个订阅 · 1 张 ADS 表 · 1 个 BI 看板</span></div>
+          <div class="kv"><span class="k">溯源分析结果(上游)</span><span class="v">ERP.t_order(9字段) · ERP.t_payment(6字段) · 字段级映射 15 条</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 模型管理 ================= -->
+    <div class="page" id="p-model">
+      <div class="card">
+        <div class="card-title">统一模型(建模驱动:先建模、后同步)<span class="more"><button class="btn btn-sm">＋ 新建模型</button></span></div>
+        <table>
+          <tr><th>模型名称</th><th>分层</th><th>业务域</th><th>版本</th><th>状态</th><th>源表映射</th><th>操作</th></tr>
+          <tr><td>订单明细</td><td><span class="tag tag-blue">DWD</span></td><td>交易</td><td>v3.2</td><td><span class="tag tag-green">已发布</span></td><td>6/6 已映射(ERP 2 · CRM 4)</td><td><span class="link">映射配置</span></td></tr>
+          <tr><td>客户主数据</td><td><span class="tag tag-blue">DWD</span></td><td>交易</td><td>v2.1</td><td><span class="tag tag-green">已发布</span></td><td>3/3 已映射</td><td><span class="link">映射配置</span></td></tr>
+          <tr><td>库存汇总</td><td><span class="tag tag-purple">DWS</span></td><td>供应链</td><td>v1.0</td><td><span class="tag tag-green">已发布</span></td><td>2/2 已映射</td><td><span class="link">映射配置</span></td></tr>
+          <tr><td>物料主数据</td><td><span class="tag tag-blue">DWD</span></td><td>供应链</td><td>v0.9</td><td><span class="tag tag-orange">草稿</span></td><td><span class="tag tag-orange">2/3 待确认</span></td><td><span class="link">映射配置</span></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title">映射配置: t_order(ERP) → 订单明细模型 <span class="more">映射审批流: 提交 → 治理委员会审批 → 生效</span></div>
+        <table>
+          <tr><th>源字段</th><th>源类型</th><th>→</th><th>模型字段</th><th>目标类型</th><th>映射方式</th><th>转换规则</th><th>状态</th></tr>
+          <tr><td>order_id</td><td>BIGINT</td><td>→</td><td>order_id</td><td>BIGINT</td><td>直接映射</td><td>—</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>order_no</td><td>VARCHAR</td><td>→</td><td>order_no</td><td>VARCHAR(32)</td><td>直接映射</td><td>—</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>mobile</td><td>VARCHAR</td><td>→</td><td>customer_mobile</td><td>VARCHAR(16)</td><td>类型转换</td><td>trim + 长度校验</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>amount</td><td>DECIMAL</td><td>→</td><td>amount</td><td>DECIMAL(18,2)</td><td>类型转换</td><td>分→元</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>status</td><td>INT</td><td>→</td><td>status</td><td>INT</td><td>枚举映射</td><td>0→待支付 1→已支付 2→已完成</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>create_time</td><td>DATETIME</td><td>→</td><td>order_ts</td><td>TIMESTAMP</td><td>表达式计算</td><td>date_format('%Y-%m-%d %H:%i:%s')</td><td><span class="tag tag-green">已生效</span></td></tr>
+          <tr><td>remark</td><td>TEXT</td><td>→</td><td>—</td><td>—</td><td>—</td><td>不映射(丢弃)</td><td><span class="tag tag-gray">已忽略</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ================= 标签管理 ================= -->
+    <div class="page" id="p-tag">
+      <div class="card">
+        <div class="card-title">标签体系(五类标签 · 表级/记录级 · 异步队列打标)<span class="more"><button class="btn btn-sm">＋ 新建标签</button></span></div>
+        <table>
+          <tr><th>标签</th><th>类型</th><th>粒度</th><th>来源</th><th>挂载资产</th><th>状态</th></tr>
+          <tr><td>业务域=交易</td><td><span class="tag tag-blue">业务标签</span></td><td>表级</td><td>模型定义</td><td>128</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>来源系统=ERP</td><td><span class="tag tag-cyan">系统标签</span></td><td>表级</td><td>采集自动继承</td><td>86</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>质量=A</td><td><span class="tag tag-green">质量标签</span></td><td>表级</td><td>质量探针</td><td>210</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>敏感:手机号</td><td><span class="tag tag-orange">敏感标签</span></td><td>字段/记录级</td><td>ML 模型检测</td><td>34</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>规则:大促核心</td><td><span class="tag tag-purple">自定义标签</span></td><td>表级</td><td>规则引擎: 业务域=交易 AND 订单量&gt;1000/日</td><td>5</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>疑似PII</td><td><span class="tag tag-orange">敏感标签</span></td><td>记录级</td><td>ML 模型检测</td><td>—</td><td><span class="tag tag-orange">试用中</span></td></tr>
+        </table>
+        <div style="margin-top:14px;font-size:12px;color:var(--text-2)">标签变更 → 目录动态重挂载 + 订阅重评估(漂移检测告警),防止静默失效</div>
+      </div>
+    </div>
+
+    <!-- ================= 订阅中心 ================= -->
+    <div class="page" id="p-sub">
+      <div class="card">
+        <div class="flex-between" style="margin-bottom:14px">
+          <div style="display:flex;gap:8px">
+            <span class="pill" style="background:var(--primary);color:#fff">全部 47</span>
+            <span class="pill">运行中 41</span>
+            <span class="pill">审批中 3</span>
+            <span class="pill">暂停 3</span>
+          </div>
+          <button class="btn" onclick="go('p-sub-create')">＋ 新建订阅</button>
+        </div>
+        <div class="searchbox">
+          <input class="input" style="flex:1" placeholder="搜索订阅名称 / 标签条件…">
+          <select class="input"><option>全部形态</option><option>逻辑视图</option><option>物理同步</option></select>
+          <select class="input"><option>全部模式</option><option>Push</option><option>Pull</option></select>
+          <button class="btn btn-ghost">重置</button>
+        </div>
+        <table>
+          <tr><th>订阅名称</th><th>条件(标签表达式)</th><th>形态</th><th>模式</th><th>接收方</th><th>密级上限</th><th>延迟/水位</th><th>状态</th><th>操作</th></tr>
+          <tr>
+            <td><span class="link" onclick="go('p-sub-detail')">sub-erp-trade</span></td>
+            <td style="font-family:ui-monospace,monospace;font-size:12px">来源系统=ERP AND 业务域=交易</td>
+            <td>物理同步</td><td><span class="tag tag-blue">Push</span></td><td>华东子节点</td>
+            <td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">8.5min</span></td>
+            <td><span class="status-dot s-run"></span>运行中</td>
+            <td><span class="link">详情</span> · <span class="link">暂停</span></td>
+          </tr>
+          <tr>
+            <td><span class="link">sub-fin-cn</span></td>
+            <td style="font-family:ui-monospace,monospace;font-size:12px">业务域=财务 AND 密级≤内部</td>
+            <td>物理同步</td><td><span class="tag tag-blue">Push</span></td><td>华北子节点</td>
+            <td><span class="secret sec-2">内部</span></td><td>—</td>
+            <td><span class="status-dot s-pending"></span>审批中</td>
+            <td><span class="link">审批</span></td>
+          </tr>
+          <tr>
+            <td><span class="link">sub-stock-batch</span></td>
+            <td style="font-family:ui-monospace,monospace;font-size:12px">业务域=供应链 AND 分层=DWS</td>
+            <td>物理同步</td><td><span class="tag tag-purple">Pull</span></td><td>华南子节点</td>
+            <td><span class="secret sec-2">内部</span></td><td>位点:子节点维护</td>
+            <td><span class="status-dot s-run"></span>运行中</td>
+            <td><span class="link">详情</span> · <span class="link">暂停</span></td>
+          </tr>
+          <tr>
+            <td><span class="link">sub-crm-view</span></td>
+            <td style="font-family:ui-monospace,monospace;font-size:12px">业务域=交易 AND 主题=客户</td>
+            <td>逻辑视图</td><td><span class="tag tag-gray">Trino</span></td><td>华南子节点</td>
+            <td><span class="secret sec-2">内部</span></td><td>查询时强制</td>
+            <td><span class="status-dot s-run"></span>运行中</td>
+            <td><span class="link">详情</span> · <span class="link">暂停</span></td>
+          </tr>
+          <tr>
+            <td><span class="link">sub-scm-material</span></td>
+            <td style="font-family:ui-monospace,monospace;font-size:12px">来源系统=SCM</td>
+            <td>物理同步</td><td><span class="tag tag-purple">Pull</span></td><td>华中子节点</td>
+            <td><span class="secret sec-3">机密</span></td><td>位点:子节点维护</td>
+            <td><span class="status-dot s-pause"></span>暂停</td>
+            <td><span class="link">详情</span> · <span class="link">恢复</span></td>
+          </tr>
+        </table>
+        <div class="pager"><span>共 47 个订阅</span><span><span class="link">‹ 上一页</span> <span class="link">下一页 ›</span></span></div>
+      </div>
+    </div>
+
+    <!-- ================= 新建订阅 ================= -->
+    <div class="page" id="p-sub-create">
+      <div class="card">
+        <div class="steps">
+          <div class="step active" id="st1"><span class="num" id="st1n">1</span>定义订阅条件</div>
+          <div class="step-line"></div>
+          <div class="step" id="st2"><span class="num" id="st2n">2</span>形态与模式</div>
+          <div class="step-line"></div>
+          <div class="step" id="st3"><span class="num" id="st3n">3</span>投递配置</div>
+          <div class="step-line"></div>
+          <div class="step" id="st4"><span class="num" id="st4n">4</span>提交审批</div>
+        </div>
+
+        <!-- Step1 -->
+        <div id="wiz1">
+          <div class="card-title">订阅条件(标签组合,支持 AND / OR / NOT)</div>
+          <div class="cond-row"><span class="logic">WHERE</span>
+            <select class="input" style="width:150px"><option>来源系统</option><option>业务域</option><option>密级</option><option>主题</option><option>分层</option></select>
+            <select class="input" style="width:90px"><option>=</option><option>≠</option><option>≤</option><option>∈</option></select>
+            <select class="input" style="width:150px"><option>ERP</option><option>CRM</option><option>SCM</option><option>HRM</option></select>
+            <span style="flex:1"></span><span class="link">✕</span>
+          </div>
+          <div class="cond-row"><span class="logic">AND</span>
+            <select class="input" style="width:150px"><option>业务域</option><option>来源系统</option><option>密级</option><option>主题</option></select>
+            <select class="input" style="width:90px"><option>=</option><option>≠</option><option>≤</option></select>
+            <select class="input" style="width:150px"><option>交易</option><option>财务</option><option>供应链</option><option>人力</option></select>
+            <span style="flex:1"></span><span class="link">✕</span>
+          </div>
+          <div class="cond-row"><span class="logic">AND</span>
+            <select class="input" style="width:150px"><option>密级</option><option>来源系统</option><option>业务域</option></select>
+            <select class="input" style="width:90px"><option>≠</option><option>=</option><option>≤</option></select>
+            <select class="input" style="width:150px"><option>机密</option><option>绝密</option></select>
+            <span style="flex:1"></span><span class="link">✕</span>
+          </div>
+          <div style="margin-bottom:14px"><span class="link">＋ 添加条件</span> <span class="link" style="margin-left:16px">＋ 添加分组 ( )</span></div>
+          <div style="display:flex;gap:16px">
+            <div style="flex:1">
+              <div class="card-title" style="font-size:13px">表达式预览(编译结果)</div>
+              <div class="expr-box"><b>来源系统=ERP</b> AND <b>业务域=交易</b> AND <b>密级≠机密</b><br>→ 命中 5 个数据集,投递密级上限: <b>内部</b></div>
+            </div>
+            <div style="flex:1">
+              <div class="card-title" style="font-size:13px">命中数据集(实时预览)</div>
+              <div class="expr-hit">
+                ✔ DWD_订单明细(ERP, 内部)<br>✔ DWD_订单支付(ERP, 内部)<br>✔ DWS_订单汇总(ERP+CRM, 内部)<br>✔ ODS_订单(ERP, 内部)<br>✔ ADS_销售日报(ERP, 公开)<br>
+                <span style="color:#8c8c8c">✘ DWD_客户主数据(密级=机密,已排除)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step2 -->
+        <div id="wiz2" style="display:none">
+          <div class="card-title">订阅形态与模式</div>
+          <div class="radio-card" id="rc-form1">
+            <div><span class="check"></span><div class="t">逻辑视图订阅</div>
+            <div class="d">无数据流、无副本。订阅生效后自动开通 Trino 查询权限(Ranger 表/列/行级),子节点通过 SQL 联邦查询访问,权限与脱敏在查询时强制。适合探查、轻量消费。</div></div>
+          </div>
+          <div class="radio-card mt8" id="rc-form2" onclick="toggleForm(this)">
+            <div><span class="check"></span><div class="t">物理同步订阅</div>
+            <div class="d">数据实际分发到子节点。支持 Push(中央直连子节点 HTTP 接口,分钟级,中央维护推送位点)与 Pull(子节点 API 拉取,位点子节点维护)。适合核心业务与大批量离线。</div></div>
+          </div>
+          <div id="mode-box" style="display:none">
+            <div class="card-title mt16" style="font-size:13px">分发模式</div>
+            <div class="radio-card" id="rc-mode1" onclick="toggleMode(this,'push')"><div><span class="check"></span><div class="t">Push 主动推送</div><div class="d">中央推送中心读 Iceberg 增量,批量同步完成后直连子节点 HTTP 接口投递。位点由中央维护,断点续传自动重推未确认区间。延迟 = 湖仓可见性(分钟级)。</div></div></div>
+            <div class="radio-card mt8" id="rc-mode2" onclick="toggleMode(this,'pull')"><div><span class="check"></span><div class="t">Pull 订阅方拉取</div><div class="d">子节点通过 API 主动拉取增量数据,位点由子节点自行维护,中央无状态。适合大批量离线同步。</div></div></div>
+          </div>
+          <div class="form-item mt16" style="max-width:320px">
+            <label>接收密级上限(审批时锁定,高密级数据不进入投递流)</label>
+            <select class="input" style="width:100%"><option>内部</option><option>公开</option><option>机密</option><option>绝密</option></select>
+          </div>
+        </div>
+
+        <!-- Step3 -->
+        <div id="wiz3" style="display:none">
+          <div class="card-title">投递配置</div>
+          <div id="cfg-push">
+            <div class="form-item" style="max-width:520px"><label>子节点接收接口 (HTTP POST /api/sink)</label><input class="input" style="width:100%" value="https://child-east.internal:8443/api/sink"></div>
+            <div class="row">
+              <div class="form-item"><label>重试策略</label><select class="input"><option>指数退避,最多 5 次</option><option>固定间隔,最多 10 次</option></select></div>
+              <div class="form-item"><label>批次大小</label><select class="input"><option>1,000 条/批</option><option>5,000 条/批</option><option>10,000 条/批</option></select></div>
+              <div class="form-item"><label>投递格式</label><select class="input"><option>JSON</option><option>Avro</option><option>Parquet(文件)</option></select></div>
+            </div>
+            <div style="font-size:12px;color:var(--text-2);background:#f7f9fc;border-radius:8px;padding:12px">接口约定: 请求体含 (订阅ID, 逻辑表, 起始/结束水位, <b>密级标签(强制携带)</b>, 数据行);响应 200 视为确认,中央推进位点;失败重试,子节点不可达时水位暂停、数据留在 Iceberg 不积压。</div>
+          </div>
+          <div id="cfg-pull" style="display:none">
+            <div style="font-size:12.5px;color:var(--text-2);background:#f7f9fc;border-radius:8px;padding:14px;line-height:1.9">Pull 模式无需投递配置。订阅生效后,子节点通过 <b>GET /api/subscriptions/{id}/incremental?after={位点}&limit=1000</b> 拉取增量,响应含新位点游标。位点由子节点维护,中央无状态。首次拉取可用 <b>snapshot</b> 参数获取全量快照。</div>
+          </div>
+          <div id="cfg-view" style="display:none">
+            <div style="font-size:12.5px;color:var(--text-2);background:#f7f9fc;border-radius:8px;padding:14px;line-height:1.9">逻辑视图订阅无需投递配置。生效后自动在 Ranger 创建查询策略(表/列/行级,继承接收密级上限),子节点通过 Trino 联邦查询访问。<b>密级与脱敏在查询时强制</b>,无数据副本。</div>
+          </div>
+        </div>
+
+        <!-- Step4 -->
+        <div id="wiz4" style="display:none">
+          <div class="card-title">确认并提交审批</div>
+          <div style="max-width:560px">
+            <div class="kv"><span class="k">订阅名称</span><span class="v">sub-erp-trade-east</span></div>
+            <div class="kv"><span class="k">订阅条件</span><span class="v" style="font-family:ui-monospace,monospace">来源系统=ERP AND 业务域=交易 AND 密级≠机密</span></div>
+            <div class="kv"><span class="k">命中数据集</span><span class="v">5 个(见条件预览)</span></div>
+            <div class="kv"><span class="k">形态 / 模式</span><span class="v">物理同步 / Push</span></div>
+            <div class="kv"><span class="k">接收方</span><span class="v">华东子节点 (child-east.internal)</span></div>
+            <div class="kv"><span class="k">密级上限</span><span class="v"><span class="secret sec-2">内部</span></span></div>
+            <div class="kv"><span class="k">审批人</span><span class="v">数据治理委员会</span></div>
+            <div style="margin-top:8px;font-size:12px;color:var(--text-3)">提交后进入审批流;通过后自动编译 plan(数据集快照)并开始投递。标签变更将触发订阅重评估与通知。</div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;margin-top:20px">
+          <button class="btn btn-ghost" id="btn-prev" onclick="wizStep(-1)" style="visibility:hidden">上一步</button>
+          <button class="btn" id="btn-next" onclick="wizStep(1)">下一步</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 订阅详情 ================= -->
+    <div class="page" id="p-sub-detail">
+      <div class="card">
+        <div class="flex-between">
+          <div>
+            <div style="font-size:18px;font-weight:700">sub-erp-trade <span class="tag tag-blue" style="vertical-align:middle">Push</span> <span class="tag tag-gray" style="vertical-align:middle">物理同步</span></div>
+            <div style="color:var(--text-3);font-size:12px;margin-top:4px">华东子节点 · 密级上限 <span class="secret sec-2">内部</span> · 创建于 2026-08-20</div>
+            <div style="margin-top:8px"><span class="tag tag-gray" style="font-family:ui-monospace,monospace">来源系统=ERP AND 业务域=交易 AND 密级≠机密</span></div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-ghost">暂停</button>
+            <button class="btn">立即推送</button>
+          </div>
+        </div>
+      </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat"><div class="l">湖可见延迟</div><div class="v" style="font-size:22px">8.5 <small style="font-size:13px">min</small></div><div class="d">目标 ≤ 15 min</div></div>
+        <div class="stat"><div class="l">推送位点(中央维护)</div><div class="v" style="font-size:22px">18,241,035</div><div class="d">DWD_订单明细 · seq</div></div>
+        <div class="stat"><div class="l">投递成功率 (30d)</div><div class="v" style="font-size:22px;color:#52c41a">99.97%</div><div class="d">重试占比 0.4%</div></div>
+        <div class="stat"><div class="l">未确认区间</div><div class="v" style="font-size:22px">0</div><div class="d">无积压(读 Iceberg 重放)</div></div>
+      </div>
+      <div class="row">
+        <div class="col" style="flex:2">
+          <div class="card">
+            <div class="card-title">投递流水(delivery_log,审计留痕含密级)<span class="more">导出</span></div>
+            <table>
+              <tr><th>时间</th><th>逻辑表</th><th>水位区间</th><th>密级</th><th>结果</th><th>耗时</th><th>重试</th></tr>
+              <tr><td>13:35:02</td><td>DWD_订单明细</td><td>18240011 → 18241035</td><td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">成功</span></td><td>2.3s</td><td>0</td></tr>
+              <tr><td>13:30:00</td><td>DWD_订单明细</td><td>18238990 → 18240010</td><td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">成功</span></td><td>2.1s</td><td>0</td></tr>
+              <tr><td>13:25:03</td><td>DWD_订单支付</td><td>9012044 → 9012188</td><td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">成功</span></td><td>1.7s</td><td>0</td></tr>
+              <tr><td>13:15:40</td><td>DWD_订单明细</td><td>18237010 → 18238989</td><td><span class="secret sec-2">内部</span></td><td><span class="tag tag-orange">超时→重试→成功</span></td><td>9.8s</td><td>1</td></tr>
+              <tr><td>13:10:02</td><td>DWS_订单汇总</td><td>450120 → 450321</td><td><span class="secret sec-2">内部</span></td><td><span class="tag tag-green">成功</span></td><td>3.0s</td><td>0</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          <div class="card">
+            <div class="card-title">订阅成员(plan 快照)</div>
+            <div style="font-size:12.5px;line-height:2.2">
+              ✔ DWD_订单明细<br>✔ DWD_订单支付<br>✔ DWS_订单汇总<br>✔ ODS_订单<br>✔ ADS_销售日报
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:var(--text-3)">成员变更(标签漂移/下线)将通知订阅方确认</div>
+          </div>
+          <div class="card">
+            <div class="card-title">断点续传</div>
+            <div class="kv"><span class="k">最近重试</span><span class="v">13:15(超时,1次后成功)</span></div>
+            <div class="kv"><span class="k">子节点不可达时长</span><span class="v">0(近30d)</span></div>
+            <div class="kv"><span class="k">恢复策略</span><span class="v">按水位重读 Iceberg</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 权限管理 ================= -->
+    <div class="page" id="p-perm">
+      <div class="card">
+        <div class="card-title">权限策略(Apache Ranger 集中配置)<span class="more"><button class="btn btn-sm">＋ 新建策略</button></span></div>
+        <table>
+          <tr><th>策略</th><th>资源</th><th>粒度</th><th>权限</th><th>脱敏</th><th>适用角色/子节点</th><th>状态</th></tr>
+          <tr><td>华东子节点-订单查询</td><td>DWD_订单明细</td><td><span class="tag tag-blue">表级+行级</span></td><td>SELECT</td><td><span class="tag tag-orange">手机号掩码</span></td><td>华东子节点</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>财务分析组</td><td>DWD_*</td><td><span class="tag tag-blue">表级</span></td><td>SELECT</td><td><span class="tag tag-orange">金额脱敏</span></td><td>role: finance-analyst</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>行级过滤-华东</td><td>DWD_订单明细</td><td><span class="tag tag-purple">行级</span></td><td>SELECT</td><td>—</td><td>region='east'</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>列级-手机号</td><td>DWD_客户主数据</td><td><span class="tag tag-purple">列级</span></td><td>SELECT</td><td><span class="tag tag-orange">掩码+加密</span></td><td>除数据Owner外</td><td><span class="tag tag-green">启用</span></td></tr>
+          <tr><td>sub-scm-material</td><td>DWS_库存汇总</td><td>订阅策略</td><td>投递</td><td>—</td><td>华中子节点</td><td><span class="tag tag-orange">订阅关联</span></td></tr>
+        </table>
+        <div style="margin-top:14px;font-size:12px;color:var(--text-2)">订阅审批通过时自动创建 Ranger 策略(逻辑视图)或绑定投递密级上限(物理同步);数据分发强制携带密级标签,审计可追溯。</div>
+      </div>
+    </div>
+
+    <!-- ================= 采集任务 ================= -->
+    <div class="page" id="p-task">
+      <div class="card">
+        <div class="card-title">采集与同步任务(SeaTunnel CDC → MySQL 缓冲 → Iceberg)<span class="more"><button class="btn btn-sm">＋ 新建任务</button></span></div>
+        <table>
+          <tr><th>任务</th><th>源</th><th>目标</th><th>模式</th><th>延迟</th><th>状态</th><th>操作</th></tr>
+          <tr><td>ERP-订单-全量+CDC</td><td>ERP.t_order</td><td>MySQL缓冲 → ODS_订单 → DWD_订单明细</td><td><span class="tag tag-blue">CDC</span></td><td><span class="tag tag-green">1.8s</span></td><td><span class="status-dot s-run"></span>运行中</td><td><span class="link">详情</span> · <span class="link">停止</span></td></tr>
+          <tr><td>CRM-客户-CDC</td><td>CRM.t_customer</td><td>MySQL缓冲 → DWD_客户主数据</td><td><span class="tag tag-blue">CDC</span></td><td><span class="tag tag-green">2.2s</span></td><td><span class="status-dot s-run"></span>运行中</td><td><span class="link">详情</span></td></tr>
+          <tr><td>SCM-库存-批量</td><td>SCM.t_stock</td><td>MySQL缓冲 → DWS_库存汇总</td><td><span class="tag tag-gray">全量</span></td><td>—</td><td><span class="status-dot s-pending"></span>调度中</td><td><span class="link">详情</span></td></tr>
+          <tr><td>MySQL→Iceberg 批量</td><td>MySQL缓冲(全部分片)</td><td>Iceberg 湖仓</td><td><span class="tag tag-purple">Batch 5-15min</span></td><td><span class="tag tag-blue">7.2min</span></td><td><span class="status-dot s-run"></span>运行中</td><td><span class="link">详情</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function go(page){
+  if(location.hash !== '#'+page){ try{history.replaceState(null,'','#'+page);}catch(e){} }
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById(page).classList.add('active');
+  document.querySelectorAll('.menu-item').forEach(m=>m.classList.remove('active'));
+  document.querySelector(`.menu-item[data-page="${page}"]`).classList.add('active');
+  var names={'p-overview':'平台总览','p-catalog':'资产目录','p-asset':'资产详情','p-lineage':'数据血缘','p-model':'模型管理','p-tag':'标签管理','p-sub':'订阅中心','p-sub-create':'新建订阅','p-sub-detail':'订阅详情','p-perm':'权限管理','p-task':'采集任务'};
+  document.getElementById('crumb').innerHTML=names[page]+' <small>Central Node / 中央节点</small>';
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    var box=t.parentElement.parentElement;
+    box.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    box.querySelectorAll('[id^="t"]').forEach(x=>x.style.display='none');
+    document.getElementById(t.dataset.tab).style.display='block';
+  });
+});
+function switchView(v){
+  ['biz','src','sec'].forEach(x=>{document.getElementById('tree-'+x).style.display = x===v?'block':'none';document.getElementById('view-'+x).style.background = x===v?'var(--primary)':'#f0f0f0';document.getElementById('view-'+x).style.color = x===v?'#fff':'var(--text-2)';});
+}
+var step=1;
+function wizStep(d){
+  step+=d; if(step<1)step=1; if(step>4)step=4;
+  for(var i=1;i<=4;i++){
+    document.getElementById('wiz'+i).style.display = i===step?'block':'none';
+    document.getElementById('st'+i).classList.toggle('active',i===step);
+    document.getElementById('st'+i).classList.toggle('done',i<step);
+  }
+  document.getElementById('btn-prev').style.visibility = step>1?'visible':'hidden';
+  document.getElementById('btn-next').textContent = step===4?'提交审批':'下一步';
+}
+function toggleForm(el){
+  document.getElementById('rc-form1').classList.remove('sel');
+  el.classList.add('sel');
+  document.getElementById('mode-box').style.display='block';
+  document.getElementById('cfg-push').style.display='none';
+  document.getElementById('cfg-pull').style.display='none';
+  document.getElementById('cfg-view').style.display='none';
+}
+function toggleMode(el,mode){
+  document.getElementById('rc-mode1').classList.remove('sel');
+  document.getElementById('rc-mode2').classList.remove('sel');
+  el.classList.add('sel');
+  document.getElementById('cfg-push').style.display = mode==='push'?'block':'none';
+  document.getElementById('cfg-pull').style.display = mode==='pull'?'block':'none';
+}
+(function init(){
+  var q=new URLSearchParams(location.search).get('p');
+  var p=q || (location.hash||'#p-overview').slice(1);
+  if(document.getElementById(p)){ go(p); }
+})();
+</script>
+</body>
+</html>

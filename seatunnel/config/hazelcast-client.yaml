@@ -1,0 +1,7 @@
+hazelcast-client:
+  cluster-name: seatunnel
+  network:
+    cluster-members:
+      - seatunnel:5801
+  properties:
+    hazelcast.logging.type: log4j2

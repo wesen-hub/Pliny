@@ -1,0 +1,53 @@
+# SeaTunnel Zeta 引擎配置（基于发行包默认, REST 端口改 8081, checkpoint 本地存储）
+seatunnel:
+  engine:
+    classloader-cache-mode: true
+    history-job-expire-minutes: 1440
+    backup-count: 1
+    queue-type: blockingqueue
+    print-execution-info-interval: 60
+    print-job-metrics-info-interval: 60
+    job-metrics-backup-interval: 1
+    slot-service:
+      dynamic-slot: true
+    checkpoint:
+      interval: 10000
+      timeout: 60000
+      storage:
+        type: hdfs
+        max-retained: 3
+        plugin-config:
+          namespace: /tmp/seatunnel/checkpoint_snapshot
+          storage.type: hdfs
+          fs.defaultFS: file:///tmp/ # Ensure that the directory has written permission
+    telemetry:
+      metric:
+        enabled: false
+      logs:
+        scheduled-deletion-enable: true
+    http:
+      enable-http: true
+      port: 8081
+      enable-dynamic-port: false
+
+hazelcast:
+  cluster-name: seatunnel
+  network:
+    rest-api:
+      enabled: true
+      endpoint-groups:
+        CLUSTER_WRITE:
+          enabled: true
+        DATA:
+          enabled: true
+    join:
+      tcp-ip:
+        enabled: true
+        member-list:
+          - seatunnel:5801
+    port:
+      auto-increment: false
+      port: 5801
+      port-count: 100
+  properties:
+    hazelcast.logging.type: log4j2

@@ -1,0 +1,21 @@
+hazelcast:
+  cluster-name: seatunnel
+  network:
+    rest-api:
+      enabled: true
+      endpoint-groups:
+        CLUSTER_WRITE:
+          enabled: true
+        DATA:
+          enabled: true
+    join:
+      tcp-ip:
+        enabled: true
+        member-list:
+          - seatunnel:5801
+    port:
+      auto-increment: false
+      port: 5801
+      port-count: 100
+  properties:
+    hazelcast.logging.type: log4j2

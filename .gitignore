@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# 构建产物
+backend/target/
+frontend/node_modules/
+frontend/dist/
+agent/target/
+dist/
+seatunnel/dist/
+
+# 演示挂载目录(容器运行期数据; 仅保留目录骨架)
+demo-agent-dir/*
+!demo-agent-dir/.gitkeep
+
+# 杂项
+*.log
+nohup.out

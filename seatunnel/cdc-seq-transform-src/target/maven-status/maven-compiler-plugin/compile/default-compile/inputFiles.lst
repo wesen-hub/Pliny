@@ -1,0 +1,4 @@
+/app/plugin/src/main/java/com/dcp/seatunnel/transform/CdcSeqTransform.java
+/app/plugin/src/main/java/com/dcp/seatunnel/transform/CdcSeqTransformConfig.java
+/app/plugin/src/main/java/com/dcp/seatunnel/transform/CdcSeqTransformFactory.java
+/app/plugin/src/main/java/com/dcp/seatunnel/transform/RouteUtil.java
