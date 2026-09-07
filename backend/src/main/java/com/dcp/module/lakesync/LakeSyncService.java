@@ -524,7 +524,12 @@ public class LakeSyncService {
             long id = ((Number) t.get("id")).longValue();
             if (((Number) t.get("enabled")).intValue() != 1) continue;
             if (!"running".equals(t.get("status"))) continue;
-            java.sql.Timestamp last = (java.sql.Timestamp) t.get("last_auto_run_at");
+            // MySQL 驱动 DATETIME 列经 JdbcTemplate 返回 LocalDateTime(非 Timestamp); 兼容两种
+            java.sql.Timestamp last;
+            Object lastRaw = t.get("last_auto_run_at");
+            if (lastRaw instanceof java.sql.Timestamp ts) last = ts;
+            else if (lastRaw instanceof LocalDateTime ldt) last = java.sql.Timestamp.valueOf(ldt);
+            else last = null;
             boolean due;
             if ("cron".equals(t.get("schedule"))) {
                 due = cronMatch(String.valueOf(t.get("cron_expr")), now) && (last == null || last.toLocalDateTime().isBefore(minuteStart));
