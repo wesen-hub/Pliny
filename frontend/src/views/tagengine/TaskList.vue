@@ -1,7 +1,7 @@
 <template>
   <div class="page-card">
     <el-alert type="info" :closable="false" show-icon style="margin-bottom:14px"
-      title="打标引擎 V1 · 页面设计稿(mock): 打标任务 = 数据集 + 规则/脚本(可视化 | SQL | Spark 脚本) → 统一任务模型/调度/版本/护栏/血缘; 标签事实统一存储, 任务间隔离" />
+      title="打标引擎 V1 · 设计稿(mock 数据): 真后端请用菜单「标签注册表 V2 / 规则库 V2 / 打标任务 V2」(已接 /api/tagengine/*); 本页仅供 V1 形态参考" />
 
     <el-card shadow="never">
       <div class="toolbar">
@@ -18,7 +18,7 @@
         </div>
         <div>
           <el-button @click="toast('规则模板库(mock)')">规则模板</el-button>
-          <el-button type="warning" @click="router.push('/tagengine/task/create')">＋ 新建打标任务</el-button>
+          <el-button type="warning" @click="router.push('/tagengine2/task/create')">＋ 新建打标任务(去 V2)</el-button>
         </div>
       </div>
 
