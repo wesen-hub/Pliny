@@ -17,7 +17,8 @@
           <el-input v-model="q" size="small" placeholder="输入节点名定位: customer_wide / amount / 订阅 #34" style="width:300px" clearable @keyup.enter="locate()">
             <template #prefix>🔍</template>
           </el-input>
-          <el-button size="small" type="primary" plain @click="focusField()">聚焦 amount 子图</el-button>
+          <el-button size="small" type="primary" plain @click="focusField('FAMT')">聚焦 amount(3 源合流)</el-button>
+          <el-button size="small" type="danger" plain @click="focusField('FPH')">聚焦敏感 phone</el-button>
           <el-button size="small" @click="clearFocus()">清除聚焦</el-button>
           <el-button size="small" @click="toggleFields()">{{ fieldOn ? '字段: 收起' : '字段: 展开' }}</el-button>
           <el-button size="small" @click="locate()">定位</el-button>
@@ -51,16 +52,20 @@
 
     <!-- ===== ② 字段映射矩阵 ===== -->
     <div v-show="tab === 'matrix'" class="lg-view page-card">
-      <div class="pg-title">字段级血缘矩阵<el-tag size="small" effect="plain" style="margin-left:8px">标准方案 §5.4</el-tag></div>
-      <div class="dim2" style="margin:6px 0 10px">目标: customer_wide ← field_mapping / 规则产出 · 合流行标注多源</div>
-      <el-table :data="matrix" size="small" border max-height="560">
-        <el-table-column prop="target" label="目标字段" width="130"><template #default="{ row }"><b>{{ row.target }}</b> <span v-if="row.merge" style="color:#fa8c16">⚠{{ row.merge }}</span></template></el-table-column>
-        <el-table-column prop="src" label="源字段" />
-        <el-table-column label="转换类型" width="110"><template #default="{ row }"><el-tag size="small" :type="row.t === '直映射' ? 'primary' : row.t === '多源合流' ? 'warning' : 'danger'" effect="plain">{{ row.t }}</el-tag></template></el-table-column>
-        <el-table-column prop="rule" label="转换规则" />
-        <el-table-column prop="from" label="来源" width="150" />
+      <div class="pg-title">字段级血缘矩阵<el-tag size="small" effect="plain" style="margin-left:8px">一行 = 一条来源边</el-tag></div>
+      <div class="dim2" style="margin:6px 0 10px">目标: customer_wide · 同一目标字段多条来源 = 多行(合流), 每行独立: 源系统/任务/转换/策略/优先级</div>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:8px" title="amount = 3 条来源边(3 行): 源① 系统A 直映射(主) / 源② 系统B 合流(后写覆盖) / 源③ 规则 r4 派生写回 —— 修改任一来源沿各自行评估影响" />
+      <el-table :data="matrix" size="small" border max-height="560" :span-method="mSpan">
+        <el-table-column label="目标字段" width="150"><template #default="{ row }"><b>{{ row.target }}</b></template></el-table-column>
+        <el-table-column label="来源序号" width="90"><template #default="{ row }"><el-tag v-if="row.tag" size="small" :type="row.tagType || 'info'" effect="plain">{{ row.tag }}</el-tag><span v-else class="dim2">—</span></template></el-table-column>
+        <el-table-column label="源(系统.表.列)" min-width="180"><template #default="{ row }"><span class="mono2">{{ row.src }}</span><div class="dim2">{{ row.task }}</div></template></el-table-column>
+        <el-table-column label="转换类型" width="100"><template #default="{ row }"><el-tag size="small" :type="row.t === '直映射' ? 'primary' : row.t === '派生/规则产出' ? 'danger' : 'warning'" effect="plain">{{ row.t }}</el-tag></template></el-table-column>
+        <el-table-column prop="rule" label="转换规则" min-width="140" />
+        <el-table-column label="合并策略" width="110"><template #default="{ row }"><span v-if="row.strategy">{{ row.strategy }}</span><span v-else class="dim2">—</span></template></el-table-column>
+        <el-table-column label="优先级" width="80"><template #default="{ row }"><span v-if="row.pri">{{ row.pri }}</span><span v-else class="dim2">—</span></template></el-table-column>
         <el-table-column label="密级" width="70"><template #default="{ row }"><el-tag size="small" :type="row.secret === 'L3' ? 'danger' : 'info'" effect="plain">{{ row.secret }}</el-tag></template></el-table-column>
       </el-table>
+      <div class="dim2" style="margin-top:6px">约定: 一行=一条 FIELD_MAPPING/PRODUCES 边(与血缘图字段级边一一对应); 同目标字段多行=水平合流, 无垂直主从之分, 仅标注优先级与覆盖策略</div>
     </div>
 
     <!-- ===== ③ 影响分析 ===== -->
@@ -179,6 +184,7 @@ const NODES = [
   { id: 'S34', k: 'sub', x: 1060, y: 80, icon: '📮', label: '订阅 #34', sub: 'dwh-batch · pull', own: '王工' },
   { id: 'S47', k: 'sub', x: 1060, y: 190, icon: '📮', label: '订阅 #47', sub: 'mkt-ext · 宽表回表', own: '李敏' },
   { id: 'S48', k: 'sub', x: 1060, y: 300, icon: '📮', label: '订阅 #48', sub: 'mkt-k · push', own: '李敏' },
+  { id: 'TAG', k: 'tag', x: 950, y: 240, icon: '🏷', label: '标签 · 金额档', sub: 'registry', own: '张工' },
   { id: 'BI', k: 'app', x: 1060, y: 430, icon: '📊', label: 'BI 经营分析', sub: 'REPORT 预留', own: '陈工' },
   { id: 'API', k: 'app', x: 1060, y: 530, icon: '🔌', label: '订单 API', sub: 'API 预留', own: '李工' },
   { id: 'SEARCH', k: 'app', x: 1060, y: 630, icon: '🔎', label: '检索服务', sub: 'SEARCH 预留', own: '陈工' },
@@ -196,18 +202,30 @@ const EDGES = [
   { f: 'R4', to: 'CW', t: 'prod', l: 'net_amt−fee→amount 派生③', amt: 1 },
   { f: 'CW', to: 'S34', t: 'sub', l: '6列视图 amount≥5000', amt: 1 },
   { f: 'CW', to: 'S47', t: 'sub', l: '宽表回表(含 amount)', amt: 1 },
-  { f: 'CW', to: 'S48', t: 'sub', l: '经标签 金额档', amt: 1 },
   { f: 'CW', to: 'BI', t: 'chain', l: '经 r1→dws_weekly', amt: 1 },
   { f: 'CW', to: 'API', t: 'reserve', l: '预留' },
   { f: 'CW', to: 'SEARCH', t: 'reserve', l: '预留' },
   { f: 'CW', to: 'LAKE', t: 'sub', l: '15min 快照' },
-  { f: 'CW', to: 'R1', t: 'chain', l: 'amount→金额档', amt: 1 },
+  { f: 'CW', to: 'R1', t: 'chain', l: 'amount→金额档判定', amt: 1 },
   { f: 'R1', to: 'DWS', t: 'chain', l: '金额档→周聚合', amt: 1 },
+  { f: 'R1', to: 'TAG', t: 'prod', l: '产出标签 金额档' },
+  { f: 'TAG', to: 'S48', t: 'sub', l: '标签矩阵圈选 · push' },
   { f: 'DWS', to: 'BI', t: 'chain', l: '周表→报表', amt: 1 }
 ]
+/* 字段级边(展开字段时显示; 真血缘: 与矩阵一行一边对应) */
+const FEDGES = [
+  { f: 'T12', to: 'FAMT', t: 'sync', l: 'user_balance→amount', amt: 1, src: '源①' },
+  { f: 'T21', to: 'FAMT', t: 'sync', l: 'bal→amount 后写覆盖', amt: 1, src: '源②' },
+  { f: 'R4', to: 'FAMT', t: 'prod', l: 'net_amt−fee→amount', amt: 1, src: '源③' },
+  { f: 'FAMT', to: 'S34', t: 'sub', l: '6列视图 amount≥5000', amt: 1 },
+  { f: 'FAMT', to: 'S47', t: 'sub', l: '宽表回表取 amount', amt: 1 },
+  { f: 'FAMT', to: 'R1', t: 'chain', l: '金额档判定入参', amt: 1 },
+  { f: 'T12', to: 'FPH', t: 'sync', l: 'phone 直映射(源敏感)', sen: 1 },
+  { f: 'FPH', to: 'LAKE', t: 'sub', l: '湖快照明文(治理项)', sen: 1, dash: 1 }
+]
 const COL = { sync: '#38bdf8', prod: '#c084fc', sub: '#34d399', chain: '#fbbf24', reserve: '#64748b' }
-const SZ = { sys: [168, 48], task: [150, 46], rule: [170, 50], core: [196, 74], sub: [172, 48], app: [172, 48], field: [128, 30] }
-const KT = { sys: ['系统', '#f59e0b'], task: ['同步任务', '#38bdf8'], rule: ['规则/加工', '#c084fc'], core: ['逻辑表', '#22d3ee'], sub: ['订阅', '#34d399'], app: ['应用(预留)', '#64748b'], field: ['字段', '#fbbf24'] }
+const SZ = { sys: [168, 48], task: [150, 46], rule: [170, 50], core: [196, 74], sub: [172, 48], app: [172, 48], field: [128, 30], tag: [150, 36] }
+const KT = { sys: ['系统', '#f59e0b'], task: ['同步任务', '#38bdf8'], rule: ['规则/加工', '#c084fc'], core: ['逻辑表', '#22d3ee'], sub: ['订阅', '#34d399'], app: ['应用(预留)', '#64748b'], field: ['字段', '#fbbf24'], tag: ['标签', '#fb923c'] }
 const legend = [
   { t: 'sync', n: '同步任务映射', c: '#38bdf8' }, { t: 'prod', n: '规则产出', c: '#c084fc' },
   { t: 'sub', n: '订阅消费', c: '#34d399' }, { t: 'chain', n: '长链路/加工', c: '#fbbf24' },
@@ -215,16 +233,26 @@ const legend = [
 ]
 
 /* ================= 子页数据 ================= */
+/* 一行 = 一条来源边(与图谱字段级边一一对应); 同目标字段多行=水平合流 */
 const matrix = [
-  { target: 'id', src: 'user_id', t: '直映射', rule: 'BIGINT', from: '系统A #12', secret: 'L1' },
-  { target: 'customer_id', src: 'user_id', t: '直映射', rule: '别名', from: '系统A #12', secret: 'L1' },
-  { target: 'phone', src: 'phone', t: '直映射', rule: 'VARCHAR', from: '系统A #12(源敏感)', secret: 'L3' },
-  { target: 'name', src: 'org_name+user_name', t: '拼接', rule: 'CONCAT(org,user)', from: '系统C #33', secret: 'L1' },
-  { target: 'amount', src: 'user_balance / bal', t: '多源合流', rule: '#12 直映射 + #21 后写覆盖', from: '系统A #12 + 系统B #21', secret: 'L2', merge: '合流' },
-  { target: 'amount', src: 'net_amt − fee', t: '规则产出', rule: 'r4: ≥5000 判定', from: '规则 r4 · 任务 T7', secret: 'L2' },
-  { target: 'region', src: 'region', t: '直映射', rule: 'VARCHAR', from: '系统A #12', secret: 'L1' },
-  { target: 'status', src: 'status', t: '直映射', rule: '枚举', from: '系统A #12', secret: 'L1' }
+  { target: 'id', src: 't_user_base.user_id', task: '系统A · 同步 #12', t: '直映射', rule: 'BIGINT', secret: 'L1' },
+  { target: 'customer_id', src: 't_user_base.user_id', task: '系统A · 同步 #12', t: '直映射', rule: '别名', secret: 'L1' },
+  { target: 'phone', src: 't_user_base.phone', task: '系统A · 同步 #12', t: '直映射', rule: 'VARCHAR(源敏感)', secret: 'L3' },
+  { target: 'name', src: 't_user_org.org + t_user_base.user', task: '系统C · 同步 #33', t: '拼接', rule: 'CONCAT(org,user)', secret: 'L1' },
+  { target: 'amount', mergeLabel: '合流 3 来源', tag: '源①', src: 't_user_base.user_balance', task: '系统A · 同步 #12', t: '直映射', rule: 'DECIMAL(12,2)', strategy: '主来源(占比最高)', pri: 'P1', secret: 'L2' },
+  { target: 'amount', tag: '源②', tagType: 'warning', src: 't_acct.bal', task: '系统B · 同步 #21', t: '直映射', rule: 'DECIMAL(12,2)', strategy: '合流 · 后写覆盖', pri: 'P2', secret: 'L2' },
+  { target: 'amount', tag: '源③', src: 'net_amt − fee', task: '规则 r4 · 任务 T7', t: '派生/规则产出', rule: '≥5000 判定写回', strategy: '派生写回', pri: 'P3', secret: 'L2' },
+  { target: 'region', src: 't_user_base.region', task: '系统A · 同步 #12', t: '直映射', rule: 'VARCHAR', secret: 'L1' },
+  { target: 'status', src: 't_user_base.status', task: '系统A · 同步 #12', t: '直映射', rule: '枚举', secret: 'L1' }
 ]
+const _mg = {}
+matrix.forEach((r, i) => { if (!(r.target in _mg)) _mg[r.target] = { start: i, len: 0 }; _mg[r.target].len++ })
+function mSpan({ row, rowIndex, columnIndex }) {
+  if (columnIndex !== 0) return
+  const g = _mg[row.target]
+  if (!g) return
+  return rowIndex === g.start ? { rowspan: g.len, colspan: 1 } : { rowspan: 0, colspan: 0 }
+}
 const traces = [
   { t: '路径 1 · 最终来源(主)', steps: [{ x: '系统A t_user_base.user_balance', k: 'src' }, { x: '直映射 #12', k: '' }, { x: 'customer_wide.net_amt', k: '' }, { x: '规则 r4 依赖', k: '' }, { x: '净支付额 net_amt−fee', k: 'tr' }, { x: 'customer_wide.amount', k: 'cur' }] },
   { t: '路径 2 · 备选来源(系统B 合流)', steps: [{ x: '系统B t_acct.bal', k: 'src' }, { x: '合流 #21 后写覆盖', k: '' }, { x: 'customer_wide.amount', k: 'cur' }] },
@@ -254,12 +282,13 @@ function build() {
   const svg = svgRef.value
   world = el('g'); world.id = 'world'; svg.appendChild(world)
   const defs = el('defs'); world.appendChild(defs)
-  EDGES.forEach((e, i) => {
-    const m = el('marker'); m.id = 'ar' + i; m.setAttribute('viewBox', '0 0 10 10'); m.setAttribute('refX', '9'); m.setAttribute('refY', '5')
+  let defsI = 0
+  allEdgeList().forEach((e) => {
+    const m = el('marker'); m.id = 'ar' + (defsI++); m.setAttribute('viewBox', '0 0 10 10'); m.setAttribute('refX', '9'); m.setAttribute('refY', '5')
     m.setAttribute('markerWidth', '6.5'); m.setAttribute('markerHeight', '6.5'); m.setAttribute('orient', 'auto')
     const p = el('path'); p.setAttribute('d', 'M0,0 L10,5 L0,10 z'); p.setAttribute('fill', COL[e.t]); m.appendChild(p); defs.appendChild(m)
     const g = el('g')
-    const path = el('path'); path.setAttribute('class', 'edge'); path.setAttribute('stroke', COL[e.t]); path.setAttribute('marker-end', 'url(#' + m.id + ')')
+    const path = el('path'); path.setAttribute('class', 'edge' + (e.dash ? ' dash' : '')); path.setAttribute('stroke', COL[e.t]); path.setAttribute('marker-end', 'url(#' + m.id + ')')
     const tx = el('text'); tx.setAttribute('class', 'el'); tx.textContent = e.l || ''
     g.appendChild(path); g.appendChild(tx); world.appendChild(g)
     e._p = path; e._t = tx; e._g = g
@@ -299,11 +328,14 @@ function paintNode(g, n, w, h) {
   const lb = g.querySelector('.lb'); lb.setAttribute('x', x + 4); lb.setAttribute('y', y - 2); lb.setAttribute('font-size', n.k === 'core' ? '13' : '11'); lb.textContent = n.label
   const sb = g.querySelector('.sb'); sb.setAttribute('x', x + 4); sb.setAttribute('y', y + 14); sb.setAttribute('text-anchor', 'middle'); sb.textContent = n.sub || ''
 }
+function allEdgeList() { return [...EDGES, ...FEDGES] }
 function refreshAll() {
-  EDGES.forEach(e => {
-    const a = NODES.find(x => x.id === e.f), b = NODES.find(x => x.id === e.to)
+  allEdgeList().forEach(e => {
+    if (e._g) e._g.style.display = (e.isF && !fieldOn) ? 'none' : ''
+    const a = allNodes().find(x => x.id === e.f), b = allNodes().find(x => x.id === e.to)
     if (!a || !b || !e._p) return
-    const fx = cx(a) + SZ[a.k][0] / 2, tx = cx(b) - SZ[b.k][0] / 2
+    const aW = (SZ[a.k] || [0, 0])[0], bW = (SZ[b.k] || [0, 0])[0]
+    const fx = cx(a) + aW / 2, tx = cx(b) - bW / 2
     e._p.setAttribute('d', `M${fx},${cy(a)} C${(fx + tx) / 2},${cy(a)} ${(fx + tx) / 2},${cy(b)} ${tx},${cy(b)}`)
     e._t.setAttribute('x', (fx + tx) / 2); e._t.setAttribute('y', Math.min(cy(a), cy(b)) - 4)
   })
@@ -337,19 +369,32 @@ function moveTip(ev) {
   const t = tipRef.value; const r = canvasRef.value.getBoundingClientRect()
   t.style.left = ev.clientX - r.left + 14 + 'px'; t.style.top = ev.clientY - r.top + 14 + 'px'
 }
-/* 聚焦/字段 */
-function focusField() {
+/* 聚焦/字段: 字段级子图(字段边真连线) */
+function focusField(id) {
+  id = id || 'FAMT'
   clearFocus()
-  EDGES.forEach(e => { const on = !!e.amt; e._p.classList.add(on ? 'hit' : 'dim'); e._t.style.display = on ? '' : 'none' })
-  const keep = ['A', 'T12', 'B', 'T21', 'R4', 'CW', 'S34', 'S47', 'S48', 'R1', 'DWS', 'BI']
-  NODES.forEach(n => { nodeEls[n.id].classList.add(keep.includes(n.id) ? 'hit' : 'dim') })
-  nodeEls['FAMT'].classList.add('hit')
-  ElMessage({ message: 'amount 子图高亮: 3 源 → 4 消费路径', type: 'info', duration: 1500 })
+  if (!fieldOn) { fieldOn = true; FIELDS.forEach(n => { n.nodeEl.style.display = '' }); refreshAll() }
+  const isPhone = id === 'FPH'
+  const hitE = FEDGES.filter(e => isPhone ? e.sen : e.amt)
+  if (!isPhone) {
+    ['CW→R1', 'R1→DWS', 'DWS→BI', 'R1→TAG', 'TAG→S48'].forEach(k => {
+      const e = EDGES.find(x => x.f + '→' + x.to === k)
+      if (e && !hitE.includes(e)) hitE.push(e)
+    })
+  }
+  allEdgeList().forEach(e => {
+    const on = hitE.includes(e)
+    e._p.classList.toggle('hit', on); e._p.classList.toggle('dim', !on)
+    e._t.style.display = on ? '' : 'none'
+  })
+  const keep = isPhone ? ['CW', 'T12', 'FPH', 'LAKE']
+    : ['CW', 'T12', 'T21', 'R4', 'FAMT', 'S34', 'S47', 'S48', 'R1', 'TAG', 'DWS', 'BI']
+  allNodes().forEach(n => { const en = nodeEls[n.id]; en.classList.toggle('hit', keep.includes(n.id)); en.classList.toggle('dim', !keep.includes(n.id)) })
+  ElMessage({ message: isPhone ? 'phone 敏感子图: #12 直映射 → 湖明文(治理项)' : 'amount 合流子图: 3 来源边 → 4 消费路径(字段级)', type: 'info', duration: 1800 })
 }
 function clearFocus() {
-  EDGES.forEach(e => { e._p.classList.remove('hit', 'dim'); e._t.style.display = '' })
-  NODES.forEach(n => nodeEls[n.id].classList.remove('hit', 'dim'))
-  nodeEls['FAMT'].classList.remove('hit')
+  allEdgeList().forEach(e => { e._p.classList.remove('hit', 'dim'); e._t.style.display = '' })
+  allNodes().forEach(n => nodeEls[n.id].classList.remove('hit', 'dim'))
 }
 function toggleFields() {
   fieldOn = !fieldOn
@@ -377,6 +422,7 @@ function selNode(n) {
     S34: { t: '📮 订阅 #34', m: 'dwh-batch · pull 定时', tabs: ['契约', '引用列'] },
     S48: { t: '📮 订阅 #48', m: 'mkt-k · push kafka · 经标签', tabs: ['契约', '血缘路径'] },
     DWS: { t: '▤ dws_weekly', m: '派生周汇总表', tabs: ['加工', '上下游'] },
+    TAG: { t: '🏷 标签 · 金额档', m: 'registry 注册标签 · 由规则 r1 产出', tabs: ['说明'] },
     BI: { t: '📊 BI 经营分析', m: 'REPORT 预留', tabs: ['说明'] },
     LAKE: { t: '⬇️ Iceberg 湖', m: '15min 快照', tabs: ['说明'] }
   }[n.id] || { t: n.label, m: (KT[n.k] || ['', ''])[0] + (n.own ? ' · Owner ' + n.own : ''), tabs: ['概要'] }
@@ -405,7 +451,8 @@ function pgHtml(n, i) {
     if (i === 0) return box('源① 系统A #12 user_balance → amount(直映射)<br>源② 系统B #21 bal → amount(合流 · 后写覆盖)<br>源③ 规则 r4 net_amt−fee → amount(派生)')
     return box('订阅 #34(6 列视图) / #47(宽表回表)<br>长链路: → r1 金额档 → dws_weekly → BI<br>共 4 条消费路径')
   }
-  if (n.id === 'FPH') return box(i === 0 ? '系统A #12: phone → phone(源敏感直映射)' : '详情/预览 mask(138****1234)<br>湖快照明文(治理项)<br>契约 #50 待复核')
+  if (n.id === 'FPH') return box(i === 0 ? '系统A #12: phone → phone(源敏感直映射)<br>字段级出边: → Iceberg 湖(明文, 治理项)' : '详情/预览 mask(138****1234)<br>湖快照明文(治理项)<br>契约 #50 待复核')
+  if (n.id === 'TAG') return box('标签: 金额档(registry)<br>由规则 r1 产出<br>消费: 订阅 #48(kafka push · 标签矩阵圈选)<br>间接影响: 金额档实体订阅 ×3')
   if (n.id === 'R4') return box(i === 0 ? 'visual · net_amt − fee ≥ 5000 → 金额档/超限' : '依赖: net_amt, fee(已声明)<br>产出: amount + 标签「金额档」')
   if (n.id === 'S34') return box(i === 0 ? 'pull 定时 · token 生效 · 增量 _seq 游标' : '引用 6 列(amount≥5000)<br><span style="color:#fa8c16">命中 amount 变更</span>')
   if (n.id === 'S48') return box(i === 0 ? 'push kafka · 定时 5min · 标签矩阵' : 'amount → r1 金额档 → tag_fact → 圈选矩阵(间接)')
@@ -491,5 +538,7 @@ window.__tabGraph = () => { tab.value = 'graph' }
 :deep(.edge) { fill: none; stroke-width: 1.7; opacity: .8; }
 :deep(.edge.dim) { opacity: .05; }
 :deep(.edge.hit) { stroke-width: 3.2; opacity: 1; }
+:deep(.edge.dash) { stroke-dasharray: 5 4; }
+.mono2 { font-family: ui-monospace, Menlo, Consolas, monospace; }
 :deep(.el) { fill: #5a6a7d; font-size: 9.5px; pointer-events: none; }
 </style>
