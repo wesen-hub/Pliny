@@ -54,14 +54,19 @@
           <el-table-column prop="fields" label="字段" width="58" align="center" />
           <el-table-column prop="jobs" label="任务" width="58" align="center" />
           <el-table-column prop="rules" label="规则" width="58" align="center" />
-          <el-table-column label="订阅" width="58" align="center">
-            <template #default="{ row }"><el-tag v-if="row.apps" size="small" type="success" effect="plain">{{ row.apps }}</el-tag><span v-else class="dim2">—</span></template>
-          </el-table-column>
-          <el-table-column label="操作" width="170" align="left">
+          <el-table-column label="订阅应用" width="72" align="center">
             <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="goLineage(row)">血缘</el-button>
-              <el-button size="small" text type="warning" @click="goLineage(row, 'i')">影响</el-button>
-              <el-button size="small" text @click="openDetail(row)">详情</el-button>
+              <el-tooltip v-if="row.apps" :content="row.appsNames.join(', ')" placement="top">
+                <el-tag size="small" type="success" effect="plain" style="cursor:help">{{ row.apps }}</el-tag>
+              </el-tooltip>
+              <span v-else class="dim2">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="196" align="left">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" plain @click="goLineage(row)">血缘</el-button>
+              <el-button size="small" type="warning" plain @click="goLineage(row, 'i')">影响</el-button>
+              <el-button size="small" plain @click="openDetail(row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -142,7 +147,8 @@ const rows = computed(() => {
       else if (e.type === 'DEPENDS_ON' && e.to.startsWith(prefix)) rs.add(e.f)
       else if (e.type === 'CONSUMES' && e.to === tid) as.add(e.f)
     })
-    return { id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind, fields, jobs: js.size, rules: rs.size, apps: as.size, fav: favs.value.includes(t.label), _n: t, _sources: sourcesOf(t.label) }
+    const appNames = [...as].map(a => tlabel(a))
+    return { id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind, fields, jobs: js.size, rules: rs.size, apps: as.size, appsNames: appNames, fav: favs.value.includes(t.label), _n: t, _sources: sourcesOf(t.label) }
   })
   return out.filter(r => {
     if (favOnly.value && !r.fav) return false
