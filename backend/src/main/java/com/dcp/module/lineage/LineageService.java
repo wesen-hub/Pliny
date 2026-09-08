@@ -102,14 +102,17 @@ public class LineageService {
         tables.forEach(t -> tableIds.add("table:" + t.get("name")));
 
         try (Session se = session()) {
+            // 约束须在独立事务(schema 修改不能跟在 write 之后)
             se.executeWrite(tx -> {
-                tx.run("MATCH (n) DETACH DELETE n");
-                // 约束
                 tx.run("CREATE CONSTRAINT table_id IF NOT EXISTS FOR (n:Table) REQUIRE n.id IS UNIQUE");
                 tx.run("CREATE CONSTRAINT field_id IF NOT EXISTS FOR (n:Field) REQUIRE n.id IS UNIQUE");
                 tx.run("CREATE CONSTRAINT job_id IF NOT EXISTS FOR (n:Job) REQUIRE n.id IS UNIQUE");
                 tx.run("CREATE CONSTRAINT app_id IF NOT EXISTS FOR (n:App) REQUIRE n.id IS UNIQUE");
                 tx.run("CREATE CONSTRAINT src_id IF NOT EXISTS FOR (n:Source) REQUIRE n.id IS UNIQUE");
+                return null;
+            });
+            se.executeWrite(tx -> {
+                tx.run("MATCH (n) DETACH DELETE n");
                 // 表 + 字段
                 int fields = 0;
                 for (Map<String, Object> t : tables) {
