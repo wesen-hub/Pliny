@@ -819,6 +819,14 @@ public class TagEngineService {
         payload.set("derived", (JsonNode) task.get("derived"));
         payload.set("bindings", snap.get("bindings"));
         payload.set("rules", snap.get("assets"));   // 执行器契约键名 rules(资产快照自含 def)
+        // 标签服务投影(查询面 tag_fact_view): 平台注入 JDBC(与 stream factView 同源默认; 生产可 DCP_TAG_FACT_VIEW_URL 覆盖)
+        payload.set("tagFactView", OM.createObjectNode()
+                .put("enabled", true)
+                .put("url", env("DCP_TAG_FACT_VIEW_URL",
+                        "jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"))
+                .put("user", env("DCP_TAG_FACT_VIEW_USER", "root"))
+                .put("password", env("DCP_TAG_FACT_VIEW_PASSWORD", "root123"))
+                .put("table", "tag_fact_view"));
         // 增量配置(§14): 任务游标非空且非 full → 增量轮(仅重算变更实体); full=1 → 全量(跑完重新初始化游标); matrix 试跑不走增量
         JsonNode cursorNode = (JsonNode) task.get("cursor");
         long cursor = (!full && !matrix && cursorNode != null && cursorNode.has("maxSeq")) ? cursorNode.path("maxSeq").asLong(-1) : -1;

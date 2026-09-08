@@ -65,6 +65,23 @@ public final class TagFactViewWriter {
                 }
                 ps.executeBatch();
             }
+            // P1.2④: 变更审计(与投影同轮; 失败仅记日志, 不阻断投影)
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO tag_notify(entity, tag_path, tag_value, task_id, task_mode)"
+                            + " VALUES(?,?,?,?,'batch')"
+                            + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), task_mode='batch', occur_ts=CURRENT_TIMESTAMP(3)")) {
+                for (Row r : data) {
+                    ps.setString(1, r.getString(0));
+                    ps.setString(2, r.getString(1));
+                    Object val = r.get(2);
+                    ps.setString(3, val == null ? null : String.valueOf(val));
+                    ps.setLong(4, taskId);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            } catch (Exception ne) {
+                Log.error("[投影] tag_notify 审计写失败(不影响投影): " + ne.getMessage());
+            }
             Log.info("[投影] tag_fact_view 已同步: task=" + taskId + " 行=" + data.size()
                     + (incr != null && incr.active ? "(增量实体 " + (incr.changedEntities == null ? 0 : incr.changedEntities.size()) + ")" : "(全量)")
                     + " 耗时=" + (System.currentTimeMillis() - t0) + "ms");
@@ -83,6 +100,13 @@ public final class TagFactViewWriter {
                     + "value VARCHAR(255) NULL,"
                     + "run_ts DATETIME NULL,"
                     + "PRIMARY KEY (task_id, entity, tag))");
+            // P1.2④: 标签变更审计(订阅消费端); 与 backend/stream 同一 tag_notify 契约
+            st.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
+                    + "entity VARCHAR(128) NOT NULL, tag_path VARCHAR(512) NOT NULL,"
+                    + "tag_value VARCHAR(128) NULL, task_id BIGINT NOT NULL,"
+                    + "task_mode VARCHAR(16) NOT NULL,"
+                    + "occur_ts DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),"
+                    + "PRIMARY KEY (entity, tag_path, task_id))");
         }
     }
 
