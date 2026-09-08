@@ -25,6 +25,11 @@ export const onlineApi = {
   event: (id, body) => request.post(`/tagengine/online/${id}/event`, body),
   entity: (entityKey) => request.get(`/tagengine/online/entity/${entityKey}`)
 }
+export const streamApi = {
+  start: (id) => request.post(`/tagengine/stream/${id}/start`),
+  stop: (id) => request.post(`/tagengine/stream/${id}/stop`),
+  status: (id) => request.get(`/tagengine/stream/${id}/status`)
+}
 export const labelsApi = {
   summary: () => request.get('/tagengine/labels/summary'),
   circle: (tagPath, value) => request.get('/tagengine/labels/circle', { params: { tagPath, value } }),

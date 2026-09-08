@@ -28,9 +28,12 @@
             <el-text v-else size="small" type="info">全量</el-text>
           </template></el-table-column>
         <el-table-column label="调度" width="90"><template #default="{ row }"><el-text size="small">{{ row.schedule === 'cron' ? row.cronExpr : (row.schedule || 'none') }}</el-text></template></el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="160">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'published' ? 'success' : 'info'" effect="plain">{{ row.status }}</el-tag>
+            <el-tag v-if="row.mode === 'stream'" size="small" style="margin-left:4px"
+              :type="row.streamStatus === 'RUNNING' ? 'success' : row.streamStatus === 'CANCELED' ? 'info' : row.streamStatus === 'FAILED' ? 'danger' : 'warning'"
+              effect="plain">{{ row.streamStatus || '未启动' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
@@ -41,6 +44,9 @@
               <el-button size="small" text type="danger" @click="del(row)">删</el-button>
             </template>
             <template v-else-if="row.mode === 'stream'">
+              <el-button v-if="row.streamStatus !== 'RUNNING'" size="small" text type="success" :disabled="row.status !== 'published'" :loading="row._busy" @click="startStream(row)">启动</el-button>
+              <el-button v-else size="small" text type="warning" :loading="row._busy" @click="stopStream(row)">停止</el-button>
+              <el-button size="small" text type="primary" :disabled="row.status !== 'published'" @click="statusStream(row)">状态</el-button>
               <el-button size="small" text @click="openRuns(row)">Runs</el-button>
               <el-button size="small" text type="danger" @click="del(row)">删</el-button>
             </template>
@@ -112,7 +118,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { tasksApi, runsApi, onlineApi } from '../../api/tagengine.js'
+import { tasksApi, runsApi, onlineApi, streamApi } from '../../api/tagengine.js'
 
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))
@@ -178,6 +184,24 @@ async function openRuns(row) {
     runs.value = await runsApi.list(row.id)
     runsDlg.value = true
   } catch (e) { /* 已提示 */ }
+}
+function startStream(row) {
+  row._busy = true
+  streamApi.start(row.id).then((r) => {
+    toast(`流作业已启动 job=${r.jobId}`)
+    load()
+  }).catch(() => {}).finally(() => { row._busy = false })
+}
+function stopStream(row) {
+  ElMessageBox.confirm('停止流作业? 将 cancel Flink 作业(任务保留, 可再次启动)。', '停止流作业', { type: 'warning' })
+    .then(() => streamApi.stop(row.id).then(() => { toast('已停止'); load() }).catch(() => {}))
+    .catch(() => {})
+}
+function statusStream(row) {
+  streamApi.status(row.id).then((r) => {
+    toast(`任务态 ${r.streamStatus} / Flink ${r.jobState}${r.flinkName ? ' · ' + r.flinkName : ''}`)
+    load()
+  }).catch(() => {})
 }
 async function openRun(row) {
   try {
