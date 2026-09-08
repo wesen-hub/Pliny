@@ -82,13 +82,13 @@ public class JobController {
     }
 
     @PostMapping
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Long> create(@RequestBody JobRequest req) {
         return ApiResponse.ok(service.create(toJob(req), req.getExtractConfig(), req.getFieldMappings()));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Void> update(@PathVariable Long id, @RequestBody JobRequest req) {
         req.setId(id);
         service.update(id, toJob(req), req.getExtractConfig(), req.getFieldMappings());
@@ -96,42 +96,42 @@ public class JobController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/enable")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:run')")
     public ApiResponse<Void> enable(@PathVariable Long id) {
         service.setEnabled(id, true);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/disable")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:run')")
     public ApiResponse<Void> disable(@PathVariable Long id) {
         service.setEnabled(id, false);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/run")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:run')")
     public ApiResponse<Map<String, Object>> run(@PathVariable Long id) {
         Long executionId = service.run(id, "MANUAL");
         return ApiResponse.ok(Map.of("executionId", executionId));
     }
 
     @PostMapping("/{id}/stop")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:run')")
     public ApiResponse<Void> stop(@PathVariable Long id) {
         service.stop(id);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/copy")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Long> copy(@PathVariable Long id) {
         return ApiResponse.ok(service.copy(id));
     }
@@ -142,7 +142,7 @@ public class JobController {
     }
 
     @PutMapping("/{id}/sync-state")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Void> resetSyncState(@PathVariable Long id,
                                             @RequestBody Map<String, String> body) {
         service.resetSyncState(id, body.get("value"), body.get("valueType"));
@@ -150,6 +150,7 @@ public class JobController {
     }
 
     @PostMapping("/mappings/expression/validate")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Map<String, Object>> validateExpression(@RequestBody Map<String, Object> body) {
         String expression = (String) body.get("expression");
         @SuppressWarnings("unchecked")
@@ -163,6 +164,7 @@ public class JobController {
     }
 
     @PostMapping("/mappings/auto")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<List<Map<String, Object>>> autoMapping(@RequestBody Map<String, Object> body) {
         @SuppressWarnings("unchecked")
         List<String> source = (List<String>) body.get("sourceColumns");

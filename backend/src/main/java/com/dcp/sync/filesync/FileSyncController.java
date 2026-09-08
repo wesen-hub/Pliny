@@ -1,5 +1,7 @@
 package com.dcp.sync.filesync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,6 +38,7 @@ public class FileSyncController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.create(body));
@@ -51,6 +54,7 @@ public class FileSyncController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.update(id, body));
@@ -60,12 +64,14 @@ public class FileSyncController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> delete(@PathVariable long id) {
         service.delete(id);
         return ApiResponse.ok(Map.of("deleted", true, "id", id));
     }
 
     @PostMapping("/{id}/run")
+    @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> run(@PathVariable long id) {
         Map<String, Object> d = service.detail(id);
         if (d == null) {
@@ -90,6 +96,7 @@ public class FileSyncController {
     }
 
     @PostMapping("/{id}/stop")
+    @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> stop(@PathVariable long id) {
         Map<String, Object> d = service.detail(id);
         if (d == null) {

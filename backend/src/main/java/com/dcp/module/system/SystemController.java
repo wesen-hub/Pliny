@@ -136,16 +136,22 @@ public class SystemController {
         SysRole r = roleMapper.selectById(id);
         if (r == null) throw new BizException(ErrorCode.NOT_FOUND, "角色不存在");
         if ("ADMIN".equals(r.getRoleCode())) throw new BizException(ErrorCode.PARAM_ERROR, "ADMIN 拥有全部权限, 无需配置");
+        // 只保存已存在的权限码(过滤前端半选组/脏码)
+        java.util.Set<String> valid = new java.util.HashSet<>();
+        permissionMapper.selectList(null).forEach(p -> valid.add(p.getCode()));
         rolePermissionMapper.delete(new LambdaQueryWrapper<SysRolePermission>().eq(SysRolePermission::getRoleId, id));
+        int savedN = 0;
         for (String c : codes) {
+            if (!valid.contains(c)) continue;
             SysRolePermission rp = new SysRolePermission();
             rp.setRoleId(id);
             rp.setPermCode(c);
             rolePermissionMapper.insert(rp);
+            savedN++;
         }
         permService.refresh();
         auditService.record("system", "ROLE_PERM_SAVE", "role", id, "保存角色权限: " + r.getRoleCode());
-        return ApiResponse.ok(Map.of("id", id, "count", codes.size()));
+        return ApiResponse.ok(Map.of("id", id, "count", savedN));
     }
 
     @GetMapping("/users")

@@ -38,6 +38,7 @@ public class PermSeedInitializer implements CommandLineRunner {
     private final SysUserMapper userMapper;
     private final SysUserRoleMapper userRoleMapper;
     private final PasswordEncoder passwordEncoder;
+    private final com.dcp.security.PermissionService permService;
 
     /** 权限点: code -> {name, module, type, hot} */
     private static final Map<String, String[]> PERMS = new LinkedHashMap<>();
@@ -75,11 +76,17 @@ public class PermSeedInitializer implements CommandLineRunner {
         perm("system:role:manage", "角色权限管理", "系统", "action", 1);
         perm("system:data-policy:manage", "数据权限配置", "系统", "action", 1);
         perm("audit:read", "审计日志查看", "系统", "action", 0);
+        perm("sync:task:write", "同步/湖/文件任务创建编辑", "平台运维", "action", 0);
+        perm("job:write", "采集任务写(建/改/删/配置)", "平台运维", "action", 0);
+        perm("job:run", "采集任务启停/运行", "平台运维", "action", 1);
+        perm("dict:write", "字典写", "平台运维", "action", 0);
+        perm("alarm:write", "告警规则写", "平台运维", "action", 0);
 
         ROLE_PERMS.put("ADMIN", List.of());   // 空=全部
         ROLE_PERMS.put("OPERATOR", List.of("datasource:page", "datasource:write", "datasource:test",
-                "sync:task:page", "sync:task:run", "sync:task:delete", "ingest:page", "agent:control",
-                "ingest:app:manage", "asset:page", "system:page", "audit:read"));
+                "sync:task:page", "sync:task:write", "sync:task:run", "sync:task:delete", "ingest:page", "agent:control",
+                "ingest:app:manage", "asset:page", "asset:secret:write", "job:write", "job:run",
+                "dict:write", "alarm:write", "system:page", "audit:read"));
         ROLE_PERMS.put("LABEL_ENG", List.of("asset:page", "tag:registry:page", "tag:registry:write",
                 "tag:rule:page", "tag:rule:write", "tag:task:page", "tag:task:write", "tag:rule:publish",
                 "tag:task:run", "tag:stream:control", "tag:task:delete", "tag:sub:page", "tag:sub:manage",
@@ -101,6 +108,7 @@ public class PermSeedInitializer implements CommandLineRunner {
             seedRoles();
             seedRolePerms();
             seedUsers();
+            permService.refresh();
             log.info("[perm] 权限种子就绪(权限点 {} 个, 角色映射 {} 个)", PERMS.size(), ROLE_PERMS.size());
         } catch (Exception e) {
             log.error("[perm] 权限种子初始化失败: {}", e.getMessage(), e);
@@ -108,9 +116,9 @@ public class PermSeedInitializer implements CommandLineRunner {
     }
 
     private void seedPerms() {
-        Long exist = permMapper.selectCount(new LambdaQueryWrapper<>());
-        if (exist != null && exist > 0) return;
         for (Map.Entry<String, String[]> e : PERMS.entrySet()) {
+            Long n = permMapper.selectCount(new LambdaQueryWrapper<SysPermission>().eq(SysPermission::getCode, e.getKey()));
+            if (n != null && n > 0) continue;   // 增量: 缺失码补插
             SysPermission p = new SysPermission();
             p.setCode(e.getKey());
             p.setName(e.getValue()[0]);
@@ -141,11 +149,14 @@ public class PermSeedInitializer implements CommandLineRunner {
         for (Map.Entry<String, List<String>> e : ROLE_PERMS.entrySet()) {
             SysRole role = roleOf(e.getKey());
             if (role == null) continue;
-            Long n = rolePermMapper.selectCount(new LambdaQueryWrapper<SysRolePermission>()
-                    .eq(SysRolePermission::getRoleId, role.getId()));
-            if (n != null && n > 0) continue;
             if (e.getValue().isEmpty()) continue;   // ADMIN 空=全部(has() 特判)
+            // 增量: 角色缺的权限码补插(不删既有, 尊重运行时手工调整)
+            var exist = rolePermMapper.selectList(new LambdaQueryWrapper<SysRolePermission>()
+                    .eq(SysRolePermission::getRoleId, role.getId()));
+            java.util.Set<String> have = new java.util.HashSet<>();
+            exist.forEach(x -> have.add(x.getPermCode()));
             for (String code : e.getValue()) {
+                if (have.contains(code)) continue;
                 SysRolePermission rp = new SysRolePermission();
                 rp.setRoleId(role.getId());
                 rp.setPermCode(code);

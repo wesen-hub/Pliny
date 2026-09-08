@@ -44,6 +44,9 @@ public class TagEngineService {
 
     private final JdbcTemplate metaJdbc;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dcp.module.tagengine.perm.DataSecurityService security;   // 数据权限(行规则执行 F2)
+
     @Value("${dcp.tagengine.runner-mode:simulate}")
     private String runnerMode;          // simulate(演练: 生成 task-json/命令不下发) | spark(真实 spark-submit)
     @Value("${dcp.tagengine.executor-jar:}")
@@ -1381,6 +1384,8 @@ public class TagEngineService {
             sql.append(" AND value=?");
             args.add(value);
         }
+        // F2 行规则(实体范围): list=实体清单; tag_ref=引用标签实体集; cond 忽略(标签投影无源表字段)
+        for (String rc : rowRuleFilters(tagPath)) sql.append(" AND ").append(rc);
         sql.append(" GROUP BY entity ORDER BY entity LIMIT ?");
         args.add(limit);
         List<Map<String, Object>> rows;
@@ -1396,6 +1401,34 @@ public class TagEngineService {
         out.put("count", rows.size());
         out.put("entities", rows);
         return out;
+    }
+
+    /** 行规则 → tag_fact_view 实体过滤 SQL 片段 */
+    private java.util.List<String> rowRuleFilters(String tagPath) {
+        java.util.List<String> conds = new java.util.ArrayList<>();
+        if (security == null) return conds;
+        try {
+            for (Map<String, Object> rr : security.rowRules("tag", tagPath)) {
+                String kind = String.valueOf(rr.get("kind"));
+                if ("list".equals(kind)) {
+                    String txt = rr.get("list_text") == null ? "" : String.valueOf(rr.get("list_text"));
+                    String[] items = txt.split("[,\n;，；\s]+");
+                    java.util.List<String> esc = new java.util.ArrayList<>();
+                    for (String it : items) {
+                        if (!it.isEmpty()) esc.add(it.replace("'", "''"));
+                    }
+                    if (!esc.isEmpty()) conds.add("entity IN ('" + String.join("','", esc) + "')");
+                } else if ("tag_ref".equals(kind)) {
+                    String ref = rr.get("tag_ref_path") == null ? "" : String.valueOf(rr.get("tag_ref_path"));
+                    if (!ref.isBlank()) {
+                        conds.add("entity IN (SELECT DISTINCT entity FROM tag_fact_view WHERE tag='"
+                                + ref.replace("'", "''") + "')");
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+        }
+        return conds;
     }
 
     public Map<String, Object> labelEntity(String entityKey) {

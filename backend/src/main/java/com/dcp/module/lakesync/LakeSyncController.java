@@ -1,5 +1,7 @@
 package com.dcp.module.lakesync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -45,6 +47,7 @@ public class LakeSyncController {
     }
 
     @PostMapping("/tasks")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> createTask(@RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.createTask(body));
@@ -54,6 +57,7 @@ public class LakeSyncController {
     }
 
     @PutMapping("/tasks/{id}")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> updateTask(@PathVariable long id, @RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.updateTask(id, body));
@@ -63,6 +67,7 @@ public class LakeSyncController {
     }
 
     @DeleteMapping("/tasks/{id}")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> deleteTask(@PathVariable long id) {
         try {
             service.deleteTask(id);
@@ -73,6 +78,7 @@ public class LakeSyncController {
     }
 
     @PostMapping("/tasks/{id}/run")
+    @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> run(@PathVariable long id,
                                                 @RequestParam(required = false) String trigger) {
         try {

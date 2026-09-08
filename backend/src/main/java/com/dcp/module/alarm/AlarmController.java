@@ -23,20 +23,20 @@ public class AlarmController {
     }
 
     @PostMapping
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('alarm:write')")
     public ApiResponse<Long> create(@RequestBody AlarmConfig cfg) {
         return ApiResponse.ok(service.create(cfg));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('alarm:write')")
     public ApiResponse<Void> update(@PathVariable Long id, @RequestBody AlarmConfig cfg) {
         service.update(id, cfg);
         return ApiResponse.ok();
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('alarm:write')")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();

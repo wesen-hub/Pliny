@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -33,6 +35,7 @@ public class TagController {
 
     /** 新建标签 */
     @PostMapping
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         long id = tagService.create(
                 String.valueOf(body.get("name")),
@@ -45,6 +48,7 @@ public class TagController {
 
     /** 更新标签 */
     @PutMapping("/{id}")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
         tagService.update(id, (String) body.get("name"), (String) body.get("category"),
                 (String) body.get("granularity"), (String) body.get("source"), (String) body.get("status"));
@@ -53,6 +57,7 @@ public class TagController {
 
     /** 删除标签(连带子标签) */
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> delete(@PathVariable long id) {
         tagService.delete(id);
         return ApiResponse.ok(null);
@@ -60,6 +65,7 @@ public class TagController {
 
     /** 移动标签(调整目录层级; 新父不能是自己的子孙) */
     @PutMapping("/{id}/move")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> move(@PathVariable long id, @RequestBody Map<String, Object> body) {
         tagService.move(id, body.get("parentId") == null ? 0 : ((Number) body.get("parentId")).longValue());
         return ApiResponse.ok(null);

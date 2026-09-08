@@ -68,40 +68,41 @@ public class DatasourceController {
     }
 
     @PostMapping
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Long> create(@RequestBody DatasourceRequest req) {
         return ApiResponse.ok(service.create(toEntity(req), req.getPassword()));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Void> update(@PathVariable Long id, @RequestBody DatasourceRequest req) {
         service.update(id, toEntity(req), req.getPassword());
         return ApiResponse.ok();
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/enable")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Void> enable(@PathVariable Long id) {
         service.setEnabled(id, true);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/disable")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Void> disable(@PathVariable Long id) {
         service.setEnabled(id, false);
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/test")
+    @PreAuthorize("@perm.has('datasource:test')")
     public ApiResponse<Void> test(@PathVariable Long id) {
         service.testConnection(id);
         return ApiResponse.ok();
@@ -145,6 +146,7 @@ public class DatasourceController {
     }
 
     @PostMapping("/{id}/preview")
+    @PreAuthorize("@perm.has('datasource:write')")
     public ApiResponse<Map<String, Object>> preview(@PathVariable Long id,
                                                     @RequestBody Map<String, Object> body) {
         String sql = (String) body.get("sql");

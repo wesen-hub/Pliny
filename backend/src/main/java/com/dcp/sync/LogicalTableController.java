@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 
 import lombok.Data;
@@ -72,6 +74,7 @@ public class LogicalTableController {
     }
 
     @PutMapping("/{table}")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> save(@PathVariable String table, @RequestBody LogicalTableReq req) {
         // 键构成上线不可变(多表合并: 同一逻辑表所有任务键必须一致; 变更 = 实体分裂 = 全量重迁)
         LogicalTableConfigService.LogicalTableConfig existing = service.load(table);

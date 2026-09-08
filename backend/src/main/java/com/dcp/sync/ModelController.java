@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,6 +36,7 @@ public class ModelController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             @SuppressWarnings("unchecked")
@@ -55,6 +58,7 @@ public class ModelController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('job:write')")
     public ApiResponse<Void> delete(@PathVariable long id) {
         modelService.delete(id);
         return ApiResponse.ok(null);

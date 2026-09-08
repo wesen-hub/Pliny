@@ -39,20 +39,20 @@ public class DictController {
     }
 
     @PostMapping
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Long> create(@RequestBody DictConfig cfg) {
         return ApiResponse.ok(service.create(cfg));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Void> update(@PathVariable Long id, @RequestBody DictConfig cfg) {
         service.update(id, cfg);
         return ApiResponse.ok();
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();
@@ -66,20 +66,20 @@ public class DictController {
     }
 
     @PostMapping("/{id}/entries")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Long> createEntry(@PathVariable Long id, @RequestBody DictEntry entry) {
         return ApiResponse.ok(service.createEntry(id, entry));
     }
 
     @PutMapping("/entries/{entryId}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Void> updateEntry(@PathVariable Long entryId, @RequestBody DictEntry entry) {
         service.updateEntry(entryId, entry);
         return ApiResponse.ok();
     }
 
     @DeleteMapping("/entries/{entryId}")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Void> deleteEntry(@PathVariable Long entryId) {
         service.deleteEntry(entryId);
         return ApiResponse.ok();
@@ -93,7 +93,7 @@ public class DictController {
     }
 
     @PostMapping("/{id}/import")
-    @PreAuthorize("@perm.canWrite()")
+    @PreAuthorize("@perm.has('dict:write')")
     public ApiResponse<Integer> importCsv(@PathVariable Long id,
                                           @RequestParam("file") MultipartFile file,
                                           @RequestParam(defaultValue = "false") boolean overwrite) {

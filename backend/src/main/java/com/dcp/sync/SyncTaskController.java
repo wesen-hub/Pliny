@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -82,6 +84,7 @@ public class SyncTaskController {
     }
 
     @PostMapping("/validate")
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> validate(@RequestBody Map<String, Object> body) {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> fieldMapping = (List<Map<String, Object>>) body.get("fieldMapping");
@@ -92,6 +95,7 @@ public class SyncTaskController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('sync:task:write')")
     public ApiResponse<Map<String, Object>> save(@RequestBody Map<String, Object> body) {
         String name = (String) body.getOrDefault("name", "同步任务");
         String logicalTable = (String) body.get("logicalTable");
@@ -164,6 +168,7 @@ public class SyncTaskController {
 
     /** 实现 3: 提交 SeaTunnel CDC 直连任务(源表 → 目标表, 复用现有 seatunnel 环境) */
     @PostMapping("/seatunnel-cdc/start")
+    @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> seatunnelCdc(@RequestBody Map<String, Object> body) {
         Long srcDsId = ((Number) body.get("sourceDatasourceId")).longValue();
         String sourceDb = (String) body.get("sourceDb");

@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +32,7 @@ public class SyncLakeController {
     }
 
     @PostMapping("/flush/{table}")
+    @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> flush(@PathVariable String table) {
         int merged = authorityMerger.flush(table);
         Map<String, Object> out = authorityMerger.statusOf(table);

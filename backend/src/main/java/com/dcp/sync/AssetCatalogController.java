@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -33,6 +35,7 @@ public class AssetCatalogController {
 
     /** 建节点 */
     @PostMapping("/nodes")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Map<String, Object>> createNode(@RequestBody Map<String, Object> body) {
         long id = catalog.createNode(
                 String.valueOf(body.get("dim")),
@@ -44,6 +47,7 @@ public class AssetCatalogController {
 
     /** 重命名节点 */
     @PutMapping("/nodes/{id}")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> renameNode(@PathVariable long id, @RequestBody Map<String, Object> body) {
         catalog.renameNode(id, String.valueOf(body.get("name")));
         return ApiResponse.ok(null);
@@ -51,6 +55,7 @@ public class AssetCatalogController {
 
     /** 删除节点(连带子节点与挂载) */
     @DeleteMapping("/nodes/{id}")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> deleteNode(@PathVariable long id) {
         catalog.deleteNode(id);
         return ApiResponse.ok(null);
@@ -58,6 +63,7 @@ public class AssetCatalogController {
 
     /** 挂载资产到节点 */
     @PostMapping("/bind")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> bind(@RequestBody Map<String, Object> body) {
         catalog.bind(((Number) body.get("nodeId")).longValue(), String.valueOf(body.get("tableName")));
         return ApiResponse.ok(null);
@@ -65,6 +71,7 @@ public class AssetCatalogController {
 
     /** 取消挂载 */
     @DeleteMapping("/bind")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> unbind(@RequestParam long nodeId, @RequestParam String tableName) {
         catalog.unbind(nodeId, tableName);
         return ApiResponse.ok(null);
@@ -72,6 +79,7 @@ public class AssetCatalogController {
 
     /** 编辑资产元数据 */
     @PutMapping("/assets/{table}")
+    @PreAuthorize("@perm.has('asset:secret:write')")
     public ApiResponse<Void> saveMeta(@PathVariable String table, @RequestBody Map<String, Object> body) {
         catalog.saveMeta(table, body);
         return ApiResponse.ok(null);

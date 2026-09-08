@@ -1,5 +1,7 @@
 package com.dcp.sync.ingest;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,6 +37,7 @@ public class IngestAppController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             @SuppressWarnings("unchecked")
@@ -56,6 +59,7 @@ public class IngestAppController {
     }
 
     @PostMapping("/{appKey}/enable")
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> enable(@PathVariable String appKey) {
         try {
             engine.enableApp(appKey, true);
@@ -66,6 +70,7 @@ public class IngestAppController {
     }
 
     @PostMapping("/{appKey}/disable")
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> disable(@PathVariable String appKey) {
         try {
             engine.enableApp(appKey, false);
@@ -76,6 +81,7 @@ public class IngestAppController {
     }
 
     @PostMapping("/{appKey}/bind")
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> bind(@PathVariable String appKey,
                                                  @RequestBody Map<String, Object> body) {
         try {
@@ -89,6 +95,7 @@ public class IngestAppController {
     }
 
     @DeleteMapping("/{appKey}")
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> delete(@PathVariable String appKey) {
         engine.deleteApp(appKey);
         return ApiResponse.ok(Map.of("deleted", true, "appKey", appKey));
