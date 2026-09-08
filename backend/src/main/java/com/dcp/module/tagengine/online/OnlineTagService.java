@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -106,23 +107,26 @@ public class OnlineTagService {
             throw new IllegalArgumentException("事件求值失败: " + e.getMessage(), e);
         }
         // Redis 置位: hash tag→value; 每标签独立字段, 整 key TTL
+        // P1.2⑥ instant 标签 TTL 由注册声明推导(未显式传 ttlSeconds 时): 命中标签注册 ttl_days 最大者
         String key = KEY_PREFIX + entity;
+        long effTtl = ttlSeconds != null ? ttlSeconds : registryTtlSeconds(collector.tags());
         if (collector.tags().isEmpty()) {
             // 无命中: 不清旧值(在线层保留最近状态), 仅 touch TTL
-            redis.expire(key, (ttlSeconds == null ? DEFAULT_TTL_SECONDS : ttlSeconds), TimeUnit.SECONDS);
+            redis.expire(key, effTtl, TimeUnit.SECONDS);
         } else {
             Map<String, String> m = new LinkedHashMap<>();
             for (String[] t : collector.tags()) {
                 m.put(t[0], t[1] == null ? "" : t[1]);
             }
             redis.opsForHash().putAll(key, m);
-            redis.expire(key, (ttlSeconds == null ? DEFAULT_TTL_SECONDS : ttlSeconds), TimeUnit.SECONDS);
+            redis.expire(key, effTtl, TimeUnit.SECONDS);
+            notifyTags(entity, collector.tags(), taskId);   // P1.2④ 标签变更审计(订阅消费端)
         }
-        log.info("[online] task#{} 事件 entity={} 命中标签={} key={}", taskId, entity, collector.tags().size(), key);
+        log.info("[online] task#{} 事件 entity={} 命中标签={} key={} ttl={}", taskId, entity, collector.tags().size(), key, effTtl);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("entity", entity);
         out.put("key", key);
-        out.put("ttlSeconds", ttlSeconds == null ? DEFAULT_TTL_SECONDS : ttlSeconds);
+        out.put("ttlSeconds", effTtl);
         List<Map<String, String>> tags = new ArrayList<>();
         for (String[] t : collector.tags()) {
             Map<String, String> tm = new LinkedHashMap<>();
@@ -147,6 +151,74 @@ public class OnlineTagService {
         out.put("ttlSeconds", ttl == null ? -1 : ttl);
         out.put("tags", tags);
         return out;
+    }
+
+    /* ---------- P1.2: instant TTL 注册推导 + 变更审计 ---------- */
+
+    /** tagPath -> ttlDays 缓存(60s 过期; 仅 instant 行, 在线层只产 instant) */
+    private final Map<String, Long> ttlCache = new ConcurrentHashMap<>();
+    private volatile long ttlCacheAt = 0L;
+
+    private void refreshTtlCacheIfStale() {
+        long now = System.currentTimeMillis();
+        if (now - ttlCacheAt < 60_000L && !ttlCache.isEmpty()) return;
+        synchronized (ttlCache) {
+            if (now - ttlCacheAt < 60_000L && !ttlCache.isEmpty()) return;
+            Map<String, Long> fresh = new HashMap<>();
+            try {
+                List<Map<String, Object>> regs = metaJdbc.queryForList(
+                        "SELECT tr.tag_dict_id, tr.timing, tr.ttl_days FROM tag_registry tr WHERE tr.timing='instant' AND tr.ttl_days IS NOT NULL");
+                Map<Long, String> name = new HashMap<>();
+                Map<Long, Long> parent = new HashMap<>();
+                for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
+                    name.put(((Number) r.get("id")).longValue(), String.valueOf(r.get("name")));
+                    parent.put(((Number) r.get("id")).longValue(), ((Number) r.get("parent_id")).longValue());
+                }
+                for (Map<String, Object> r : regs) {
+                    long id = ((Number) r.get("tag_dict_id")).longValue();
+                    List<String> chain = new ArrayList<>();
+                    Long cur = id;
+                    Set<Long> guard = new java.util.HashSet<>();
+                    while (cur != null && cur != 0 && guard.add(cur) && name.containsKey(cur)) {
+                        chain.add(0, name.get(cur));
+                        cur = parent.get(cur);
+                    }
+                    fresh.put(String.join("/", chain), ((Number) r.get("ttl_days")).longValue());
+                }
+            } catch (Exception e) {
+                log.warn("[online] 注册 TTL 缓存刷新失败(用默认): {}", e.getMessage());
+            }
+            ttlCache.clear();
+            ttlCache.putAll(fresh);
+            ttlCacheAt = System.currentTimeMillis();
+        }
+    }
+
+    /** 命中标签注册 ttl 最大者(秒); 无 instant 注册/异常 → DEFAULT */
+    private long registryTtlSeconds(List<String[]> tags) {
+        if (tags == null || tags.isEmpty()) return DEFAULT_TTL_SECONDS;
+        refreshTtlCacheIfStale();
+        long maxDays = 0;
+        for (String[] t : tags) {
+            Long d = ttlCache.get(t[0]);
+            if (d != null && d > maxDays) maxDays = d;
+        }
+        return maxDays > 0 ? maxDays * 86_400L : DEFAULT_TTL_SECONDS;
+    }
+
+    /** 标签变更审计(订阅消费端底座): 每 entity+tag+task 保留最新一次 */
+    private void notifyTags(String entity, List<String[]> tags, long taskId) {
+        try {
+            for (String[] t : tags) {
+                String val = (t[1] == null || t[1].isEmpty()) ? null : t[1];
+                metaJdbc.update("INSERT INTO tag_notify(entity,tag_path,tag_value,task_id,task_mode)"
+                                + " VALUES(?,?,?,?,'online')"
+                                + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), task_mode='online', occur_ts=CURRENT_TIMESTAMP(3)",
+                        entity, t[0], val, taskId);
+            }
+        } catch (Exception e) {
+            log.warn("[online] 变更审计写入失败(entity={}): {}", entity, e.getMessage());
+        }
     }
 
     /* ---------- KieBundle: 编译缓存 ---------- */

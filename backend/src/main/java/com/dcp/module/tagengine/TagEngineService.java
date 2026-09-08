@@ -157,7 +157,25 @@ public class TagEngineService {
         try {
             metaJdbc.execute("ALTER TABLE tag_run ADD COLUMN cursor_after TEXT NULL");
         } catch (DataAccessException ignored) { /* 已存在 */ }
-        log.info("[tagengine] schema ensured: tag_rule / tag_task / tag_run");
+        /* P1.2 订阅推送(§17.7④): 订阅=标签条件; tag_notify=执行端标签变更审计(每 entity+tag+task 最新一次) */
+        metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_subscription ("
+                + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                + "name VARCHAR(128) NOT NULL COMMENT '订阅名',"
+                + "tag_path VARCHAR(512) NOT NULL COMMENT '订阅标签路径(须注册表路径)',"
+                + "tag_value VARCHAR(128) NULL COMMENT 'NULL/空=任意值(命中即订阅); 非空=精确值',"
+                + "status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=暂停',"
+                + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                + "update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                + "UNIQUE KEY uk_sub (tag_path, tag_value))");
+        metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
+                + "entity VARCHAR(128) NOT NULL COMMENT '实体键值',"
+                + "tag_path VARCHAR(512) NOT NULL,"
+                + "tag_value VARCHAR(128) NULL,"
+                + "task_id BIGINT NOT NULL,"
+                + "task_mode VARCHAR(16) NOT NULL COMMENT 'batch|stream|online',"
+                + "occur_ts DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '变更发生时间',"
+                + "PRIMARY KEY (entity, tag_path, task_id))");
+        log.info("[tagengine] schema ensured: tag_rule / tag_task / tag_run / tag_subscription / tag_notify");
     }
 
     /* ═══════════════════ 内部工具 ═══════════════════ */
@@ -699,6 +717,19 @@ public class TagEngineService {
                         + " —— 请补数据集字段清单(datasetFields)或在派生字段中定义(DRL 规则的引用字段无法自动收集, 请人工核对)");
             }
         }
+        /* P1.2⑥ §4 发布前兼容校验: 在线无聚合派生; 流窗口派生未落地前同样拦截(落地后放开 stream) */
+        {
+            String mode = str(exist.get("mode"));
+            JsonNode der2 = (JsonNode) exist.get("derived");
+            boolean hasDer = false;
+            if (der2 != null && der2.isArray()) {
+                for (JsonNode d : der2) if (!d.path("name").asText("").isEmpty()) { hasDer = true; break; }
+            }
+            if (hasDer && ("online".equals(mode) || "stream".equals(mode))) {
+                throw new IllegalArgumentException("发布校验未通过(§4 模式兼容): " + mode
+                        + " 模式不支持派生字段 —— 在线=单事件无聚合; 流窗口派生落地(P1.2)后放开 stream, 当前请改用批任务或移除派生");
+            }
+        }
         int newVer = ((Number) exist.get("ver")).intValue() + 1;
         checkPublishTags(id, ordered, str(exist.get("mode")));
         metaJdbc.update("UPDATE tag_task SET status='published', ver=?, snapshot_json=? WHERE id=?",
@@ -1033,32 +1064,39 @@ public class TagEngineService {
 
     /* ---------- ③ 发布标签校验: 动作 tag 已注册 + 跨任务同 tag 冲突拦截 ---------- */
 
-    /** 从规则定义提取动作标签集(visual: actions.tag; table: table.tag; drl: tag($f,"路径")) */
-    private java.util.Set<String> collectTagsOf(Map<String, Object> rule) {
-        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+    /** 从规则定义提取动作(tag+val; 第三位=定义方式 visual|table|drl, 值型动作带值校验仅 visual 可静态判定) */
+    private java.util.List<String[]> collectActionsOf(Map<String, Object> rule) {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
         JsonNode def = jnode((String) rule.get("def_json"));
         String mode = def.path("mode").asText("visual");
         if ("visual".equals(mode)) {
             for (JsonNode a : def.path("visual").path("actions")) {
                 if ("tag".equals(a.path("type").asText())) {
                     String t = a.path("tag").asText("");
-                    if (!t.isEmpty()) out.add(t);
+                    if (!t.isEmpty()) out.add(new String[]{t, a.path("val").asText(""), "visual"});
                 }
             }
         } else if ("table".equals(mode)) {
             String t = def.path("table").path("tag").asText("");
-            if (!t.isEmpty()) out.add(t);
+            if (!t.isEmpty()) out.add(new String[]{t, "", "table"});
         } else if ("drl".equals(mode)) {
             String drl = def.path("drl").asText("");
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("tag\\(\\$f,\\s*\\\"([^\\\"]+)\"")
                     .matcher(drl);
-            while (m.find()) out.add(m.group(1));
+            while (m.find()) out.add(new String[]{m.group(1), "", "drl"});
         }
         return out;
     }
 
-    /** 已注册标签路径集合(registry tagPath, 规则动作 tag 必须精确匹配) */
-    private java.util.Set<String> registeredTagPaths() {
+    /** 从规则定义提取动作标签集(visual: actions.tag; table: table.tag; drl: tag($f,"路径")) */
+    private java.util.Set<String> collectTagsOf(Map<String, Object> rule) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String[] a : collectActionsOf(rule)) out.add(a[0]);
+        return out;
+    }
+
+    /** 注册表元数据: tagPath -> {timing, valueType}(发布前兼容校验用) */
+    private java.util.Map<String, String[]> registryMetaAll() {
         java.util.Map<Long, String> name = new java.util.HashMap<>();
         java.util.Map<Long, Long> parent = new java.util.HashMap<>();
         for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
@@ -1066,8 +1104,8 @@ public class TagEngineService {
             name.put(id, String.valueOf(r.get("name")));
             parent.put(id, ((Number) r.get("parent_id")).longValue());
         }
-        java.util.Set<String> paths = new java.util.LinkedHashSet<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT tag_dict_id FROM tag_registry ORDER BY id")) {
+        java.util.Map<String, String[]> meta = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> r : metaJdbc.queryForList("SELECT tag_dict_id,timing,value_type FROM tag_registry ORDER BY id")) {
             long id = ((Number) r.get("tag_dict_id")).longValue();
             java.util.List<String> chain = new java.util.ArrayList<>();
             Long cur = id;
@@ -1076,9 +1114,10 @@ public class TagEngineService {
                 chain.add(0, name.get(cur));
                 cur = parent.get(cur);
             }
-            paths.add(String.join("/", chain));
+            meta.put(String.join("/", chain), new String[]{
+                    String.valueOf(r.get("timing")), String.valueOf(r.get("value_type"))});
         }
-        return paths;
+        return meta;
     }
 
     /** 已发布任务快照中的动作标签 → 认领任务名(冲突拦截用; 排除自身) */
@@ -1101,11 +1140,16 @@ public class TagEngineService {
     }
 
     private void checkPublishTags(long taskId, List<Map<String, Object>> ordered, String mode) {
-        java.util.Set<String> registered = registeredTagPaths();
+        java.util.Map<String, String[]> reg = registryMetaAll();
+        java.util.Set<String> registered = reg.keySet();
+        java.util.List<String[]> myActs = new java.util.ArrayList<>();
         java.util.Set<String> myTags = new java.util.LinkedHashSet<>();
         for (Map<String, Object> r : ordered) {
             if ("flow".equals(r.get("kind"))) continue;   // 流不直接产标签(引用规则已展开收录)
-            myTags.addAll(collectTagsOf(r));
+            for (String[] a : collectActionsOf(r)) {
+                myActs.add(a);
+                myTags.add(a[0]);
+            }
         }
         java.util.List<String> unreg = myTags.stream().filter(t -> !registered.contains(t)).toList();
         if (!unreg.isEmpty()) {
@@ -1119,6 +1163,24 @@ public class TagEngineService {
             for (String c : conflict) who.add(c + "(已被任务「" + claimed.get(c) + "」产出)");
             throw new IllegalArgumentException("同标签跨任务冲突(§11⑧, 标签由首次发布任务认领): "
                     + String.join("、", who) + " —— 同一标签只能由一个任务产出; 如需多规则协同请用决策表/规则流编排在同一任务内");
+        }
+        /* §4 发布前兼容校验(P1.2⑥): online=仅 instant 标签; 值型标签(非 boolean)动作必须带值 */
+        java.util.List<String> errs = new java.util.ArrayList<>();
+        for (String[] a : myActs) {
+            String tag = a[0];
+            String[] m = reg.get(tag);
+            String timing = m == null ? "" : m[0];
+            String vt = m == null ? "" : m[1];
+            if ("online".equals(mode) && !"instant".equals(timing)) {
+                errs.add("在线任务只允许产出 instant(即时)标签: 「" + tag + "」注册 timing="
+                        + (timing.isEmpty() ? "?" : timing) + " —— 注册表声明改 instant, 或改用批/流模式产出");
+            }
+            if ("visual".equals(a[2]) && !"boolean".equals(vt) && a[1].isEmpty()) {
+                errs.add("值型标签打标动作必须带值: 「" + tag + "」(valueType=" + vt + ") —— 请在动作里填档位/数值");
+            }
+        }
+        if (!errs.isEmpty()) {
+            throw new IllegalArgumentException("发布校验未通过(§4 模式兼容):\n- " + String.join("\n- ", errs));
         }
     }
 
