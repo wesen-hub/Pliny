@@ -15,10 +15,10 @@
           <span style="font-weight:600">执行形态</span>
           <el-radio-group v-model="mode">
             <el-radio-button value="batch">批(离线/定时)</el-radio-button>
-            <el-radio-button value="stream" disabled>流(近实时/窗口)·P1</el-radio-button>
-            <el-radio-button value="online" disabled>在线(瞬时置位)·P1</el-radio-button>
+            <el-radio-button value="stream">流(近实时)</el-radio-button>
+            <el-radio-button value="online">在线(瞬时置位)</el-radio-button>
           </el-radio-group>
-          <el-tooltip content="P0 只实现批引擎(Spark 读 Iceberg); 流/在线 P1 开放, 后端 mode/校验位已预留" placement="top">
+          <el-tooltip content="批=Spark 读 Iceberg; 流=Flink 事件流(近实时双写); 在线=事件置位 Redis; 流/在线 P1 已开放" placement="top">
             <el-text size="small" type="warning">P0 仅批可用</el-text>
           </el-tooltip>
         </div>

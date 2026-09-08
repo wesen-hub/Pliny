@@ -20,6 +20,16 @@ export const claimsApi = {
   list: () => request.get('/tagengine/claims'),
   get: (path) => request.get('/tagengine/claims/x', { params: { path } })
 }
+export const onlineApi = {
+  info: (id) => request.get(`/tagengine/online/${id}`),
+  event: (id, body) => request.post(`/tagengine/online/${id}/event`, body),
+  entity: (entityKey) => request.get(`/tagengine/online/entity/${entityKey}`)
+}
+export const labelsApi = {
+  summary: () => request.get('/tagengine/labels/summary'),
+  circle: (tagPath, value) => request.get('/tagengine/labels/circle', { params: { tagPath, value } }),
+  entity: (entityKey) => request.get(`/tagengine/labels/entity/${entityKey}`)
+}
 
 export const tasksApi = {
   list: () => request.get('/tagengine/tasks'),

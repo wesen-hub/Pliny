@@ -35,12 +35,23 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="publish(row)">发布</el-button>
-            <el-button size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
-            <el-button size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
-            <el-button size="small" text :disabled="row.status !== 'published'" @click="matrixRun(row)">试跑</el-button>
-            <el-button size="small" text @click="openRuns(row)">Runs</el-button>
-            <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+            <template v-if="row.mode === 'online'">
+              <el-button size="small" text type="primary" @click="openEvent(row)">发事件</el-button>
+              <el-button size="small" text @click="openRuns(row)">Runs</el-button>
+              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+            </template>
+            <template v-else-if="row.mode === 'stream'">
+              <el-button size="small" text @click="openRuns(row)">Runs</el-button>
+              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+            </template>
+            <template v-else>
+              <el-button size="small" text type="primary" @click="publish(row)">发布</el-button>
+              <el-button size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
+              <el-button size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
+              <el-button size="small" text :disabled="row.status !== 'published'" @click="matrixRun(row)">试跑</el-button>
+              <el-button size="small" text @click="openRuns(row)">Runs</el-button>
+              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -82,6 +93,18 @@
         <pre style="max-height:300px;overflow:auto;background:#0d1b2a;color:#9fdcb0;padding:10px;font-size:12px">{{ curRun.payloadText }}</pre>
       </el-dialog>
     </el-drawer>
+
+    <!-- ═══ 在线发事件弹窗 ═══ -->
+    <el-dialog v-model="eventDlg" :title="'在线事件 · ' + (curTask ? curTask.name : '')" width="560" append-to-body>
+      <el-text size="small" type="info" style="display:block;margin-bottom:8px">
+        事件 JSON(含实体键 {{ curTask ? curTask.entityKey : '?' }} 与规则字段; 命中即置位 Redis tag:online:{entity})
+      </el-text>
+      <el-input v-model="eventJson" type="textarea" :rows="6" placeholder='{"id":"E001","status":"black","region":"east","ttlSeconds":600}' />
+      <template #footer>
+        <el-button size="small" @click="eventDlg = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="eventSending" @click="sendEvent">发送并求值</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -89,7 +112,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { tasksApi, runsApi } from '../../api/tagengine.js'
+import { tasksApi, runsApi, onlineApi } from '../../api/tagengine.js'
 
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))
@@ -100,6 +123,9 @@ const runs = ref([])
 const curTask = ref(null)
 const runJsonDlg = ref(false)
 const curRun = ref({})
+const eventDlg = ref(false)
+const eventJson = ref('')
+const eventSending = ref(false)
 
 async function load() {
   loading.value = true
@@ -122,6 +148,22 @@ function matrixRun(row) {
   tasksApi.run(row.id, false, true).then((r) => {
     toast(`试跑 run #${r.runId} 已触发(采样命中矩阵, 不写 tag_fact): ${r.status}`)
   }).catch(() => {})
+}
+function openEvent(row) {
+  curTask.value = row
+  eventJson.value = JSON.stringify({ [row.entityKey || 'id']: '', ttlSeconds: 600 }, null, 0)
+    .replace('"":', '"E' + Date.now().toString().slice(-4) + '":')
+  eventDlg.value = true
+}
+function sendEvent() {
+  let body
+  try { body = JSON.parse(eventJson.value) } catch (e) { toast('事件 JSON 格式错误', 'warning'); return }
+  if (!curTask.value) return
+  eventSending.value = true
+  onlineApi.event(curTask.value.id, body).then((r) => {
+    toast(`已求值: 命中 ${(r.tags || []).length} 个标签 → ${r.key || ''}(TTL ${r.ttlSeconds}s)`)
+    eventDlg.value = false
+  }).catch(() => {}).finally(() => { eventSending.value = false })
 }
 function fullRun(row) {
   ElMessageBox.confirm('全量重算: 忽略当前增量游标, 整集重算(跑完自动重新初始化游标)。确定?', '全量重算', { type: 'warning' })
