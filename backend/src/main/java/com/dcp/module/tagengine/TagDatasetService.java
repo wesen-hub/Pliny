@@ -104,21 +104,22 @@ public class TagDatasetService {
         }
         // 实体键候选: 业务键(business_key.keyFields/scopeFields, key_columns) > 真实主键 > 常见 id
         Set<String> pk = new LinkedHashSet<>();
-        for (String raw : List.of(cfg == null ? null : (String) cfg.get("businessKey"),
-                cfg == null ? null : (String) cfg.get("keyColumns"))) {
-            if (raw == null || raw.isBlank()) continue;
-            try {
-                com.fasterxml.jackson.databind.JsonNode n = new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw);
-                List<String> keys = new ArrayList<>();
-                if (n.isArray()) n.forEach(x -> keys.add(x.asText()));
-                else {
-                    for (String f : List.of("keyFields", "scopeFields")) {
-                        if (n.has(f) && n.get(f).isArray()) n.get(f).forEach(x -> keys.add(x.asText()));
+        if (cfg != null) {
+            for (String raw : List.of((String) cfg.get("businessKey"), (String) cfg.get("keyColumns"))) {
+                if (raw == null || raw.isBlank()) continue;
+                try {
+                    com.fasterxml.jackson.databind.JsonNode n = new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw);
+                    List<String> keys = new ArrayList<>();
+                    if (n.isArray()) n.forEach(x -> keys.add(x.asText()));
+                    else {
+                        for (String f : List.of("keyFields", "scopeFields")) {
+                            if (n.has(f) && n.get(f).isArray()) n.get(f).forEach(x -> keys.add(x.asText()));
+                        }
                     }
+                    keys.forEach(k -> { if (cols.stream().anyMatch(c -> c.get("name").equals(k))) pk.add(k); });
+                } catch (Exception ignore) {
+                    /* 解析失败忽略 */
                 }
-                keys.forEach(k -> { if (cols.stream().anyMatch(c -> c.get("name").equals(k))) pk.add(k); });
-            } catch (Exception ignore) {
-                /* 解析失败忽略 */
             }
         }
         cols.forEach(c -> { if ("PRI".equals(c.get("key"))) pk.add((String) c.get("name")); });
