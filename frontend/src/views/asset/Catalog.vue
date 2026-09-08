@@ -27,35 +27,41 @@
       </div>
       <!-- 右: 资产列表 -->
       <div class="cat-list">
-        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="openDetail">
-          <el-table-column label="资产" min-width="190">
+        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="openDetail" :header-cell-style="{ background: '#f7f9fc', color: '#4a5568', fontWeight: 600 }" :cell-style="{ padding: '6px 8px' }">
+          <el-table-column width="44" align="center">
+            <template #default="{ row }">
+              <el-button size="small" text :type="row.fav ? 'warning' : 'info'" title="收藏" @click="toggleFav(row)" style="font-size:15px;padding:0">{{ row.fav ? '★' : '☆' }}</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="资产" min-width="170" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="t-name" @click="openDetail(row)">{{ row.label }}</span>
-              <el-tag size="small" effect="plain" style="margin-left:6px">{{ row.kind || 'physical' }}</el-tag>
-              <el-tag v-if="row.fav" size="small" type="warning" effect="dark" style="margin-left:4px">★</el-tag>
+              <span class="kind-badge">{{ row.kind || 'physical' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="层 / 域" min-width="120">
+          <el-table-column label="层 · 域" min-width="96" show-overflow-tooltip>
             <template #default="{ row }"><span class="dim2">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></span></template>
           </el-table-column>
-          <el-table-column label="数据来源" min-width="120">
+          <el-table-column label="数据来源" min-width="130" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-tag v-for="s in row.sources" :key="s" size="small" effect="plain" style="margin:1px">{{ s }}</el-tag>
-              <span v-if="!row.sources.length" class="dim2">—</span>
+              <template v-if="row.sources.length">
+                <span class="src-chip" v-for="s in row.sources.slice(0, 2)" :key="s">{{ s }}</span>
+                <span v-if="row.sources.length > 2" class="dim2">+{{ row.sources.length - 2 }}</span>
+              </template>
+              <span v-else class="dim2">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="fields" label="字段" width="60" align="center" />
-          <el-table-column label="上游任务" width="80" align="center"><template #default="{ row }">{{ row.jobs || '—' }}</template></el-table-column>
-          <el-table-column label="依赖规则" width="80" align="center"><template #default="{ row }">{{ row.rules || '—' }}</template></el-table-column>
-          <el-table-column label="订阅应用" width="80" align="center">
+          <el-table-column prop="fields" label="字段" width="58" align="center" />
+          <el-table-column prop="jobs" label="任务" width="58" align="center" />
+          <el-table-column prop="rules" label="规则" width="58" align="center" />
+          <el-table-column label="订阅" width="58" align="center">
             <template #default="{ row }"><el-tag v-if="row.apps" size="small" type="success" effect="plain">{{ row.apps }}</el-tag><span v-else class="dim2">—</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="230" fixed="right">
+          <el-table-column label="操作" width="170" align="left">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="goLineage(row)">血缘</el-button>
               <el-button size="small" text type="warning" @click="goLineage(row, 'i')">影响</el-button>
               <el-button size="small" text @click="openDetail(row)">详情</el-button>
-              <el-button size="small" text :type="row.fav ? 'warning' : 'info'" @click="toggleFav(row)">★</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -226,6 +232,8 @@ onMounted(() => { favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]')
 .tnode { display: flex; align-items: center; gap: 4px; width: 100%; padding-right: 6px; font-size: 13px; }
 .cat-list { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 12px; }
 .t-name { color: #1677ff; font-weight: 600; cursor: pointer; }
+.kind-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 16px; color: #7b8794; background: #f0f2f5; border: 1px solid #e4e9f0; vertical-align: 1px; }
+.src-chip { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 17px; color: #0b5bd3; background: #e6f4ff; border: 1px solid #bcdcff; }
 .sec { font-size: 13px; font-weight: 600; }
 .dim2 { color: #999; font-size: 12px; }
 </style>
