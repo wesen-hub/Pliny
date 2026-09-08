@@ -43,24 +43,24 @@
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <template v-if="row.mode === 'online'">
-              <el-button size="small" text type="primary" @click="openEvent(row)">发事件</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:run')" size="small" text type="primary" @click="openEvent(row)">发事件</el-button>
               <el-button size="small" text @click="openRuns(row)">Runs</el-button>
-              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:delete')" size="small" text type="danger" @click="del(row)">删</el-button>
             </template>
             <template v-else-if="row.mode === 'stream'">
-              <el-button v-if="row.streamStatus !== 'RUNNING'" size="small" text type="success" :disabled="row.status !== 'published'" :loading="row._busy" @click="startStream(row)">启动</el-button>
-              <el-button v-else size="small" text type="warning" :loading="row._busy" @click="stopStream(row)">停止</el-button>
+              <el-button v-if="userStore.hasPerm('tag:stream:control') && row.streamStatus !== 'RUNNING'" size="small" text type="success" :disabled="row.status !== 'published'" :loading="row._busy" @click="startStream(row)">启动</el-button>
+              <el-button v-if="userStore.hasPerm('tag:stream:control') && row.streamStatus === 'RUNNING'" size="small" text type="warning" :loading="row._busy" @click="stopStream(row)">停止</el-button>
               <el-button size="small" text type="primary" :disabled="row.status !== 'published'" @click="statusStream(row)">状态</el-button>
               <el-button size="small" text @click="openRuns(row)">Runs</el-button>
-              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:delete')" size="small" text type="danger" @click="del(row)">删</el-button>
             </template>
             <template v-else>
-              <el-button size="small" text type="primary" @click="publish(row)">发布</el-button>
-              <el-button size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
-              <el-button size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
-              <el-button size="small" text :disabled="row.status !== 'published'" @click="matrixRun(row)">试跑</el-button>
+              <el-button v-if="userStore.hasPerm('tag:rule:publish')" size="small" text type="primary" @click="publish(row)">发布</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:run')" size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:run')" size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:run')" size="small" text :disabled="row.status !== 'published'" @click="matrixRun(row)">试跑</el-button>
               <el-button size="small" text @click="openRuns(row)">Runs</el-button>
-              <el-button size="small" text type="danger" @click="del(row)">删</el-button>
+              <el-button v-if="userStore.hasPerm('tag:task:delete')" size="small" text type="danger" @click="del(row)">删</el-button>
             </template>
           </template>
         </el-table-column>
@@ -123,6 +123,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tasksApi, runsApi, onlineApi, streamApi } from '../../api/tagengine.js'
+import { useUserStore } from '../../store/user'
+const userStore = useUserStore()
 
 const router = useRouter()
 const toast = (m, t) => (t ? ElMessage[t](m) : ElMessage.info(m))

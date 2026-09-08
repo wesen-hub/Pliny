@@ -58,7 +58,8 @@ const routes = [
       { path: 'subscribe/create', name: 'subscribe-create', component: () => import('../views/subscribe/Wizard.vue'), meta: { title: '新建订阅', active: 'subscribe' } },
       { path: 'subscribe/:id', name: 'subscribe-detail', component: () => import('../views/subscribe/Detail.vue'), meta: { title: '订阅详情', active: 'subscribe' } },
       // ---------- 权限管理 ----------
-      { path: 'system/permission', name: 'permission', component: () => import('../views/system/Permission.vue'), meta: { title: '权限管理', admin: true } },
+      { path: 'system/role-perm', name: 'role-perm', component: () => import('../views/system/RolePerm.vue'), meta: { title: '角色权限', admin: true } },
+      { path: 'system/permission', name: 'permission', component: () => import('../views/system/Permission.vue'), meta: { title: '数据权限', admin: true } },
       { path: 'system/user', name: 'user', component: () => import('../views/system/User.vue'), meta: { title: '用户管理', admin: true } },
       { path: 'system/audit', name: 'audit', component: () => import('../views/system/Audit.vue'), meta: { title: '审计日志', admin: true } }
     ]

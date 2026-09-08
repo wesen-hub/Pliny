@@ -12,6 +12,14 @@ export const useUserStore = defineStore('user', {
     canWrite: (state) => {
       const roles = (state.user && state.user.roles) || []
       return !roles.includes('VIEWER') && !roles.includes('AUDITOR')
+    },
+    // RBAC: 权限点全集(null=ADMIN 全量)
+    perms: (state) => (state.user && state.user.perms) || [],
+    // 用法: userStore.hasPerm('tag:rule:publish'); perms=null(admin) 恒真
+    hasPerm: (state) => (code) => {
+      const perms = state.user && state.user.perms
+      if (perms === null || perms === undefined || perms === 'all') return true
+      return Array.isArray(perms) && perms.includes(code)
     }
   },
   actions: {
