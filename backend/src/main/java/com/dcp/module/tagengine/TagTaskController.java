@@ -33,6 +33,15 @@ public class TagTaskController {
         return ApiResponse.ok(service.listTasks());
     }
 
+    @GetMapping("/{id}/overview")
+    public ApiResponse<Map<String, Object>> overview(@PathVariable long id) {
+        try {
+            return ApiResponse.ok(service.taskOverview(id));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(400, e.getMessage());
+        }
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> get(@PathVariable long id) {
         try {

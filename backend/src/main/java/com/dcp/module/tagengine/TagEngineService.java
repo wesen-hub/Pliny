@@ -902,6 +902,46 @@ public class TagEngineService {
         }
     }
 
+    /** 任务详情统计(P1.2 详情页): 产出标签(tag_fact_view 按 task)+ 运行统计(tag_run)+ 最近变更(tag_notify) */
+    public Map<String, Object> taskOverview(long taskId) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        getTask(taskId);   // 不存在即抛
+        // 产出标签(投影当前值; 湖仍权威)
+        List<Map<String, Object>> tagRows = metaJdbc.queryForList(
+                "SELECT tag, value, COUNT(DISTINCT entity) AS entities, MAX(run_ts) AS last_at"
+                        + " FROM tag_fact_view WHERE task_id=? GROUP BY tag, value ORDER BY entities DESC, tag", taskId);
+        List<Map<String, Object>> tagStats = new ArrayList<>();
+        for (Map<String, Object> r : tagRows) {
+            Map<String, Object> m = new LinkedHashMap<>(r);
+            tagStats.add(m);
+        }
+        out.put("tagStats", tagStats);
+        // 运行统计
+        List<Map<String, Object>> agg = metaJdbc.queryForList(
+                "SELECT COUNT(*) AS total,"
+                        + " SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END) AS ok,"
+                        + " SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS bad,"
+                        + " SUM(CASE WHEN status IN ('submitted','running') THEN 1 ELSE 0 END) AS active,"
+                        + " MAX(started_at) AS last_at, MAX(finished_at) AS last_finished"
+                        + " FROM tag_run WHERE task_id=?", taskId);
+        if (!agg.isEmpty()) {
+            Map<String, Object> rs = new LinkedHashMap<>(agg.get(0));
+            rs.put("total", rs.get("total") == null ? 0 : rs.get("total"));
+            rs.put("ok", rs.get("ok") == null ? 0 : rs.get("ok"));
+            rs.put("bad", rs.get("bad") == null ? 0 : rs.get("bad"));
+            rs.put("active", rs.get("active") == null ? 0 : rs.get("active"));
+            out.put("runStats", rs);
+        } else {
+            out.put("runStats", Map.of("total", 0, "ok", 0, "bad", 0, "active", 0));
+        }
+        // 最近变更审计(本任务产出)
+        List<Map<String, Object>> nrows = metaJdbc.queryForList(
+                "SELECT entity,tag_path,tag_value,occur_ts FROM tag_notify WHERE task_id=?"
+                        + " ORDER BY occur_ts DESC LIMIT 10", taskId);
+        out.put("recentNotify", nrows);
+        return out;
+    }
+
     public List<Map<String, Object>> listRuns(Long taskId, int limit) {
         String sql = "SELECT id,task_id,task_name,trigger_type,status,payload_path,submit_cmd,exit_code,summary_json,matrix_json,cursor_after,error_msg,started_at,finished_at FROM tag_run";
         List<Object> args = new ArrayList<>();

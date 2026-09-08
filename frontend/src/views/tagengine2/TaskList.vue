@@ -10,7 +10,11 @@
       </div>
 
       <el-table :data="tasks" size="small" border stripe style="margin-top:10px">
-        <el-table-column label="任务名称" min-width="160"><template #default="{ row }"><el-text size="small" style="font-weight:600">{{ row.name }}</el-text></template></el-table-column>
+        <el-table-column label="任务名称" min-width="170">
+          <template #default="{ row }">
+            <el-link type="primary" :underline="false" style="font-weight:600" @click="$router.push(`/tagengine2/task/detail?id=${row.id}`)">{{ row.name }}</el-link>
+          </template>
+        </el-table-column>
         <el-table-column label="数据集/实体" min-width="170"><template #default="{ row }"><el-text size="small">{{ row.dataset }} · {{ row.entityKey }}</el-text></template></el-table-column>
         <el-table-column label="绑定(执行序)" min-width="260">
           <template #default="{ row }">

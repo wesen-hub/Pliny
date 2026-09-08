@@ -48,6 +48,7 @@ export const notifyApi = {
 
 export const tasksApi = {
   list: () => request.get('/tagengine/tasks'),
+  overview: (id) => request.get(`/tagengine/tasks/${id}/overview`),
   get: (id) => request.get(`/tagengine/tasks/${id}`),
   create: (body) => request.post('/tagengine/tasks', body),
   update: (id, body) => request.put(`/tagengine/tasks/${id}`, body),
