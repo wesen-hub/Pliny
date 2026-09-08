@@ -18,6 +18,7 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructType;
 
@@ -90,6 +91,14 @@ public final class TagBatchJob {
             // 增量模式: 只保留变更行并收集实体集/游标(墓碑行不参与求值; 空变更 → 无事可做直接成功退出)
             IncrementalSnapshot incr = new IncrementalSnapshot();
             base = DatasetAssembly.applyIncremental(base, cfg, incr);
+            if (!incr.active) {
+                // 全量轮同样排除墓碑行(_is_deleted=1 = 实体注销, 不打标; 旧分区删除已清其历史标签)
+                java.util.List<String> cols = java.util.Arrays.asList(base.columns());
+                if (cols.contains(cfg.incremental.tombstoneColumn)) {
+                    base = base.filter(org.apache.spark.sql.functions.col(cfg.incremental.tombstoneColumn).isNull()
+                            .or(org.apache.spark.sql.functions.col(cfg.incremental.tombstoneColumn).notEqual(org.apache.spark.sql.functions.lit(1))));
+                }
+            }
             if (incr.active && !incr.hasChanged()) {
                 Log.info("════════ 打标批任务完成 task=" + cfg.taskId + "(增量: 无变更, 游标已最新) 退出码 0 ════════");
                 return 0;
@@ -134,13 +143,18 @@ public final class TagBatchJob {
                 Log.info("[tag_fact] 写行数=" + written + (incr.active ? "(增量轮)" : ""));
             }
 
-            // ④ run 摘要 + 命中矩阵 + 游标输出(增量)
+            // ④ run 摘要 + 命中矩阵 + 游标输出(增量轮: 变更 maxSeq; 全量轮给定 --cursor-out: 全表 maxSeq 作游标初始化)
             Map<String, Long> m = new TreeMap<>(matrix.value());
             String summary = summaryText(cfg, plan, m, written, opts.matrix);
             Log.info("[摘要] " + summary);
-            if (incr.active && !opts.matrix) {
-                writeCursorOut(incr, opts);
+            if (!opts.matrix && opts.cursorOut != null) {
+                if (incr.active) {
+                    writeCursorOut(incr, opts);
+                } else {
+                    writeFullCursorOut(base, spark, cfg, opts);
+                }
             }
+
             if (opts.matrixOut != null) {
                 writeMatrixFile(cfg, plan, m, opts.matrixOut);
             }
@@ -236,6 +250,35 @@ public final class TagBatchJob {
             first = false;
         }
         return sb.append(']').toString();
+    }
+
+    /** 全量轮游标初始化(给定 --cursor-out 时): 探测湖表 _seq% 列 → 全表 maxSeq, 供平台回写后转增量 */
+    private static void writeFullCursorOut(Dataset<Row> base, SparkSession spark, TaskConfig cfg, CliOptions opts) {
+        try {
+            String seqCol = cfg.incremental.seqColumn;
+            if (seqCol == null || seqCol.isBlank()) {
+                java.util.List<String> cols = java.util.Arrays.asList(base.columns());
+                seqCol = cols.stream().filter(c -> c.startsWith("_seq")).findFirst().orElse(null);
+            }
+            if (seqCol == null) {
+                Log.warn("[游标] 全量轮未找到 _seq% 列, 不写游标初始化(后续无法转增量)");
+                return;
+            }
+            org.apache.spark.sql.Row agg = base.agg(functions.max(functions.col(seqCol)).alias("m")).head();
+            long maxSeq = agg == null || agg.isNullAt(0) ? -1 : agg.getLong(0);
+            if (maxSeq < 0) {
+                Log.warn("[游标] 数据集为空或无 _seq 值, 游标保持未初始化");
+                return;
+            }
+            ObjectNode o = OM.createObjectNode();
+            o.put("seqColumn", seqCol);
+            o.put("maxSeq", maxSeq);
+            Files.writeString(Paths.get(opts.cursorOut), OM.writerWithDefaultPrettyPrinter().writeValueAsString(o),
+                    StandardCharsets.UTF_8);
+            Log.info("[游标] 全量轮游标初始化已写: " + opts.cursorOut + " = " + o);
+        } catch (Exception e) {
+            Log.error("[游标] 写文件失败: " + e.getMessage());
+        }
     }
 
     /** 游标输出(增量轮; 平台 exit0 后读文件回写 tag_task.cursor_json, 同 lakesync cursor-out 模式) */
