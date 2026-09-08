@@ -437,3 +437,17 @@ CREATE TABLE IF NOT EXISTS data_sub_delivery (
   error_msg VARCHAR(1024), ts DATETIME DEFAULT CURRENT_TIMESTAMP,
   KEY idx_contract (contract_id, id)
 ) ENGINE=InnoDB COMMENT='数据订阅交付记录';
+
+-- ============ 数据订阅(2026-09-09): 异步导出任务 ============
+CREATE TABLE IF NOT EXISTS data_sub_export (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_id BIGINT NOT NULL,
+  format VARCHAR(8) NOT NULL COMMENT 'csv|json',
+  status VARCHAR(12) NOT NULL DEFAULT 'pending' COMMENT 'pending|done|fail',
+  rows_count INT NULL,
+  file_name VARCHAR(128) NULL,
+  error_msg VARCHAR(512),
+  expire_at DATETIME NULL,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_contract (contract_id, id)
+) ENGINE=InnoDB COMMENT='数据订阅异步导出任务';

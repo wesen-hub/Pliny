@@ -90,7 +90,7 @@ public class DataSubService {
     public Map<String, Object> getContract(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
                 "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,"
-                        + "push_interval_min,last_deliver_at,ttl,status,token,webhook_secret,approved_by,approved_at,reject_reason,create_by,create_time,update_time"
+                        + "push_interval_min,last_cursor,last_deliver_at,ttl,status,token,webhook_secret,approved_by,approved_at,reject_reason,create_by,create_time,update_time"
                         + " FROM data_contract WHERE id=?", id);
         if (rows.isEmpty()) throw new BizException(ErrorCode.NOT_FOUND, "契约不存在 id=" + id);
         Map<String, Object> m = new LinkedHashMap<>(rows.get(0));
@@ -199,7 +199,7 @@ public class DataSubService {
 
     public List<Map<String, Object>> list() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,push_interval_min,last_deliver_at,ttl,status,"
+                "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,push_interval_min,last_cursor,last_deliver_at,ttl,status,"
                         + "approved_by,approved_at,reject_reason,create_by,create_time,update_time FROM data_contract ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) {
@@ -486,32 +486,91 @@ public class DataSubService {
 
     /* ---------- 交付(PULL 由订阅方调; PUSH 平台 deliver 触发) ---------- */
 
-    /** PULL snapshot/changes 统一取数入口 */
-    public Map<String, Object> pull(long id, String token, Long after, int limit, boolean asChanges) {
+    /** 标签变更事件流(occur_ts 时间游标): 圈选标签集内打标/改值事件(exclude 实体剔除) */
+    public List<Map<String, Object>> tagChanges(JsonNode view, String afterTs, int limit) {
+        List<String> paths = new ArrayList<>();
+        view.path("tags").forEach(t -> {
+            String x = t.path("path").asText("");
+            if (!x.isBlank()) paths.add(lit(x));
+        });
+        if (paths.isEmpty()) return new ArrayList<>();
+        Set<String> exEntities = new HashSet<>();
+        for (JsonNode ex : view.path("exclude")) {
+            String path = ex.isTextual() ? ex.asText() : ex.path("path").asText("");
+            if (path.isBlank()) continue;
+            List<Map<String, Object>> exr = metaJdbc.queryForList("SELECT DISTINCT entity FROM tag_fact_view WHERE tag=?", path);
+            exr.forEach(r -> exEntities.add(s(r.get("entity"))));
+        }
+        StringBuilder sql = new StringBuilder("SELECT entity, tag_path, tag_value, occur_ts FROM tag_notify WHERE tag_path IN (")
+                .append(String.join(",", paths)).append(")");
+        if (afterTs != null && !afterTs.isBlank()) sql.append(" AND occur_ts > ").append(lit(afterTs));
+        sql.append(" ORDER BY occur_ts, entity LIMIT ").append(Math.min(Math.max(limit, 1), 5000));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : metaJdbc.queryForList(sql.toString())) {
+            if (exEntities.contains(s(r.get("entity")))) continue;
+            Map<String, Object> ev = new LinkedHashMap<>();
+            ev.put("entity", s(r.get("entity")));
+            ev.put("tag", s(r.get("tag_path")));
+            ev.put("value", r.get("tag_value") == null ? "" : s(r.get("tag_value")));
+            ev.put("ts", s(r.get("occur_ts")).replace('T', ' '));
+            out.add(ev);
+        }
+        return out;
+    }
+
+    /** 行集增量键最大值(行须含 seqCol 键; seq 为数值, 数值比较防 "100"<"8" 字符串坑) */
+    private static String maxSeqOf(List<Map<String, Object>> rows, String seqCol) {
+        if (rows == null || seqCol == null) return null;
+        String max = null;
+        for (Map<String, Object> r : rows) {
+            Object sc = r.get(seqCol);
+            if (sc == null) continue;
+            String v = s(sc);
+            if (max == null) {
+                max = v;
+                continue;
+            }
+            try {
+                if (new java.math.BigDecimal(v).compareTo(new java.math.BigDecimal(max)) > 0) max = v;
+            } catch (NumberFormatException e) {
+                if (v.compareTo(max) > 0) max = v;
+            }
+        }
+        return max;
+    }
+
+    /** 当前视图全量行(logical 快照 / tag 实体渲染) */
+    private List<Map<String, Object>> snapshotRows(Map<String, Object> c) {
+        JsonNode view = (JsonNode) c.get("view");
+        return "logical".equals(s(c.get("view_type")))
+                ? queryLogical(view, null, 10000)
+                : renderTagView(view, tagEntities(view));
+    }
+
+    /** PULL snapshot/changes 统一取数入口; after 游标: 逻辑表=数字 seq, 标签视图=occur_ts 时间串 */
+    public Map<String, Object> pull(long id, String token, String after, int limit, boolean asChanges) {
         Map<String, Object> c = requireActiveForPull(id, token);
         JsonNode view = (JsonNode) c.get("view");
         List<Map<String, Object>> rows;
         String nextCursor = null;
         if ("logical".equals(s(c.get("view_type")))) {
-            rows = queryLogical(view, asChanges ? after : null, limit);
-            if (asChanges && !rows.isEmpty()) {
-                String seqCol = probeSeqCol(view.path("tables").get(0).asText());
-                for (Map<String, Object> r : rows) {
-                    Object sc = r.get(seqCol);
-                    if (sc != null) nextCursor = String.valueOf(sc);
+            Long afterSeq = null;
+            if (asChanges && after != null && !after.isBlank()) {
+                try {
+                    afterSeq = Long.valueOf(after);
+                } catch (NumberFormatException e) {
+                    throw new BizException(ErrorCode.PARAM_ERROR, "逻辑表增量游标须为数字 seq");
                 }
             }
-        } else {
-            Set<String> ents = tagEntities(view);
-            List<String> sorted = new ArrayList<>(ents);
-            if (after != null && asChanges) {
-                // 标签增量: after 为上次实体数(简化: 分页语义)——取实体序号 > after
-                List<String> sub = sorted.stream().skip(after).limit(limit).toList();
-                rows = renderTagView(view, new LinkedHashSet<>(sub));
-                if (!sub.isEmpty()) nextCursor = String.valueOf(after + sub.size());
-            } else {
-                rows = renderTagView(view, new LinkedHashSet<>(sorted));
+            rows = queryLogical(view, asChanges ? afterSeq : null, limit);
+            if (asChanges && !rows.isEmpty()) {
+                nextCursor = maxSeqOf(rows, probeSeqCol(view.path("tables").get(0).asText()));
             }
+        } else if (asChanges) {
+            rows = tagChanges(view, after, limit);
+            if (!rows.isEmpty()) nextCursor = s(rows.get(rows.size() - 1).get("ts"));
+        } else {
+            rows = renderTagView(view, tagEntities(view));
         }
         // 交付审计 + 记录
         metaJdbc.update("INSERT INTO data_sub_delivery(contract_id,mode,channel,range_text,rows_count,status) VALUES(?,?,?,?,?,'ok')",
@@ -525,26 +584,74 @@ public class DataSubService {
         return out;
     }
 
-    /** PUSH 投递(平台触发: 手动/后续调度); webhook 验签密钥已随生效下发; kafka 发 topic */
-    public Map<String, Object> deliver(long id, String who) {
+    /** PUSH 投递; incremental=true 且契约 last_cursor 已存在 → 只推游标后增量(成功才推进游标, at-least-once 可重放); 无游标首轮=全量并初始化游标 */
+    public Map<String, Object> deliver(long id, String who, boolean incremental) {
         Map<String, Object> c = getContract(id);
-        if (!"active".equals(s(c.get("status"))) && !"push".equals(s(c.get("push")))) {
+        if (!"active".equals(s(c.get("status"))) || !"push".equals(s(c.get("push")))) {
             throw new BizException(ErrorCode.PARAM_ERROR, "仅生效 push 契约可投递");
         }
         JsonNode view = (JsonNode) c.get("view");
-        List<Map<String, Object>> rows = "logical".equals(s(c.get("view_type")))
-                ? queryLogical(view, null, 1000)
-                : renderTagView(view, tagEntities(view));
+        boolean isLogical = "logical".equals(s(c.get("view_type")));
         String channel = "webhook".equals(s(c.get("target_type"))) ? "webhook" : "kafka";
+        String cursor = s(c.get("last_cursor"));
+        boolean useIncr = incremental && cursor != null && !cursor.isBlank();
+        List<Map<String, Object>> rows;
+        String nextCursor = null;
+        if (isLogical) {
+            String firstTable = ident(view.path("tables").get(0).asText());
+            if (firstTable == null) throw new BizException(ErrorCode.PARAM_ERROR, "非法表名");
+            String seqCol = probeSeqCol(firstTable);
+            if (useIncr) {
+                try {
+                    long from = Long.parseLong(cursor.trim());
+                    rows = queryLogical(view, from, 5000);
+                    nextCursor = maxSeqOf(rows, seqCol);
+                } catch (NumberFormatException e) {
+                    rows = new ArrayList<>();
+                }
+            } else {
+                rows = queryLogical(view, null, 10000);
+                if (seqCol != null && !rows.isEmpty()) {
+                    Object mx = target().queryForObject("SELECT MAX(`" + seqCol + "`) FROM `" + firstTable + "`", Object.class);
+                    if (mx != null) nextCursor = s(mx);
+                }
+            }
+        } else {
+            if (useIncr) {
+                rows = tagChanges(view, cursor, 5000);
+                if (!rows.isEmpty()) nextCursor = s(rows.get(rows.size() - 1).get("ts"));
+            } else {
+                rows = renderTagView(view, tagEntities(view));
+                List<String> paths = new ArrayList<>();
+                view.path("tags").forEach(t -> {
+                    String x = t.path("path").asText("");
+                    if (!x.isBlank()) paths.add(lit(x));
+                });
+                if (!paths.isEmpty()) {
+                    try {
+                        Object mx = metaJdbc.queryForObject("SELECT MAX(occur_ts) FROM tag_notify WHERE tag_path IN ("
+                                + String.join(",", paths) + ")", Object.class);
+                        if (mx != null) nextCursor = s(mx).replace('T', ' ');
+                    } catch (Exception ignore) {
+                    }
+                }
+            }
+        }
         String status = "ok";
-        int retries = 0;
         String err = null;
         try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("contract", s(c.get("name")));
+            payload.put("mode", useIncr ? "incremental" : "full");
+            if (useIncr) payload.put("from", cursor);
+            payload.put("next", nextCursor);
+            payload.put("count", rows.size());
+            payload.put(useIncr && !isLogical ? "events" : "rows", rows);
+            String body = OM.writeValueAsString(payload);
             if ("webhook".equals(channel)) {
                 String url = s(c.get("target_url"));
                 String secret = s(c.get("webhook_secret"));
                 if (url.isBlank()) throw new IllegalStateException("未配置目标 URL");
-                String body = OM.writeValueAsString(Map.of("contract", s(c.get("name")), "rows", rows, "count", rows.size()));
                 long ts = System.currentTimeMillis();
                 String sign = hmac(secret, ts, body);
                 var client = java.net.http.HttpClient.newHttpClient();
@@ -560,23 +667,39 @@ public class DataSubService {
                 var resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() >= 400) throw new IllegalStateException("webhook HTTP " + resp.statusCode());
             } else {
-                kafkaSend("dcp.sub." + s(c.get("subscriber")) + "." + id,
-                        OM.writeValueAsString(Map.of("contract", s(c.get("name")), "rows", rows, "count", rows.size())));
+                kafkaSend("dcp.sub." + s(c.get("subscriber")) + "." + id, body);
             }
         } catch (Exception e) {
             status = "fail";
             err = e.getMessage();
-            retries = 1;
         }
+        // 失败累计(连续失败次数, 供退避重试上限判断); 成功归零
+        int retries = 0;
+        if ("fail".equals(status)) {
+            try {
+                Integer mx = metaJdbc.queryForObject("SELECT COALESCE(MAX(retries),0) FROM data_sub_delivery"
+                        + " WHERE contract_id=? AND mode='push' AND status='fail'", Integer.class, id);
+                retries = (mx == null ? 0 : mx) + 1;
+            } catch (Exception ignore) {
+                retries = 1;
+            }
+        }
+        String range = (useIncr ? "incr from=" + cursor : "full") + (nextCursor != null ? " to=" + nextCursor : "");
         metaJdbc.update("INSERT INTO data_sub_delivery(contract_id,mode,channel,range_text,rows_count,status,retries,error_msg)"
-                        + " VALUES(?,?,?,?,?,?,?,?)", id, "push", channel, "deliver", rows.size(), status, retries, err);
-        // 节拍语义: 无论成败都推进 last_deliver_at, 调度按间隔重试(失败可见于交付记录)
-        metaJdbc.update("UPDATE data_contract SET last_deliver_at=NOW() WHERE id=?", id);
-        audit("DELIVER", id, (status.equals("ok") ? "投递成功 " : "投递失败 ") + channel + " " + rows.size() + " 行" + (err == null ? "" : ": " + err));
+                        + " VALUES(?,?,?,?,?,?,?,?)", id, "push", channel, range, rows.size(), status, retries, err);
+        // 成功才推进数据游标(失败保留, 下次重放同范围); 节拍时间无条件推进
+        if ("ok".equals(status) && nextCursor != null) {
+            metaJdbc.update("UPDATE data_contract SET last_cursor=?, last_deliver_at=NOW() WHERE id=?", nextCursor, id);
+        } else {
+            metaJdbc.update("UPDATE data_contract SET last_deliver_at=NOW() WHERE id=?", id);
+        }
+        audit("DELIVER", id, (status.equals("ok") ? "投递成功 " : "投递失败 ") + channel + " " + range + " " + rows.size() + " 行" + (err == null ? "" : ": " + err));
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);
         out.put("channel", channel);
+        out.put("mode", useIncr ? "incremental" : "full");
         out.put("rows", rows.size());
+        out.put("cursor", nextCursor);
         out.put("status", status);
         out.put("error", err);
         return out;
@@ -618,13 +741,59 @@ public class DataSubService {
         return v == null || v.isBlank() ? def : v;
     }
 
-    /** CSV 导出(全量视图, 直接返回文本) */
-    public String exportCsv(long id, String token) {
-        Map<String, Object> c = requireActiveForPull(id, token);
-        JsonNode view = (JsonNode) c.get("view");
-        List<Map<String, Object>> rows = "logical".equals(s(c.get("view_type")))
-                ? queryLogical(view, null, 10000)
-                : renderTagView(view, tagEntities(view));
+    private final java.util.concurrent.ExecutorService exportExec =
+            java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+                Thread t = new Thread(r, "dcp-export");
+                t.setDaemon(true);
+                return t;
+            });
+    private static final java.nio.file.Path EXPORT_DIR = java.nio.file.Paths.get("/tmp/dcp-export");
+
+    /** 异步导出(方案 3.1): 创建任务(admin 或契约 token) → 后台生成 csv/json → 轮询状态 → TTL 内下载 */
+    public Map<String, Object> createExport(long id, String token, boolean admin, String format) {
+        String fmt = "json".equals(format) ? "json" : "csv";
+        Map<String, Object> c;
+        if (admin) {
+            c = getContract(id);
+            if (!"active".equals(s(c.get("status")))) throw new BizException(ErrorCode.FORBIDDEN, "契约未生效");
+        } else {
+            c = requireActiveForPull(id, token);
+        }
+        metaJdbc.update("INSERT INTO data_sub_export(contract_id,format,status,expire_at) VALUES(?,?,'pending',DATE_ADD(NOW(), INTERVAL 30 MINUTE))",
+                id, fmt);
+        Number taskId = metaJdbc.queryForObject("SELECT LAST_INSERT_ID()", Number.class);
+        long tid = taskId.longValue();
+        audit("EXPORT", id, "创建导出任务 " + tid + " format=" + fmt);
+        exportExec.submit(() -> runExport(tid));
+        return Map.of("taskId", tid, "status", "pending");
+    }
+
+    private void runExport(long taskId) {
+        try {
+            List<Map<String, Object>> rows = metaJdbc.queryForList("SELECT contract_id, format FROM data_sub_export WHERE id=?", taskId);
+            if (rows.isEmpty()) return;
+            Map<String, Object> task = rows.get(0);
+            Map<String, Object> c = getContract(((Number) task.get("contract_id")).longValue());
+            List<Map<String, Object>> data = snapshotRows(c);
+            String fmt = s(task.get("format"));
+            String content = "csv".equals(fmt) ? toCsv(data) : OM.writeValueAsString(data);
+            java.nio.file.Files.createDirectories(EXPORT_DIR);
+            String fn = taskId + "." + fmt;
+            java.nio.file.Files.write(EXPORT_DIR.resolve(fn), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            metaJdbc.update("UPDATE data_sub_export SET status='done', rows_count=?, file_name=? WHERE id=?", data.size(), fn, taskId);
+            metaJdbc.update("INSERT INTO data_sub_delivery(contract_id,mode,channel,range_text,rows_count,status) VALUES(?,?,'export',?,?,'ok')",
+                    task.get("contract_id"), "pull", "task#" + taskId, data.size());
+        } catch (Exception e) {
+            try {
+                String m = e.getMessage();
+                metaJdbc.update("UPDATE data_sub_export SET status='fail', error_msg=? WHERE id=?",
+                        m == null ? "未知错误" : m.substring(0, Math.min(m.length(), 400)), taskId);
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
+    private static String toCsv(List<Map<String, Object>> rows) {
         StringBuilder sb = new StringBuilder();
         if (!rows.isEmpty()) {
             sb.append(String.join(",", rows.get(0).keySet())).append("\n");
@@ -634,10 +803,53 @@ public class DataSubService {
                 sb.append(String.join(",", vals)).append("\n");
             }
         }
-        metaJdbc.update("INSERT INTO data_sub_delivery(contract_id,mode,channel,range_text,rows_count,status) VALUES(?,?,'export',?,?,'ok')",
-                id, "pull", "csv", rows.size());
-        audit("EXPORT", id, "CSV 导出 " + rows.size() + " 行");
         return sb.toString();
+    }
+
+    private Map<String, Object> exportTaskRow(long taskId) {
+        List<Map<String, Object>> rows = metaJdbc.queryForList(
+                "SELECT t.*, c.subscriber FROM data_sub_export t JOIN data_contract c ON c.id=t.contract_id WHERE t.id=?", taskId);
+        if (rows.isEmpty()) throw new BizException(ErrorCode.NOT_FOUND, "导出任务不存在");
+        return rows.get(0);
+    }
+
+    private void requireExportAccess(long taskId, String token, boolean admin) {
+        if (admin) return;
+        Map<String, Object> t = exportTaskRow(taskId);
+        Map<String, Object> c = getContract(((Number) t.get("contract_id")).longValue());
+        if (token == null || !token.equals(s(c.get("token")))) throw new BizException(ErrorCode.FORBIDDEN, "X-Dcp-Token 无效");
+    }
+
+    /** 导出任务状态(订阅方轮询 / 管理查看) */
+    public Map<String, Object> exportStatus(long taskId, String token, boolean admin) {
+        requireExportAccess(taskId, token, admin);
+        Map<String, Object> t = exportTaskRow(taskId);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("taskId", taskId);
+        out.put("format", s(t.get("format")));
+        out.put("status", s(t.get("status")));
+        out.put("rows", t.get("rows_count"));
+        out.put("error", t.get("error_msg"));
+        out.put("expireAt", s(t.get("expire_at")));
+        out.put("downloadUrl", "done".equals(s(t.get("status"))) ? "/api/data-sub/export-task/" + taskId + "/download" : null);
+        return out;
+    }
+
+    /** 导出文件下载(TTL 内; 权限=任务归属契约 token 或 admin) */
+    public byte[] exportDownload(long taskId, String token, boolean admin) {
+        requireExportAccess(taskId, token, admin);
+        Map<String, Object> t = exportTaskRow(taskId);
+        if (!"done".equals(s(t.get("status")))) throw new BizException(ErrorCode.PARAM_ERROR, "任务未完成(status=" + t.get("status") + ")");
+        String expire = s(t.get("expire_at"));
+        if (!expire.isBlank()) {
+            String now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            if (now.compareTo(expire) > 0) throw new BizException(ErrorCode.NOT_FOUND, "导出文件已过期(TTL 30min)");
+        }
+        try {
+            return java.nio.file.Files.readAllBytes(EXPORT_DIR.resolve(s(t.get("file_name"))));
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.NOT_FOUND, "导出文件缺失");
+        }
     }
 
     @org.springframework.beans.factory.annotation.Autowired

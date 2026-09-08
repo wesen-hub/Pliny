@@ -562,21 +562,35 @@ async function testPull(row) {
     if (monCid.value === row.id && tab.value === 'deliver') await loadDeliveries()
   } catch (e) { /* 已弹错 */ }
 }
-async function exportCsv(row) {
+async function exportCsv(row, format = 'csv') {
   if (!row.token) { ElMessage.warning('契约未生效, 无取数凭据'); return }
+  const h = { 'X-Dcp-Token': row.token }
   try {
-    const res = await fetch(`/api/data-sub/${row.id}/export?format=csv`, { headers: { 'X-Dcp-Token': row.token } })
+    // 异步导出任务(方案 3.1): 创建 → 轮询 → TTL 内下载
+    const t = await request.post(`/data-sub/${row.id}/export?format=${format}`, {}, { headers: h })
+    const toast = ElMessage({ message: `导出任务 #${t.taskId} 生成中...`, duration: 0 })
+    let d = null
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      d = await request.get(`/data-sub/export-task/${t.taskId}`, { headers: h })
+      if (d.status === 'done' || d.status === 'fail') break
+    }
+    toast.close()
+    if (d?.status !== 'done') { ElMessage.error('导出未完成: ' + (d?.error || '超时')); return }
+    const res = await fetch(`/api/data-sub/export-task/${t.taskId}/download`, { headers: h })
     if (!res.ok) throw new Error('HTTP ' + res.status)
-    const text = await res.text()
-    const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' })
+    const buf = new Uint8Array(await res.arrayBuffer())
+    const type = format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json'
+    // csv 加 BOM 防 Excel 中文乱码
+    const body = format === 'csv' ? new Blob(['\ufeff', buf], { type }) : new Blob([buf], { type })
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `data-sub-${row.id}-${Date.now()}.csv`
+    a.href = URL.createObjectURL(body)
+    a.download = `data-sub-${row.id}-${t.taskId}.${format}`
     a.click()
     URL.revokeObjectURL(a.href)
-    ElMessage.success('CSV 已下载')
+    ElMessage.success(`导出完成: ${d.rows ?? 0} 行已下载`)
     if (monCid.value === row.id && tab.value === 'deliver') await loadDeliveries()
-  } catch (e) { ElMessage.error('导出失败: ' + e.message) }
+  } catch (e) { ElMessage.error('导出失败: ' + (e.message || e)) }
 }
 
 /* ---------- 详情 ---------- */

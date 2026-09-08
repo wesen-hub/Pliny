@@ -47,6 +47,7 @@ public class PushScheduler {
     }
 
     void tick() {
+        // ① 定时档到期契约: 增量投递(无游标首轮=全量并初始化游标)
         List<Long> due;
         try {
             due = metaJdbc.queryForList(
@@ -60,11 +61,31 @@ public class PushScheduler {
         }
         for (Long id : due) {
             try {
-                dataSubService.deliver(id, "scheduler");
+                dataSubService.deliver(id, "scheduler", true);
                 log.info("data-sub 定时投递完成 contractId={}", id);
             } catch (Exception e) {
                 log.warn("data-sub 定时投递失败 contractId={}: {}", id, e.getMessage());
             }
+        }
+        // ② 失败退避重试(最近一次 push 失败行 retries<3, 按 1m/5m/30m 指数退避; 达 3 次=死信停自动, 手动可重投)
+        try {
+            List<Long> retry = metaJdbc.queryForList(
+                    "SELECT d.contract_id FROM data_sub_delivery d"
+                            + " JOIN data_contract c ON c.id=d.contract_id"
+                            + " WHERE d.mode='push' AND d.status='fail' AND d.retries<3 AND c.push='push' AND c.status='active'"
+                            + " AND d.id=(SELECT MAX(d2.id) FROM data_sub_delivery d2 WHERE d2.contract_id=d.contract_id AND d2.mode='push')"
+                            + " AND d.ts < DATE_SUB(NOW(), INTERVAL CASE d.retries WHEN 1 THEN 60 WHEN 2 THEN 300 ELSE 1800 END SECOND)",
+                    Long.class);
+            for (Long id : retry) {
+                try {
+                    dataSubService.deliver(id, "retry", true);
+                    log.info("data-sub 退避重试完成 contractId={}", id);
+                } catch (Exception e) {
+                    log.warn("data-sub 退避重试失败 contractId={}: {}", id, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("data-sub 重试扫描失败: {}", e.getMessage());
         }
     }
 }

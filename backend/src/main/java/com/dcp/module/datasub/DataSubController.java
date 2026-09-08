@@ -97,12 +97,13 @@ public class DataSubController {
         }
     }
 
-    /** PUSH 投递(平台触发; 后续接调度实现定时/实时) */
+    /** PUSH 投递: 默认全量; ?incremental=true → 按契约 last_cursor 增量(调度/重试用) */
     @PostMapping("/{id}/deliver")
     @PreAuthorize("@perm.isAdmin()")
-    public ApiResponse<Map<String, Object>> deliver(@PathVariable long id) {
+    public ApiResponse<Map<String, Object>> deliver(@PathVariable long id,
+                                                    @RequestParam(defaultValue = "false") boolean incremental) {
         try {
-            return ApiResponse.ok(service.deliver(id, SecurityUtils.currentUsername()));
+            return ApiResponse.ok(service.deliver(id, SecurityUtils.currentUsername(), incremental));
         } catch (BizException e) {
             return ApiResponse.error(400, e.getMessage());
         }
@@ -141,7 +142,7 @@ public class DataSubController {
     @GetMapping("/{id}/changes")
     public ApiResponse<Map<String, Object>> changes(@PathVariable long id,
                                                     @RequestHeader(value = "X-Dcp-Token", required = false) String token,
-                                                    @RequestParam(required = false) Long after,
+                                                    @RequestParam(required = false) String after,
                                                     @RequestParam(defaultValue = "1000") int limit) {
         try {
             return ApiResponse.ok(service.pull(id, token, after, limit, true));
@@ -150,12 +151,36 @@ public class DataSubController {
         }
     }
 
-    /** 批量导出(异步文件语义: 小数据同步返回; 大数据走任务分片 —— 本期同步 CSV 输出) */
-    @GetMapping(value = "/{id}/export", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String export(@PathVariable long id,
-                         @RequestHeader(value = "X-Dcp-Token", required = false) String token,
-                         @RequestParam(defaultValue = "csv") String format) {
-        if (!"csv".equals(format)) throw new BizException(ErrorCode.PARAM_ERROR, "本期支持 csv");
-        return service.exportCsv(id, token);
+    /* ---------- 异步导出(方案 3.1: 创建任务 → 轮询 → TTL 内下载) ---------- */
+
+    @PostMapping("/{id}/export")
+    public ApiResponse<Map<String, Object>> createExport(@PathVariable long id,
+                                                         @RequestHeader(value = "X-Dcp-Token", required = false) String token,
+                                                         @RequestParam(defaultValue = "csv") String format) {
+        if (!"csv".equals(format) && !"json".equals(format)) throw new BizException(ErrorCode.PARAM_ERROR, "format=csv|json");
+        try {
+            return ApiResponse.ok(service.createExport(id, token, SecurityUtils.hasRole("ADMIN"), format));
+        } catch (BizException e) {
+            return ApiResponse.error(403, e.getMessage());
+        }
+    }
+
+    @GetMapping("/export-task/{taskId}")
+    public ApiResponse<Map<String, Object>> exportStatus(@PathVariable long taskId,
+                                                         @RequestHeader(value = "X-Dcp-Token", required = false) String token) {
+        try {
+            return ApiResponse.ok(service.exportStatus(taskId, token, SecurityUtils.hasRole("ADMIN")));
+        } catch (BizException e) {
+            return ApiResponse.error(e.getCode() == ErrorCode.NOT_FOUND.getCode() ? 404 : 403, e.getMessage());
+        }
+    }
+
+    @GetMapping(value = "/export-task/{taskId}/download", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] exportDownload(@PathVariable long taskId,
+                                 @RequestHeader(value = "X-Dcp-Token", required = false) String token,
+                                 jakarta.servlet.http.HttpServletResponse response) {
+        byte[] data = service.exportDownload(taskId, token, SecurityUtils.hasRole("ADMIN"));
+        response.setHeader("Content-Disposition", "attachment; filename=dcp-export-" + taskId + ".dat");
+        return data;
     }
 }

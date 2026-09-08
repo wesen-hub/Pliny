@@ -62,7 +62,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/data-sub/*/schema").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/data-sub/*/snapshot").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/data-sub/*/changes").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/*/export").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/data-sub/*/export").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*/download").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
