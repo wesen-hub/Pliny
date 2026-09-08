@@ -2,6 +2,7 @@ package com.dcp.module.tagengine.online;
 
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.Map;
 
@@ -25,6 +26,7 @@ public class StreamJobController {
     }
 
     @PostMapping("/{taskId}/start")
+    @PreAuthorize("@perm.has('tag:stream:control')")
     public ApiResponse<Map<String, Object>> start(@PathVariable long taskId) {
         try {
             return ApiResponse.ok(service.start(taskId));
@@ -34,6 +36,7 @@ public class StreamJobController {
     }
 
     @PostMapping("/{taskId}/stop")
+    @PreAuthorize("@perm.has('tag:stream:control')")
     public ApiResponse<Map<String, Object>> stop(@PathVariable long taskId) {
         try {
             return ApiResponse.ok(service.stop(taskId));

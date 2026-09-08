@@ -2,6 +2,7 @@ package com.dcp.module.tagengine;
 
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,7 @@ public class TagTaskController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('tag:task:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.createTask(body));
@@ -61,6 +63,7 @@ public class TagTaskController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:task:write')")
     public ApiResponse<Map<String, Object>> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.updateTask(id, body));
@@ -70,6 +73,7 @@ public class TagTaskController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:task:delete')")
     public ApiResponse<Map<String, Object>> delete(@PathVariable long id) {
         try {
             service.deleteTask(id);
@@ -80,6 +84,7 @@ public class TagTaskController {
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("@perm.has('tag:rule:publish')")
     public ApiResponse<Map<String, Object>> publish(@PathVariable long id) {
         try {
             return ApiResponse.ok(service.publishTask(id));
@@ -90,6 +95,7 @@ public class TagTaskController {
 
     /** 手动触发一次批运行(P0 演练/提交器; cron 由服务端 tick 自动触发) */
     @PostMapping("/{id}/run")
+    @PreAuthorize("@perm.has('tag:task:run')")
     public ApiResponse<Map<String, Object>> run(@PathVariable long id,
                                                 @RequestParam(required = false) String trigger,
                                                 @RequestParam(required = false, defaultValue = "false") boolean full,

@@ -2,6 +2,7 @@ package com.dcp.module.tagengine;
 
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,7 @@ public class TagRegistryController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('tag:registry:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.create(body));
@@ -41,6 +43,7 @@ public class TagRegistryController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:registry:write')")
     public ApiResponse<Map<String, Object>> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.update(id, body));
@@ -50,6 +53,7 @@ public class TagRegistryController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:registry:write')")
     public ApiResponse<Map<String, Object>> delete(@PathVariable long id) {
         try {
             service.delete(id);

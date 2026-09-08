@@ -2,6 +2,7 @@ package com.dcp.module.tagengine.online;
 
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.Map;
 
@@ -37,6 +38,7 @@ public class OnlineTagController {
     }
 
     @PostMapping("/{taskId}/event")
+    @PreAuthorize("@perm.has('tag:task:run')")
     public ApiResponse<Map<String, Object>> event(@PathVariable long taskId, @RequestBody Map<String, Object> body) {
         try {
             Object ttl = body.remove("ttlSeconds");

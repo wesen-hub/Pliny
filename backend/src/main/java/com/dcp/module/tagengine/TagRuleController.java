@@ -2,6 +2,7 @@ package com.dcp.module.tagengine;
 
 import com.dcp.common.ApiResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,7 @@ public class TagRuleController {
     }
 
     @PostMapping
+    @PreAuthorize("@perm.has('tag:rule:write')")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.createRule(body));
@@ -52,6 +54,7 @@ public class TagRuleController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:rule:write')")
     public ApiResponse<Map<String, Object>> update(@PathVariable long id, @RequestBody Map<String, Object> body) {
         try {
             return ApiResponse.ok(service.updateRule(id, body));
@@ -61,6 +64,7 @@ public class TagRuleController {
     }
 
     @PostMapping("/{id}/copy")
+    @PreAuthorize("@perm.has('tag:rule:write')")
     public ApiResponse<Map<String, Object>> copy(@PathVariable long id) {
         try {
             return ApiResponse.ok(service.copyRule(id));
@@ -70,6 +74,7 @@ public class TagRuleController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@perm.has('tag:rule:write')")
     public ApiResponse<Map<String, Object>> delete(@PathVariable long id) {
         try {
             service.deleteRule(id);

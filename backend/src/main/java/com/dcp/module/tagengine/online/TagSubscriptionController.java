@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -104,6 +105,7 @@ public class TagSubscriptionController {
     }
 
     @PostMapping("/subs")
+    @PreAuthorize("@perm.has('tag:sub:manage')")
     public ApiResponse<Map<String, Object>> createSub(@RequestBody Map<String, Object> body) {
         ensureSchema();
         String name = s(body.get("name")).trim();
@@ -130,6 +132,7 @@ public class TagSubscriptionController {
     }
 
     @PutMapping("/subs/{id}")
+    @PreAuthorize("@perm.has('tag:sub:manage')")
     public ApiResponse<Map<String, Object>> updateSub(@PathVariable long id, @RequestBody Map<String, Object> body) {
         ensureSchema();
         List<Map<String, Object>> rows = metaJdbc.queryForList("SELECT id FROM tag_subscription WHERE id=?", id);
@@ -154,6 +157,7 @@ public class TagSubscriptionController {
     }
 
     @DeleteMapping("/subs/{id}")
+    @PreAuthorize("@perm.has('tag:sub:manage')")
     public ApiResponse<Map<String, Object>> deleteSub(@PathVariable long id) {
         ensureSchema();
         int n = metaJdbc.update("DELETE FROM tag_subscription WHERE id=?", id);
