@@ -1,0 +1,76 @@
+package com.dcp.tagjob.run;
+
+import org.kie.api.runtime.KieSession;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 在线执行动作收集器(backend 内嵌; 与 tagengine-executor 同 FQCN —— 在线 DRL 复用
+ * DrlGenerator 生成的 function 包装, 动作 tag()/halt() 落在 ThreadLocal 收集器)。
+ * 与执行器版差异: 无 RowSink(批语义), 只收集 (tag, value) 列表 + halt 标志。
+ */
+public final class TagActions {
+    private static final ThreadLocal<Collector> COLLECTOR = new ThreadLocal<>();
+    private static final ThreadLocal<KieSession> SESSION = new ThreadLocal<>();
+
+    private TagActions() {
+    }
+
+    public static void bindCollector(Collector c) {
+        COLLECTOR.set(c);
+    }
+
+    public static void bindSession(KieSession session) {
+        SESSION.set(session);
+    }
+
+    public static void clearThread() {
+        COLLECTOR.remove();
+        SESSION.remove();
+    }
+
+    public static void tag(Object fact, String path) {
+        tag(fact, path, null);
+    }
+
+    public static void tag(Object fact, String path, String value) {
+        Collector c = COLLECTOR.get();
+        if (c != null) c.add(path, value);
+    }
+
+    public static void halt() {
+        Collector c = COLLECTOR.get();
+        if (c != null) c.halt();
+        KieSession s = SESSION.get();
+        if (s != null) {
+            try {
+                s.halt();
+            } catch (Throwable ignore) {
+                // 尽力而为
+            }
+        }
+    }
+
+    /** 在线单事件收集器 */
+    public static class Collector {
+        private final List<String[]> tags = new ArrayList<>();
+        private boolean halted = false;
+
+        public void add(String path, String value) {
+            tags.add(new String[]{path, value});
+        }
+
+        public void halt() {
+            halted = true;
+        }
+
+        public boolean halted() {
+            return halted;
+        }
+
+        public List<String[]> tags() {
+            return tags;
+        }
+    }
+}

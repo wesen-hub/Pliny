@@ -532,7 +532,7 @@ public class TagEngineService {
         String mode = str(body.getOrDefault("mode", "batch"));
         String dataset = str(body.get("dataset"));
         if (name.isEmpty()) throw new IllegalArgumentException("任务名称必填");
-        if (!"batch".equals(mode)) throw new IllegalArgumentException("P0 仅支持批模式(batch); 流/在线 P1 开放");
+        if (!"batch".equals(mode) && !"online".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online(P0 批 + P1 在线; 流 stream 待 Flink 执行器)");
         if (dataset.isEmpty()) throw new IllegalArgumentException("数据集(逻辑表)必填");
         String rawKey = str(body.getOrDefault("entityKey", "id")).trim();
         final String entityKey = rawKey.isEmpty() ? "id" : rawKey;
@@ -581,7 +581,7 @@ public class TagEngineService {
         String name = str(body.getOrDefault("name", exist.get("name"))).trim();
         String mode = str(body.getOrDefault("mode", exist.get("mode")));
         String dataset = str(body.getOrDefault("dataset", exist.get("dataset")));
-        if (!"batch".equals(mode)) throw new IllegalArgumentException("P0 仅支持批模式(batch); 流/在线 P1 开放");
+        if (!"batch".equals(mode) && !"online".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online(P0 批 + P1 在线; 流 stream 待 Flink 执行器)");
         String entityKey = str(body.getOrDefault("entityKey", exist.get("entityKey"))).trim();
         if (entityKey.isEmpty()) entityKey = "id";
         JsonNode bindings = toNode(body.get("bindings"));
@@ -688,7 +688,7 @@ public class TagEngineService {
             }
         }
         int newVer = ((Number) exist.get("ver")).intValue() + 1;
-        checkPublishTags(id, ordered);
+        checkPublishTags(id, ordered, str(exist.get("mode")));
         metaJdbc.update("UPDATE tag_task SET status='published', ver=?, snapshot_json=? WHERE id=?",
                 newVer, jstr(snap), id);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -1070,10 +1070,10 @@ public class TagEngineService {
     }
 
     /** 已发布任务快照中的动作标签 → 认领任务名(冲突拦截用; 排除自身) */
-    private java.util.Map<String, String> claimedTagsBy(long excludeTaskId) {
+    private java.util.Map<String, String> claimedTagsBy(long excludeTaskId, String mode) {
         java.util.Map<String, String> claim = new java.util.LinkedHashMap<>();
         java.util.List<Map<String, Object>> tasks = metaJdbc.queryForList(
-                "SELECT id,name,snapshot_json FROM tag_task WHERE status='published' AND id<>?", excludeTaskId);
+                "SELECT id,name,mode,snapshot_json FROM tag_task WHERE status='published' AND id<>? AND mode=?", excludeTaskId, mode);
         for (Map<String, Object> t : tasks) {
             JsonNode snap = jnode((String) t.get("snapshot_json"));
             for (JsonNode a : snap.path("assets")) {
@@ -1088,7 +1088,7 @@ public class TagEngineService {
         return claim;
     }
 
-    private void checkPublishTags(long taskId, List<Map<String, Object>> ordered) {
+    private void checkPublishTags(long taskId, List<Map<String, Object>> ordered, String mode) {
         java.util.Set<String> registered = registeredTagPaths();
         java.util.Set<String> myTags = new java.util.LinkedHashSet<>();
         for (Map<String, Object> r : ordered) {
@@ -1100,7 +1100,7 @@ public class TagEngineService {
             throw new IllegalArgumentException("以下动作标签未注册(tag 路径须与注册表 tagPath 精确一致): "
                     + String.join("、", unreg) + " —— 请先在 标签注册表 V2 注册, 或在规则里改选已注册标签路径");
         }
-        java.util.Map<String, String> claimed = claimedTagsBy(taskId);
+        java.util.Map<String, String> claimed = claimedTagsBy(taskId, mode);
         java.util.List<String> conflict = myTags.stream().filter(claimed::containsKey).toList();
         if (!conflict.isEmpty()) {
             java.util.List<String> who = new java.util.ArrayList<>();
