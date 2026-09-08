@@ -107,6 +107,11 @@ public class TagEngineService {
         } catch (DataAccessException ignored) {
             /* 已存在 */
         }
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN cursor_json TEXT NULL COMMENT '增量游标(湖表行级 seq): NULL=全量; {seqColumn:maxSeq}'");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_run ("
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "task_id BIGINT NOT NULL,"
@@ -454,7 +459,7 @@ public class TagEngineService {
 
     public List<Map<String, Object>> listTasks() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,create_time,update_time"
                         + " FROM tag_task ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) out.add(taskRowToMap(r));
@@ -463,7 +468,7 @@ public class TagEngineService {
 
     public Map<String, Object> getTask(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,create_time,update_time"
                         + " FROM tag_task WHERE id=?", id);
         if (rows.isEmpty()) throw new IllegalArgumentException("任务不存在 id=" + id);
         return taskRowToMap(rows.get(0));
@@ -477,11 +482,13 @@ public class TagEngineService {
         out.put("datasetFields", jnode((String) r.get("dataset_fields_json")));
         out.put("guard", jnode((String) r.get("guard_json")));
         out.put("snapshot", r.get("snapshot_json") == null ? null : jnode((String) r.get("snapshot_json")));
+        out.put("cursor", r.get("cursor_json") == null ? null : jnode((String) r.get("cursor_json")));
         out.remove("derived_json");
         out.remove("bindings_json");
         out.remove("dataset_fields_json");
         out.remove("guard_json");
         out.remove("snapshot_json");
+        out.remove("cursor_json");
         return out;
     }
 
@@ -685,6 +692,11 @@ public class TagEngineService {
 
     /** 触发一次批运行: 生成 task-json(发布快照自含资产定义) → 落 runs 目录 → 记 tag_run → 按 runner-mode 演练/提交 */
     public Map<String, Object> startRun(long taskId, String trigger) {
+        return startRun(taskId, trigger, false);
+    }
+
+    /** full=true: 全量重算(忽略任务游标, 不带 incremental 段; 跑完由执行器输出全表 maxSeq 重新初始化游标) */
+    public Map<String, Object> startRun(long taskId, String trigger, boolean full) {
         Map<String, Object> task = getTask(taskId);
         if (!"published".equals(task.get("status"))) throw new IllegalArgumentException("任务未发布, 请先 publish");
         JsonNode snap = (JsonNode) task.get("snapshot");
@@ -708,6 +720,15 @@ public class TagEngineService {
         payload.set("derived", (JsonNode) task.get("derived"));
         payload.set("bindings", snap.get("bindings"));
         payload.set("rules", snap.get("assets"));   // 执行器契约键名 rules(资产快照自含 def)
+        // 增量配置(§14): 任务游标非空且非 full → 增量轮(仅重算变更实体); full=1 → 全量(跑完重新初始化游标)
+        JsonNode cursorNode = (JsonNode) task.get("cursor");
+        long cursor = (!full && cursorNode != null && cursorNode.has("maxSeq")) ? cursorNode.path("maxSeq").asLong(-1) : -1;
+        if (cursor >= 0) {
+            ObjectNode incr = payload.putObject("incremental");
+            incr.put("cursor", cursor);
+            if (cursorNode != null && cursorNode.has("seqColumn")) incr.put("seqColumn", cursorNode.path("seqColumn").asText());
+            if (cursorNode != null && cursorNode.has("tombstoneColumn")) incr.put("tombstoneColumn", cursorNode.path("tombstoneColumn").asText());
+        }
         payload.put("icebergConfig", "湖参数待接湖环境(设计 §13): catalog/namespace 现为占位, 湖落地后平台配置下发");
         String json = jstr(payload);
 
@@ -735,7 +756,8 @@ public class TagEngineService {
             String err = null;
             if ("spark".equalsIgnoreCase(runnerMode) && !executorJar.isBlank()) {
                 submitCmd = sparkSubmitBin + " --class com.dcp.tagjob.TagBatchJob "
-                        + env("DCP_TAGENGINE_SPARK_MASTER", "local[*]") + " --task-json " + file;
+                        + env("DCP_TAGENGINE_SPARK_MASTER", "local[*]") + " --task-json " + file
+                        + " --cursor-out " + dir.resolve("task-" + taskId + "-run-" + runId + ".cursor.json");
                 try {
                     Process p = new ProcessBuilder(submitCmd.split(" ")).redirectErrorStream(true).start();
                     status = "running";
@@ -807,9 +829,9 @@ public class TagEngineService {
         return m;
     }
 
-    /** 执行器回写 run 结果(状态/exit/summary/错误); 命中矩阵回写待 E2E 接线 */
+    /** 执行器回写 run 结果(状态/exit/summary/错误); 增量轮带 cursor{seqColumn,maxSeq} → 成功后回写任务游标(§14.3) */
     public Map<String, Object> finishRun(long runId, Map<String, Object> body) {
-        getRun(runId);
+        Map<String, Object> run = getRun(runId);
         String status = str(body.getOrDefault("status", "failed"));
         if (!List.of("succeeded", "failed", "running").contains(status)) {
             throw new IllegalArgumentException("status 须为 succeeded|failed|running");
@@ -820,6 +842,14 @@ public class TagEngineService {
                 jstr(body.getOrDefault("summary", new LinkedHashMap<String, Object>())),
                 str(body.get("error")).isEmpty() ? null : str(body.get("error")),
                 runId);
+        // 游标回写(仅 succeeded + 显式给 cursor; 失败不推进 → 下轮重试幂等 §14.2)
+        if ("succeeded".equals(status) && body.get("cursor") instanceof Map<?, ?> cursorMap) {
+            Long taskId = (Long) run.get("task_id");
+            if (taskId != null && !cursorMap.isEmpty()) {
+                metaJdbc.update("UPDATE tag_task SET cursor_json=? WHERE id=?", jstr(cursorMap), taskId);
+                log.info("[tagengine] run#{} 游标回写任务#{}: {}", runId, taskId, jstr(cursorMap));
+            }
+        }
         return Map.of("runId", runId, "status", status);
     }
 

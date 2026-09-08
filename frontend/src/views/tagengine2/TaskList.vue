@@ -23,16 +23,21 @@
           </template>
         </el-table-column>
         <el-table-column label="版本" width="60"><template #default="{ row }"><el-tag size="small" effect="plain">v{{ row.ver }}</el-tag></template></el-table-column>
+        <el-table-column label="增量游标" width="110"><template #default="{ row }">
+            <el-tag v-if="row.cursor && row.cursor.maxSeq >= 0" size="small" type="success" effect="plain">seq≤{{ row.cursor.maxSeq }}</el-tag>
+            <el-text v-else size="small" type="info">全量</el-text>
+          </template></el-table-column>
         <el-table-column label="调度" width="90"><template #default="{ row }"><el-text size="small">{{ row.schedule === 'cron' ? row.cronExpr : (row.schedule || 'none') }}</el-text></template></el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'published' ? 'success' : 'info'" effect="plain">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click="publish(row)">发布</el-button>
             <el-button size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
+            <el-button size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
             <el-button size="small" text @click="openRuns(row)">Runs</el-button>
             <el-button size="small" text type="danger" @click="del(row)">删</el-button>
           </template>
@@ -97,6 +102,13 @@ function runTask(row) {
   tasksApi.run(row.id).then((r) => {
     toast(`run #${r.runId} 已触发: ${r.status} —— ${r.submitCmd ? '命令已生成(见 Runs→看 json)' : ''}`)
   }).catch(() => {})
+}
+function fullRun(row) {
+  ElMessageBox.confirm('全量重算: 忽略当前增量游标, 整集重算(跑完自动重新初始化游标)。确定?', '全量重算', { type: 'warning' })
+    .then(() => tasksApi.run(row.id, true).then((r) => {
+      toast(`全量 run #${r.runId} 已触发: ${r.status}`)
+    }).catch(() => {}))
+    .catch(() => {})
 }
 async function openRuns(row) {
   curTask.value = row

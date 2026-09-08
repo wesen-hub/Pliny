@@ -24,7 +24,7 @@ export const tasksApi = {
   update: (id, body) => request.put(`/tagengine/tasks/${id}`, body),
   remove: (id) => request.delete(`/tagengine/tasks/${id}`),
   publish: (id) => request.post(`/tagengine/tasks/${id}/publish`),
-  run: (id) => request.post(`/tagengine/tasks/${id}/run?trigger=manual`)
+  run: (id, full) => request.post(`/tagengine/tasks/${id}/run?trigger=manual${full ? '&full=true' : ''}`)
 }
 
 export const runsApi = {

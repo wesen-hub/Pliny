@@ -82,9 +82,10 @@ public class TagTaskController {
     /** 手动触发一次批运行(P0 演练/提交器; cron 由服务端 tick 自动触发) */
     @PostMapping("/{id}/run")
     public ApiResponse<Map<String, Object>> run(@PathVariable long id,
-                                                @RequestParam(required = false) String trigger) {
+                                                @RequestParam(required = false) String trigger,
+                                                @RequestParam(required = false, defaultValue = "false") boolean full) {
         try {
-            return ApiResponse.ok(service.startRun(id, trigger == null ? "manual" : trigger));
+            return ApiResponse.ok(service.startRun(id, trigger == null ? "manual" : trigger, full));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
         }
