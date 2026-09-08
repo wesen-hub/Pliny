@@ -60,12 +60,13 @@
             <el-button size="small" @click.stop="fitAll()">⤢</el-button>
           </div>
           <div class="legend">
-            <div style="font-weight:600;color:#cfe3ff">图例</div>
-            <div class="lg-row"><span class="sq" style="background:#1e3a5f;border:1px solid #22d3ee"></span>逻辑表(核心)</div>
-            <div class="lg-row"><span class="sq" style="background:#f59e0b55"></span>源系统 / 同步任务</div>
-            <div class="lg-row"><span class="sq" style="background:#c084fc55"></span>规则 / 标签</div>
-            <div class="lg-row"><span class="sq" style="background:#34d39955"></span>数据应用(订阅)</div>
-            <div class="hint">字段级({{ statN('Field') }})进详情/矩阵页 · 深色线=同步 · 紫=规则/标签 · 绿=订阅消费</div>
+            <div style="font-weight:700;color:#2a3442;margin-bottom:2px">图例 <span style="font-weight:400;color:#a0a8b4">(拖节点 · 滚轮缩放 · 悬停边看关系)</span></div>
+            <div class="lg-row"><span class="sq" style="background:#eaf3ff;border:1.5px solid #1677ff"></span>逻辑表(核心)</div>
+            <div class="lg-row"><span class="sq" style="background:#fff7e6;border:1.5px solid #f59e0b"></span>源系统</div>
+            <div class="lg-row"><span class="sq" style="background:#e6f7ff;border:1.5px solid #38bdf8"></span>同步/打标任务</div>
+            <div class="lg-row"><span class="sq" style="background:#f9f0ff;border:1.5px solid #c084fc"></span>规则 / 标签</div>
+            <div class="lg-row"><span class="sq" style="background:#f6ffed;border:1.5px solid #52c41a"></span>订阅应用</div>
+            <div class="hint">蓝线=同步映射 · 紫=规则/标签产出 · 绿=订阅消费 · 悬停边显示关系详情</div>
           </div>
           <div class="g-tip" ref="tipRef"></div>
         </div>
@@ -300,8 +301,12 @@ function buildGraph() {
     const g = el('g')
     const path = el('path'); path.setAttribute('class', 'edge'); path.setAttribute('stroke', ECOL[e.type] || '#888'); path.setAttribute('marker-end', 'url(#' + m.id + ')')
     const tx = el('text'); tx.setAttribute('class', 'el'); tx.textContent = e.type + (e.n > 1 ? '×' + e.n : '')
+    tx.style.display = 'none'
     g.appendChild(path); g.appendChild(tx); world.appendChild(g)
     e._p = path; e._t = tx
+    path.addEventListener('mouseenter', () => { path.classList.add('hov'); tx.style.display = '' })
+    path.addEventListener('mouseleave', () => { path.classList.remove('hov'); tx.style.display = 'none' })
+    path.addEventListener('click', ev => { ev.stopPropagation(); edgeTip(ev, e) })
   })
   // 节点卡
   vis.forEach(n => {
@@ -331,9 +336,10 @@ function buildGraph() {
 function paintNode(g, n, w, h) {
   const b = g.querySelector('.bkg')
   b.setAttribute('x', n.x - w / 2); b.setAttribute('y', n.y - h / 2); b.setAttribute('width', w); b.setAttribute('height', h); b.setAttribute('rx', 10)
-  const ic = g.querySelector('.ico'); ic.setAttribute('x', n.x - w / 2 + 14); ic.setAttribute('y', n.y + 4); ic.setAttribute('text-anchor', 'middle')
+  b.setAttribute('stroke', COL[n.type] || '#cdd5e0')
+  const ic = g.querySelector('.ico'); ic.setAttribute('x', n.x - w / 2 + 15); ic.setAttribute('y', n.y + 4); ic.setAttribute('text-anchor', 'middle')
   ic.textContent = { Source: '🗄', Job: '⇄', Table: '▤', Rule: '⚙️', Tag: '🏷', App: '📮' }[n.type] || '•'
-  const lb = g.querySelector('.lb'); lb.setAttribute('x', n.x + 6); lb.setAttribute('y', n.y - 2); lb.setAttribute('font-size', n.type === 'Table' ? '13' : '11'); lb.textContent = (n.label || n.id).slice(0, 22)
+  const lb = g.querySelector('.lb'); lb.setAttribute('x', n.x + 6); lb.setAttribute('y', n.y - 2); lb.setAttribute('font-size', n.type === 'Table' ? '13.5' : '11.5'); lb.textContent = (n.label || n.id).slice(0, 24)
   const sb = g.querySelector('.sb'); sb.setAttribute('x', n.x + 6); sb.setAttribute('y', n.y + 14); sb.setAttribute('text-anchor', 'middle')
   sb.textContent = subOf(n)
 }
@@ -369,9 +375,33 @@ function redrawEdges() {
 }
 /* 视图操作 */
 function applyView() { world.setAttribute('transform', `translate(${panX},${panY}) scale(${scale})`) }
-function zoomBy(f) { scale = Math.min(2.2, Math.max(0.4, scale * f)); applyView() }
-function fitAll() { scale = 1; panX = 0; panY = 0; applyView() }
-function onWheel(e) { zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15) }
+function zoomBy(f) { scale = Math.min(2.4, Math.max(0.35, scale * f)); applyView() }
+function zoomAt(f, px, py) {
+  const wx = (px - panX) / scale, wy = (py - panY) / scale
+  scale = Math.min(2.4, Math.max(0.35, scale * f))
+  panX = px - wx * scale; panY = py - wy * scale
+  applyView()
+}
+function fitAll() {
+  const c = canvasRef.value
+  if (!world || !c || !vis.length) return
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  vis.forEach(n => {
+    const [w, h] = SZ[n.type] || [170, 46]
+    minX = Math.min(minX, n.x + (n.ox || 0) - w / 2); maxX = Math.max(maxX, n.x + (n.ox || 0) + w / 2)
+    minY = Math.min(minY, n.y + (n.oy || 0) - h / 2); maxY = Math.max(maxY, n.y + (n.oy || 0) + h / 2)
+  })
+  const bw = maxX - minX + 60, bh = maxY - minY + 60
+  scale = Math.min(c.clientWidth / bw, c.clientHeight / bh)
+  scale = Math.min(1.15, Math.max(0.35, scale))
+  panX = c.clientWidth / 2 - (minX + maxX) / 2 * scale
+  panY = c.clientHeight / 2 - (minY + maxY) / 2 * scale
+  applyView()
+}
+function onWheel(e) {
+  const c = canvasRef.value.getBoundingClientRect()
+  zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - c.left, e.clientY - c.top)
+}
 function canvasDown(ev) {
   if (ev.target.closest('.nd') || ev.target.closest('.zoom-col') || ev.target.closest('.legend') || drag) return
   panning = { x: ev.clientX, y: ev.clientY, px: panX, py: panY }
@@ -396,6 +426,15 @@ function canvasMove(ev) {
   }
 }
 function canvasUp() { drag = null; panning = null }
+function edgeTip(ev, e) {
+  const t = tipRef.value
+  const a = byId.value[e.f], b = byId.value[e.t]
+  t.innerHTML = `<b>${(a ? a.label : e.f)} ⇄ ${(b ? b.label : e.to)}</b><br>关系: ${e.type}${e.n && e.n > 1 ? ' ×' + e.n : ''}${e.sourceField ? '<br>源字段: ' + e.sourceField : ''}${e.targetField ? ' → ' + e.targetField : ''}${e.transform ? '<br>转换: ' + e.transform : ''}`
+  t.style.display = 'block'
+  const r = canvasRef.value.getBoundingClientRect()
+  t.style.left = ev.clientX - r.left + 14 + 'px'; t.style.top = ev.clientY - r.top + 14 + 'px'
+  setTimeout(() => { if (t.style.display !== 'none') t.style.display = 'none' }, 2600)
+}
 function showTip(ev, n) {
   const t = tipRef.value
   let h = `<b>${(n.label || n.id).slice(0, 40)}</b><br>${KN[n.type] || n.type}`
@@ -420,6 +459,9 @@ function locate() {
 /* ============ 节点详情(真实聚合) ============ */
 function fnameOf(fid) { return (byId.value[fid] || {}).label || fid }
 function selNode(n) {
+  vis.forEach(v => { if (v._g) v._g.classList.remove('sel') })
+  if (n && n._g) n._g.classList.add('sel')
+  if (!n) { drawer.value = false; return }
   curSel = n
   dt.value = (n.label || n.id)
   dm.value = `${KN[n.type] || n.type}${n.subscriber ? ' · 订阅方 ' + n.subscriber : ''}${n.layer ? ' · ' + n.layer + '/' + n.kind : ''}`
@@ -505,6 +547,7 @@ async function loadTrace() {
 }
 watch(mTable, refreshMatrix)
 watch(tTable, refreshTrace)
+watch(tab, v => { if (v === 'graph') setTimeout(() => { fitAll() }, 120) })
 onMounted(() => { reload(false); if (tables.value.length) { mTable.value = tables.value[0].id; iTable.value = tables.value[0].id; tTable.value = tables.value[0].id } })
 </script>
 
@@ -521,20 +564,23 @@ onMounted(() => { reload(false); if (tables.value.length) { mTable.value = table
 .dim2 { color: #999; font-size: 12px; }
 .flex { display: flex; align-items: center; }
 .sec { font-size: 13px; font-weight: 600; margin: 6px 0; }
-.graph-shell { border-radius: 10px; overflow: hidden; border: 1px solid #1e2a3d; }
-.gbar { background: #0d1626; padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.gbar :deep(.el-input__wrapper) { background: #12203a; box-shadow: none; border: 1px solid #2a3b56; }
-.gbar :deep(.el-input__inner) { color: #e6edf5; }
-.gstats { margin-left: auto; color: #5a6a7d; font-size: 11px; }
-.canvas { position: relative; height: 660px; background: radial-gradient(ellipse at 30% 20%, #12202f 0%, #0b1420 60%); overflow: hidden; }
+/* 图谱区: 铺满剩余视口, 明亮背景 */
+.graph-shell { border-radius: 10px; overflow: hidden; border: 1px solid #e3e8ef; background: #fff; height: calc(100vh - 208px); min-height: 520px; display: flex; flex-direction: column; }
+.gbar { background: #fbfcfe; border-bottom: 1px solid #eef1f6; padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+.gstats { margin-left: auto; color: #98a1ad; font-size: 11px; }
+.canvas { position: relative; flex: 1; background:
+    linear-gradient(rgba(23, 92, 200, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 92, 200, .05) 1px, transparent 1px),
+    linear-gradient(160deg, #f9fbff 0%, #f1f5fb 100%);
+  background-size: 24px 24px, 24px 24px, 100% 100%; overflow: hidden; }
 .canvas svg { width: 100%; height: 100%; display: block; }
-.zoom-col { position: absolute; right: 12px; bottom: 90px; display: flex; flex-direction: column; gap: 4px; }
-.zoom-col .el-button { width: 30px; padding: 0; background: #0d1626; border-color: #2a3b56; color: #cfe3ff; }
-.legend { position: absolute; left: 10px; bottom: 10px; background: rgba(13, 22, 38, .92); border: 1px solid #2a3b56; border-radius: 8px; padding: 7px 10px; font-size: 11px; color: #8b98ab; line-height: 1.9; }
-.lg-row { display: flex; align-items: center; gap: 6px; }
-.sq { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-.hint { margin-top: 4px; border-top: 1px solid #1e2a3d; padding-top: 4px; color: #5a6a7d; }
-.g-tip { position: absolute; display: none; background: rgba(13, 22, 38, .95); border: 1px solid #2a3b56; border-radius: 8px; padding: 7px 10px; font-size: 12px; pointer-events: none; z-index: 30; max-width: 320px; }
+.zoom-col { position: absolute; right: 14px; bottom: 16px; display: flex; flex-direction: column; gap: 4px; }
+.zoom-col .el-button { width: 32px; padding: 0; background: #fff; border-color: #d9dee7; color: #1677ff; box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+.legend { position: absolute; left: 12px; bottom: 12px; background: rgba(255, 255, 255, .96); border: 1px solid #e3e8ef; border-radius: 10px; padding: 8px 12px; font-size: 11px; color: #5a6472; line-height: 2; box-shadow: 0 4px 16px rgba(31, 56, 99, .08); }
+.lg-row { display: flex; align-items: center; gap: 7px; }
+.sq { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.hint { margin-top: 4px; border-top: 1px dashed #e8ecf2; padding-top: 4px; color: #a0a8b4; }
+.g-tip { position: absolute; display: none; background: rgba(255, 255, 255, .98); border: 1px solid #dfe5ee; border-radius: 10px; padding: 8px 12px; font-size: 12px; pointer-events: none; z-index: 40; max-width: 340px; box-shadow: 0 8px 24px rgba(31, 56, 99, .14); color: #1f2329; line-height: 1.8; }
 .dm { color: #888; font-size: 12px; margin-bottom: 8px; }
 .dbody { font-size: 13px; }
 .mono2 { font-family: ui-monospace, Menlo, Consolas, monospace; }
@@ -545,14 +591,16 @@ onMounted(() => { reload(false); if (tables.value.length) { mTable.value = table
 .notice-card .nt { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
 .kv { display: flex; font-size: 13px; } .kv b { width: 110px; color: #999; font-weight: 400; }
 :deep(.nd) { cursor: grab; }
-:deep(.nd .bkg) { fill: #16223a; stroke: #2a3b56; stroke-width: 1; transition: filter .15s; }
-:deep(.nd:hover .bkg) { filter: brightness(1.4); }
-:deep(.nd.core .bkg) { fill: rgba(34, 211, 238, .1); stroke: #22d3ee; stroke-width: 1.7; }
-:deep(.nd.core .lb) { fill: #7ce7f7; font-size: 13px; }
-:deep(.nd .lb) { fill: #dbe7f5; font-size: 11px; font-weight: 600; }
-:deep(.nd .sb) { fill: #6b7d94; font-size: 9.5px; }
-:deep(.nd .ico) { font-size: 13px; }
-:deep(.nd.blink .bkg) { stroke: #fff; stroke-width: 2.5; }
-:deep(.edge) { fill: none; stroke-width: 1.6; opacity: .75; }
-:deep(.el) { fill: #5a6a7d; font-size: 9.5px; pointer-events: none; }
+:deep(.nd .bkg) { fill: #ffffff; stroke: #cdd5e0; stroke-width: 1.2; transition: all .15s; }
+:deep(.nd:hover .bkg) { stroke-width: 2; }
+:deep(.nd.core .bkg) { fill: #eaf3ff; stroke: #1677ff; stroke-width: 1.8; }
+:deep(.nd.core .lb) { fill: #0b5bd3; font-size: 13.5px; }
+:deep(.nd .lb) { fill: #2a3442; font-size: 11.5px; font-weight: 600; }
+:deep(.nd .sb) { fill: #9aa4b1; font-size: 9.5px; }
+:deep(.nd .ico) { font-size: 14px; }
+:deep(.nd.blink .bkg) { stroke: #fa8c16; stroke-width: 3; }
+:deep(.nd.sel .bkg) { stroke: #1677ff; stroke-width: 2.6; }
+:deep(.edge) { fill: none; stroke-width: 1.7; opacity: .8; transition: opacity .1s; }
+:deep(.edge.hov) { stroke-width: 3.2; opacity: 1; }
+:deep(.el) { fill: #9aa4b1; font-size: 9.5px; pointer-events: none; }
 </style>
