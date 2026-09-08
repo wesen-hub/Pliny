@@ -53,19 +53,48 @@
     <!-- ===== ② 字段映射矩阵 ===== -->
     <div v-show="tab === 'matrix'" class="lg-view page-card">
       <div class="pg-title">字段级血缘矩阵<el-tag size="small" effect="plain" style="margin-left:8px">一行 = 一条来源边</el-tag></div>
-      <div class="dim2" style="margin:6px 0 10px">目标: customer_wide · 同一目标字段多条来源 = 多行(合流), 每行独立: 源系统/任务/转换/策略/优先级</div>
-      <el-alert type="info" :closable="false" show-icon style="margin-bottom:8px" title="amount = 3 条来源边(3 行): 源① 系统A 直映射(主) / 源② 系统B 合流(后写覆盖) / 源③ 规则 r4 派生写回 —— 修改任一来源沿各自行评估影响" />
-      <el-table :data="matrix" size="small" border max-height="560" :span-method="mSpan">
-        <el-table-column label="目标字段" width="150"><template #default="{ row }"><b>{{ row.target }}</b></template></el-table-column>
-        <el-table-column label="来源序号" width="90"><template #default="{ row }"><el-tag v-if="row.tag" size="small" :type="row.tagType || 'info'" effect="plain">{{ row.tag }}</el-tag><span v-else class="dim2">—</span></template></el-table-column>
-        <el-table-column label="源(系统.表.列)" min-width="180"><template #default="{ row }"><span class="mono2">{{ row.src }}</span><div class="dim2">{{ row.task }}</div></template></el-table-column>
-        <el-table-column label="转换类型" width="100"><template #default="{ row }"><el-tag size="small" :type="row.t === '直映射' ? 'primary' : row.t === '派生/规则产出' ? 'danger' : 'warning'" effect="plain">{{ row.t }}</el-tag></template></el-table-column>
-        <el-table-column prop="rule" label="转换规则" min-width="140" />
-        <el-table-column label="合并策略" width="110"><template #default="{ row }"><span v-if="row.strategy">{{ row.strategy }}</span><span v-else class="dim2">—</span></template></el-table-column>
-        <el-table-column label="优先级" width="80"><template #default="{ row }"><span v-if="row.pri">{{ row.pri }}</span><span v-else class="dim2">—</span></template></el-table-column>
-        <el-table-column label="密级" width="70"><template #default="{ row }"><el-tag size="small" :type="row.secret === 'L3' ? 'danger' : 'info'" effect="plain">{{ row.secret }}</el-tag></template></el-table-column>
-      </el-table>
-      <div class="dim2" style="margin-top:6px">约定: 一行=一条 FIELD_MAPPING/PRODUCES 边(与血缘图字段级边一一对应); 同目标字段多行=水平合流, 无垂直主从之分, 仅标注优先级与覆盖策略</div>
+      <div class="dim2" style="margin:6px 0 4px">目标: customer_wide · 同字段多条来源 = 水平合流(每来源独立一行/一枝)</div>
+      <el-tabs v-model="fmt" size="small">
+        <el-tab-pane label="表格" name="table">
+          <el-alert type="info" :closable="false" show-icon style="margin:6px 0 8px" title="amount = 3 条来源边: 源① 系统A 直映射(主) / 源② 系统B 合流(后写覆盖) / 源③ 规则 r4 派生写回 —— 修改任一来源沿各自行评估" />
+          <el-table :data="matrix" size="small" border max-height="520" :span-method="mSpan">
+            <el-table-column label="目标字段" width="150"><template #default="{ row }"><b>{{ row.target }}</b> <el-tag v-if="row.mergeLabel" size="small" type="warning" effect="plain">{{ row.mergeLabel }}</el-tag></template></el-table-column>
+            <el-table-column label="来源序号" width="90"><template #default="{ row }"><el-tag v-if="row.tag" size="small" :type="row.tagType || 'info'" effect="plain">{{ row.tag }}</el-tag><span v-else class="dim2">—</span></template></el-table-column>
+            <el-table-column label="源(系统.表.列)" min-width="180"><template #default="{ row }"><span class="mono2">{{ row.src }}</span><div class="dim2">{{ row.task }}</div></template></el-table-column>
+            <el-table-column label="转换类型" width="104"><template #default="{ row }"><el-tag size="small" :type="row.t === '直映射' ? 'primary' : row.t === '派生/规则产出' ? 'danger' : 'warning'" effect="plain">{{ row.t }}</el-tag></template></el-table-column>
+            <el-table-column prop="rule" label="转换规则" min-width="130" />
+            <el-table-column label="合并策略" width="112"><template #default="{ row }"><span v-if="row.strategy">{{ row.strategy }}</span><span v-else class="dim2">—</span></template></el-table-column>
+            <el-table-column label="优先级" width="78"><template #default="{ row }"><span v-if="row.pri">{{ row.pri }}</span><span v-else class="dim2">—</span></template></el-table-column>
+            <el-table-column label="密级" width="70"><template #default="{ row }"><el-tag size="small" :type="row.secret === 'L3' ? 'danger' : 'info'" effect="plain">{{ row.secret }}</el-tag></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="树状" name="tree">
+          <div class="dim2" style="margin:4px 0 8px">树: 资产 → 字段 → 来源边(合流字段展开多条来源叶)</div>
+          <el-tree :data="treeData" :props="tp" default-expand-all :expand-on-click-node="false" style="max-height:560px;overflow:auto;font-size:13px">
+            <template #default="{ data }">
+              <span v-if="data.kind === 'asset'" class="trow" style="font-size:14px">🗂 <b>{{ data.label }}</b> <el-tag size="small" effect="plain" style="margin-left:6px">{{ data.sec }}</el-tag></span>
+              <span v-else-if="data.kind === 'field'" class="trow">
+                <b>{{ data.label }}</b>
+                <el-tag v-if="data.merge" size="small" type="warning" effect="plain" style="margin-left:6px">{{ data.merge }}</el-tag>
+                <el-tag size="small" :type="data.sec === 'L3' ? 'danger' : 'info'" effect="plain" style="margin-left:6px">{{ data.sec }}</el-tag>
+              </span>
+              <span v-else class="trow edge-row">
+                <el-tag v-if="data.tag" size="small" :type="data.tagType || 'info'" effect="plain" style="margin-right:6px">{{ data.tag }}</el-tag>
+                <span class="mono2">{{ data.src }}</span>
+                <span class="dim2" style="margin-left:6px">{{ data.task }}</span>
+                <el-tag size="small" :type="data.t === '直映射' ? 'primary' : data.t === '派生/规则产出' ? 'danger' : 'warning'" effect="plain" style="margin-left:8px">{{ data.t }}</el-tag>
+                <span class="dim2" style="margin-left:8px">{{ data.rule }}<template v-if="data.strategy"> · {{ data.strategy }}</template></span>
+              </span>
+            </template>
+          </el-tree>
+        </el-tab-pane>
+
+        <el-tab-pane label="脑图" name="mind">
+          <div class="dim2" style="margin:4px 0 8px">脑图(放射): 根 = 资产 → 字段(中列) → 各来源边(叶; 合流字段多叶上下展开)。悬停卡片看转换/策略/优先级</div>
+          <div class="mind-wrap"><svg ref="mindRef"></svg></div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <!-- ===== ③ 影响分析 ===== -->
@@ -154,7 +183,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const tabs = [
@@ -163,6 +192,17 @@ const tabs = [
 ]
 const tab = ref('graph')
 const q = ref('')
+/* 矩阵展示形态: 表格 / 树状 / 脑图 */
+const fmt = ref('table')
+const tp = { children: 'children', label: 'label' }
+const treeData = (() => {
+  const map = {}
+  matrix.forEach(r => {
+    if (!map[r.target]) map[r.target] = { kind: 'field', label: r.target, sec: r.secret, merge: r.mergeLabel || '', children: [] }
+    map[r.target].children.push({ kind: 'edge', tag: r.tag || '', tagType: r.tagType, src: r.src, task: r.task, t: r.t, rule: r.rule, strategy: r.strategy || '' })
+  })
+  return [{ kind: 'asset', label: 'customer_wide (逻辑表)', sec: 'L2', children: Object.values(map) }]
+})()
 /* 通知动作 */
 const n1 = ref(true); const n2 = ref(true); const n3 = ref(true); const n4 = ref(true)
 const note = ref('amount 由"消费金额"改为"净支付额(含退款)" — 口径变化, schema 不变')
@@ -253,6 +293,60 @@ function mSpan({ row, rowIndex, columnIndex }) {
   if (!g) return
   return rowIndex === g.start ? { rowspan: g.len, colspan: 1 } : { rowspan: 0, colspan: 0 }
 }
+/* ===== 脑图(放射式: 资产 → 字段 → 来源叶) ===== */
+let mindBuilt = false
+const mindRef = ref(null)
+function buildMind() {
+  if (mindBuilt || !mindRef.value) return
+  mindBuilt = true
+  const NS = 'http://www.w3.org/2000/svg'
+  const svg = mindRef.value
+  const mk = (t, a) => { const n = document.createElementNS(NS, t); Object.entries(a || {}).forEach(([k, v]) => n.setAttribute(k, v)); return n }
+  const fmap = {}
+  matrix.forEach(r => { if (!fmap[r.target]) fmap[r.target] = { sec: r.secret, merge: r.mergeLabel || '', edges: [] }; fmap[r.target].edges.push(r) })
+  const fields = Object.values(fmap)
+  const ROW = 54
+  let top = 24
+  fields.forEach(f => { f.top = top; f.n = Math.max(1, f.edges.length); f.cy = f.top + 26; top += (f.n - 1) * ROW + 64 })
+  const H = top + 20, W = 1180
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H)
+  svg.setAttribute('height', H)
+  const line = (x1, y1, x2, y2) => { svg.appendChild(mk('path', { d: `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`, fill: 'none', stroke: '#c0c4cc', 'stroke-width': 1.4 })) }
+  const card = (cx, cy, w, h, fill, stroke, sw) => { const r = mk('rect', { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 8, fill, stroke, 'stroke-width': sw || 1 }); svg.appendChild(r); return r }
+  const txt = (x, y, str, size, color, bold, anchor) => { const t = mk('text', { x, y, 'text-anchor': anchor || 'start', 'font-size': size || 12, fill: color || '#333', 'font-weight': bold ? 600 : 400 }); t.textContent = str; svg.appendChild(t) }
+  const rootY = H / 2
+  card(86, rootY, 176, 58, '#e6f4ff', '#1677ff', 1.6)
+  txt(86, rootY - 6, 'customer_wide', 14, '#0b5bd3', true, 'middle')
+  txt(86, rootY + 13, '逻辑表 · DWD · L2', 10.5, '#7b9cc9', false, 'middle')
+  const FX = 300, LX = 760, LW = 400, FW = 150, FH = 34
+  fields.forEach(f => {
+    const cyF = f.cy
+    const isMerge = !!f.merge
+    card(FX, cyF, FW, FH, '#fff', isMerge ? '#fa8c16' : '#1677ff', isMerge ? 1.8 : 1.2)
+    txt(FX, cyF + 2, f.target + (isMerge ? ' ⚠3源' : ''), 12.5, isMerge ? '#d46b08' : '#0b5bd3', true, 'middle')
+    line(172, rootY, FX - FW / 2, cyF)
+    f.edges.forEach((e, i) => {
+      const off = (i - (f.n - 1) / 2) * ROW
+      const cyE = cyF + off
+      line(FX + FW / 2, cyF, LX - LW / 2, cyE)
+      const c = card(LX, cyE, LW, 44, '#fafbfc', '#d9d9d9', 1)
+      c.setAttribute('style', 'cursor:help')
+      const title = mk('title')
+      title.textContent = (e.tag ? e.tag + ' ' : '') + e.src + '\n' + e.task + ' · ' + e.t + (e.rule ? ' · ' + e.rule : '') + (e.strategy ? '\n策略: ' + e.strategy + (e.pri ? ' · 优先级 ' + e.pri : '') : '')
+      c.appendChild(title)
+      let x = LX - LW / 2 + 12
+      if (e.tag) {
+        const tagW = 34
+        svg.appendChild(mk('rect', { x, y: cyE - 9, width: tagW, height: 18, rx: 9, fill: e.tagType === 'warning' ? '#fff7e6' : '#e6f4ff', stroke: e.tagType === 'warning' ? '#ffd591' : '#91caff' }))
+        txt(x + tagW / 2, cyE + 3, e.tag, 10.5, e.tagType === 'warning' ? '#d46b08' : '#0b5bd3', true, 'middle')
+        x += tagW + 8
+      }
+      txt(x, cyE - 4, e.src, 12, '#333', true)
+      txt(x, cyE + 12, (e.task || '') + (e.t ? ' · ' + e.t : '') + (e.rule ? ' · ' + e.rule : ''), 10.5, '#909399')
+    })
+  })
+}
+watch(fmt, v => { if (v === 'mind') setTimeout(buildMind, 60) })
 const traces = [
   { t: '路径 1 · 最终来源(主)', steps: [{ x: '系统A t_user_base.user_balance', k: 'src' }, { x: '直映射 #12', k: '' }, { x: 'customer_wide.net_amt', k: '' }, { x: '规则 r4 依赖', k: '' }, { x: '净支付额 net_amt−fee', k: 'tr' }, { x: 'customer_wide.amount', k: 'cur' }] },
   { t: '路径 2 · 备选来源(系统B 合流)', steps: [{ x: '系统B t_acct.bal', k: 'src' }, { x: '合流 #21 后写覆盖', k: '' }, { x: 'customer_wide.amount', k: 'cur' }] },
@@ -540,5 +634,8 @@ window.__tabGraph = () => { tab.value = 'graph' }
 :deep(.edge.hit) { stroke-width: 3.2; opacity: 1; }
 :deep(.edge.dash) { stroke-dasharray: 5 4; }
 .mono2 { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mind-wrap { border: 1px solid var(--el-border-color-lighter); border-radius: 8px; overflow: auto; max-height: 620px; background: #fff; }
+.trow { display: inline-flex; align-items: center; padding: 3px 0; }
+.edge-row .mono2 { color: #0b5bd3; }
 :deep(.el) { fill: #5a6a7d; font-size: 9.5px; pointer-events: none; }
 </style>
