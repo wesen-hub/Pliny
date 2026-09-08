@@ -65,7 +65,17 @@ public class AuthService {
     public Map<String, Object> me() {
         LoginUser lu = SecurityUtils.currentUser();
         SysUser user = userMapper.selectById(lu.getUserId());
-        return Map.of("id", user.getId(), "username", user.getUsername(),
-                "nickname", user.getNickname(), "roles", lu.getRoles());
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("id", user.getId());
+        out.put("username", user.getUsername());
+        out.put("nickname", user.getNickname());
+        out.put("roles", lu.getRoles());
+        // P1 RBAC: 权限点全集(ADMIN=null → 前端按全量处理)
+        java.util.Set<String> perms = permService.permsOfCurrent();
+        out.put("perms", perms);
+        return out;
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dcp.security.PermissionService permService;
 }

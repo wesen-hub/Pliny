@@ -8,7 +8,11 @@ import com.dcp.common.ErrorCode;
 import com.dcp.module.system.entity.SysRole;
 import com.dcp.module.system.entity.SysUser;
 import com.dcp.module.system.entity.SysUserRole;
+import com.dcp.module.system.entity.SysPermission;
+import com.dcp.module.system.entity.SysRolePermission;
+import com.dcp.module.system.mapper.SysPermissionMapper;
 import com.dcp.module.system.mapper.SysRoleMapper;
+import com.dcp.module.system.mapper.SysRolePermissionMapper;
 import com.dcp.module.system.mapper.SysUserMapper;
 import com.dcp.module.system.mapper.SysUserRoleMapper;
 import com.dcp.module.system.service.AuditService;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api")
@@ -29,6 +34,9 @@ public class SystemController {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final SysUserRoleMapper userRoleMapper;
+    private final SysPermissionMapper permissionMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
+    private final com.dcp.security.PermissionService permService;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
 
@@ -44,6 +52,100 @@ public class SystemController {
         private String phone;
         private Integer status;
         private List<String> roles;
+    }
+
+    // ---------- 角色权限管理(P1 RBAC) ----------
+
+    @Data
+    public static class RoleRequest {
+        private String roleCode;
+        private String roleName;
+        private String description;
+    }
+
+    @GetMapping("/permissions")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<List<Map<String, Object>>> permissions() {
+        List<SysPermission> all = permissionMapper.selectList(
+                new LambdaQueryWrapper<SysPermission>().orderByAsc(SysPermission::getModule, SysPermission::getCode));
+        Map<String, List<Map<String, Object>>> grouped = new java.util.LinkedHashMap<>();
+        for (SysPermission p : all) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("code", p.getCode());
+            m.put("name", p.getName());
+            m.put("type", p.getType());
+            m.put("hot", p.getHot());
+            grouped.computeIfAbsent(p.getModule(), k -> new java.util.ArrayList<>()).add(m);
+        }
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        grouped.forEach((module, perms) -> out.add(Map.of("module", module, "perms", perms)));
+        return ApiResponse.ok(out);
+    }
+
+    @PostMapping("/roles")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<Map<String, Object>> createRole(@RequestBody RoleRequest req) {
+        if (req.getRoleCode() == null || req.getRoleCode().isBlank()) throw new BizException(ErrorCode.PARAM_ERROR, "角色 code 必填");
+        String code = req.getRoleCode().trim().toUpperCase();
+        SysRole exist = roleMapper.selectOne(new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, code));
+        if (exist != null) throw new BizException(ErrorCode.PARAM_ERROR, "角色已存在: " + code);
+        SysRole r = new SysRole();
+        r.setRoleCode(code);
+        r.setRoleName(req.getRoleName() == null ? code : req.getRoleName());
+        r.setDescription(req.getDescription());
+        roleMapper.insert(r);
+        return ApiResponse.ok(Map.of("id", r.getId(), "roleCode", code));
+    }
+
+    @PutMapping("/roles/{id}")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<Map<String, Object>> updateRole(@PathVariable Long id, @RequestBody RoleRequest req) {
+        SysRole r = roleMapper.selectById(id);
+        if (r == null) throw new BizException(ErrorCode.NOT_FOUND, "角色不存在");
+        if (req.getRoleName() != null) r.setRoleName(req.getRoleName());
+        if (req.getDescription() != null) r.setDescription(req.getDescription());
+        roleMapper.updateById(r);
+        return ApiResponse.ok(Map.of("id", id));
+    }
+
+    @DeleteMapping("/roles/{id}")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<Map<String, Object>> deleteRole(@PathVariable Long id) {
+        SysRole r = roleMapper.selectById(id);
+        if (r == null) throw new BizException(ErrorCode.NOT_FOUND, "角色不存在");
+        if (List.of("ADMIN", "OPERATOR", "VIEWER", "AUDITOR", "LABEL_ENG", "ANALYST").contains(r.getRoleCode())) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "预置角色不可删除");
+        }
+        rolePermissionMapper.delete(new LambdaQueryWrapper<SysRolePermission>().eq(SysRolePermission::getRoleId, id));
+        roleMapper.deleteById(id);
+        permService.refresh();
+        return ApiResponse.ok(Map.of("deleted", true, "id", id));
+    }
+
+    /** 角色已授权权限码 */
+    @GetMapping("/roles/{id}/perms")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<Set<String>> rolePerms(@PathVariable Long id) {
+        return ApiResponse.ok(permService.permsOfRole(id));
+    }
+
+    /** 保存角色权限点(全量覆盖) */
+    @PutMapping("/roles/{id}/perms")
+    @PreAuthorize("@perm.isAdmin()")
+    public ApiResponse<Map<String, Object>> saveRolePerms(@PathVariable Long id, @RequestBody List<String> codes) {
+        SysRole r = roleMapper.selectById(id);
+        if (r == null) throw new BizException(ErrorCode.NOT_FOUND, "角色不存在");
+        if ("ADMIN".equals(r.getRoleCode())) throw new BizException(ErrorCode.PARAM_ERROR, "ADMIN 拥有全部权限, 无需配置");
+        rolePermissionMapper.delete(new LambdaQueryWrapper<SysRolePermission>().eq(SysRolePermission::getRoleId, id));
+        for (String c : codes) {
+            SysRolePermission rp = new SysRolePermission();
+            rp.setRoleId(id);
+            rp.setPermCode(c);
+            rolePermissionMapper.insert(rp);
+        }
+        permService.refresh();
+        auditService.record("system", "ROLE_PERM_SAVE", "role", id, "保存角色权限: " + r.getRoleCode());
+        return ApiResponse.ok(Map.of("id", id, "count", codes.size()));
     }
 
     @GetMapping("/users")

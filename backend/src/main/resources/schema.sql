@@ -354,3 +354,48 @@ CREATE TABLE IF NOT EXISTS asset_subscription (
   create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资产订阅(标签条件)';
+
+-- ============ 权限体系(2026-09-08): 系统权限(功能 RBAC) + 数据权限 ============
+CREATE TABLE IF NOT EXISTS sys_permission (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  code        VARCHAR(96) NOT NULL UNIQUE COMMENT '权限码 模块:资源:动作',
+  name        VARCHAR(64)  NOT NULL,
+  module      VARCHAR(32)  NOT NULL COMMENT '平台运维|资产|打标V2|标签消费|系统',
+  type        VARCHAR(8)   NOT NULL DEFAULT 'action' COMMENT 'menu(菜单页)|action(操作)',
+  hot         TINYINT      NOT NULL DEFAULT 0 COMMENT '高危独立点(发布/启停/删除/导出/管理)',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB COMMENT='权限点表';
+
+CREATE TABLE IF NOT EXISTS sys_role_permission (
+  role_id   BIGINT UNSIGNED NOT NULL,
+  perm_code VARCHAR(96) NOT NULL,
+  PRIMARY KEY (role_id, perm_code)
+) ENGINE=InnoDB COMMENT='角色-权限点关联';
+
+-- 数据权限(L0-L3 × scope/dataset/column/tag + 行规则; 设计文档 2026-09-08)
+CREATE TABLE IF NOT EXISTS data_policy (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  res_type VARCHAR(16) NOT NULL COMMENT 'scope|dataset|column|tag',
+  dim VARCHAR(8) NULL COMMENT 'scope: biz|sec|src',
+  res_path VARCHAR(512) NOT NULL COMMENT '分类路径/表名/列名/标签全路径',
+  subject_type VARCHAR(8) NOT NULL COMMENT 'role|user',
+  subject_id VARCHAR(64) NOT NULL,
+  level TINYINT NOT NULL COMMENT '0-3',
+  eff VARCHAR(8) NOT NULL DEFAULT 'grant' COMMENT 'grant|deny',
+  enabled TINYINT NOT NULL DEFAULT 1,
+  update_by VARCHAR(64), update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_policy (res_type, res_path, subject_type, subject_id)
+) ENGINE=InnoDB COMMENT='数据权限策略';
+
+CREATE TABLE IF NOT EXISTS row_rule (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  res_type VARCHAR(16) NOT NULL COMMENT 'dataset|tag',
+  res_path VARCHAR(512) NOT NULL,
+  kind VARCHAR(8) NOT NULL COMMENT 'cond|list|tag_ref',
+  cond_json TEXT NULL COMMENT '{field,op,val}',
+  list_text MEDIUMTEXT NULL,
+  tag_ref_path VARCHAR(512) NULL,
+  note VARCHAR(512), enabled TINYINT NOT NULL DEFAULT 1,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB COMMENT='行规则(手工配置)';

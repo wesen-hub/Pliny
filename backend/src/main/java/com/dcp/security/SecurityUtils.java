@@ -27,6 +27,15 @@ public final class SecurityUtils {
         return currentUser().getUsername();
     }
 
+    /** 当前用户角色 code 列表(claims) */
+    public static java.util.List<String> roles() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof LoginUser lu) {
+            return lu.getRoles();
+        }
+        return java.util.List.of();
+    }
+
     public static boolean hasRole(String role) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof LoginUser lu) {
