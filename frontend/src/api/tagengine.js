@@ -36,6 +36,16 @@ export const labelsApi = {
   entity: (entityKey) => request.get(`/tagengine/labels/entity/${entityKey}`)
 }
 
+export const subApi = {
+  list: () => request.get('/tagengine/subs'),
+  create: (body) => request.post('/tagengine/subs', body),
+  update: (id, body) => request.put(`/tagengine/subs/${id}`, body),
+  remove: (id) => request.delete(`/tagengine/subs/${id}`)
+}
+export const notifyApi = {
+  list: (params) => request.get('/tagengine/notify', { params: params || {} })
+}
+
 export const tasksApi = {
   list: () => request.get('/tagengine/tasks'),
   get: (id) => request.get(`/tagengine/tasks/${id}`),
