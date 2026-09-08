@@ -214,6 +214,10 @@ services:
       DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}
       SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST:-dcp-redis}
       SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
+      DCP_TAGSTREAM_FLINK_URL: ${DCP_TAGSTREAM_FLINK_URL:-http://flink-jobmanager:8081}
+      DCP_TAGSTREAM_JAR: ${DCP_TAGSTREAM_JAR:-/opt/dcp-tagstream.jar}
+      DCP_TAGSTREAM_REDIS_HOST: ${DCP_TAGSTREAM_REDIS_HOST:-dcp-redis}
+      DCP_TAGSTREAM_REDIS_PORT: ${DCP_TAGSTREAM_REDIS_PORT:-6379}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
       SYNC_TOPICS: ""
@@ -221,7 +225,8 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      - ./demo-agent-dir:/data          # 平台 local 源演示目录(容器内 mc 直接镜像)
+      - ./demo-agent-dir:/data
+      - ./dcp-tagstream/target/dcp-tagstream.jar:/opt/dcp-tagstream.jar:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/actuator/health || exit 1"]
       interval: 10s

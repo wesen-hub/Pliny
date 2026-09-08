@@ -125,6 +125,16 @@ public class TagEngineService {
         } catch (DataAccessException ignored) {
             /* 已存在 */
         }
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN stream_job_id VARCHAR(64) NULL COMMENT 'Flink 作业 id(stream 任务)'");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
+        try {
+            metaJdbc.execute("ALTER TABLE tag_task ADD COLUMN stream_status VARCHAR(16) NULL COMMENT 'stream 任务: 未启动|RUNNING|CANCELED|FAILED'");
+        } catch (DataAccessException ignored) {
+            /* 已存在 */
+        }
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_run ("
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "task_id BIGINT NOT NULL,"
@@ -480,7 +490,7 @@ public class TagEngineService {
 
     public List<Map<String, Object>> listTasks() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,interval_min,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,interval_min,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,stream_job_id,stream_status,create_time,update_time"
                         + " FROM tag_task ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) out.add(taskRowToMap(r));
@@ -489,7 +499,7 @@ public class TagEngineService {
 
     public Map<String, Object> getTask(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,interval_min,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,create_time,update_time"
+                "SELECT id,name,mode,dataset,entity_key,last_auto_run_at,dataset_fields_json,derived_json,bindings_json,schedule,interval_min,cron_expr,guard_json,status,ver,snapshot_json,cursor_json,stream_job_id,stream_status,create_time,update_time"
                         + " FROM tag_task WHERE id=?", id);
         if (rows.isEmpty()) throw new IllegalArgumentException("任务不存在 id=" + id);
         return taskRowToMap(rows.get(0));
@@ -499,6 +509,8 @@ public class TagEngineService {
         Map<String, Object> out = new LinkedHashMap<>(r);
         out.put("entityKey", out.remove("entity_key"));
         out.put("intervalMin", out.remove("interval_min"));
+        out.put("streamJobId", out.remove("stream_job_id"));
+        out.put("streamStatus", out.remove("stream_status"));
         out.put("derived", jnode((String) r.get("derived_json")));
         out.put("bindings", jnode((String) r.get("bindings_json")));
         out.put("datasetFields", jnode((String) r.get("dataset_fields_json")));

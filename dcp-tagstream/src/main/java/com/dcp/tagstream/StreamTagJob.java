@@ -30,17 +30,22 @@ public final class StreamTagJob {
 
     public static void main(String[] args) throws Exception {
         String jobJson = null;
+        String jobJsonB64 = null;
         for (int i = 0; i < args.length; i++) {
             if ("--job-json".equals(args[i]) && i + 1 < args.length) jobJson = args[++i];
-        }
-        if (jobJson == null) {
-            System.err.println("缺少 --job-json <file>");
-            System.exit(2);
-            return;
+            if ("--job-json-b64".equals(args[i]) && i + 1 < args.length) jobJsonB64 = args[++i];
         }
         StreamConfig cfg;
         try {
-            cfg = OM.readValue(Files.readString(Paths.get(jobJson), StandardCharsets.UTF_8), StreamConfig.class);
+            if (jobJsonB64 != null) {
+                cfg = OM.readValue(java.util.Base64.getDecoder().decode(jobJsonB64), StreamConfig.class);
+            } else if (jobJson != null) {
+                cfg = OM.readValue(Files.readString(Paths.get(jobJson), StandardCharsets.UTF_8), StreamConfig.class);
+            } else {
+                System.err.println("缺少 --job-json <file> 或 --job-json-b64 <base64>");
+                System.exit(2);
+                return;
+            }
         } catch (Exception e) {
             System.err.println("job-json 解析失败: " + e.getMessage());
             System.exit(2);
