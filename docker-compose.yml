@@ -209,7 +209,7 @@ services:
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root123
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://demo-db:3306/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://tidb:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
       SYNC_TOPICS: ""
@@ -277,7 +277,7 @@ services:
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root123
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://demo-db:3306/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://tidb:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
       SYNC_TOPICS: ""
