@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据血缘 · 设计稿 v2(合体版)</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --bg:#f0f2f5; --card:#fff;
+  --border:#e8e8e8; --text:#1f2329; --text-2:#646a73; --text-3:#8f959e;
+  --green:#52c41a; --green-weak:#f6ffed; --orange:#fa8c16; --orange-weak:#fff7e6;
+  --red:#f5222d; --red-weak:#fff1f0; --blue:#1677ff; --purple:#722ed1; --purple-weak:#f9f0ff;
+  --cyan:#13c2c2; --cyan-weak:#e6fffb;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+/* ===== 顶栏 ===== */
+.appbar{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:26px;position:sticky;top:0;z-index:50}
+.logo{display:flex;align-items:center;gap:8px;padding:12px 0;font-weight:700;font-size:15px}
+.logo i{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1677ff,#36cfc9);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-size:13px}
+.nav{display:flex;gap:4px;height:48px}
+.nav .ni{display:flex;align-items:center;padding:0 14px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;user-select:none}
+.nav .ni.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.appbar .right{margin-left:auto;display:flex;align-items:center;gap:14px;color:var(--text-2);font-size:12px}
+.bell{position:relative;cursor:pointer}
+.bell .dot{position:absolute;top:-2px;right:-4px;background:var(--red);color:#fff;border-radius:8px;font-size:10px;padding:0 4px;line-height:14px}
+.page{max-width:1440px;margin:0 auto;padding:14px 20px 40px}
+.view{display:none}
+.view.on{display:block}
+/* 工具 */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.sec{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec .sub{font-weight:400;color:var(--text-3);font-size:12px}
+.tag{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px;white-space:nowrap}
+.t-green{background:var(--green-weak);color:var(--green)} .t-blue{background:var(--blue-weak);color:var(--blue)}
+.t-orange{background:var(--orange-weak);color:var(--orange)} .t-purple{background:var(--purple-weak);color:var(--purple)}
+.t-red{background:var(--red-weak);color:var(--red)} .t-gray{background:#f5f5f5;color:var(--text-3)}
+.t-cyan{background:var(--cyan-weak);color:var(--cyan)}
+.dim{color:var(--text-3);font-size:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:13px;color:var(--text)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.sm{padding:2px 10px;font-size:12px}
+.btn.danger{border-color:#ffa39e;color:var(--red)}
+.btn.link{border:none;color:var(--primary);background:none;padding:0 4px;cursor:pointer;font-size:12px}
+.searchbox{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 12px;width:380px;font-size:13px}
+.searchbox input{border:none;outline:none;flex:1;font-size:13px}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.chip{border:1px solid var(--border);border-radius:14px;padding:2px 10px;font-size:12px;cursor:pointer;background:#fff;color:var(--text-2)}
+.chip.on{background:var(--primary-weak);border-color:var(--primary);color:var(--primary)}
+/* 节点 */
+.node{border:1px solid var(--border);border-radius:8px;background:#fafbfc;padding:8px 10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s}
+.node:hover{box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.node.sel{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-weak)}
+.node .n-title{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.node .n-meta{font-size:12px;color:var(--text-2);margin-top:4px;line-height:1.6}
+.auto-tag{font-size:10px;padding:0 5px;border-radius:3px}
+/* 图谱 */
+.graph{display:grid;grid-template-columns:250px 320px 1fr;gap:14px}
+.center-node{border:2px solid var(--primary);border-radius:12px;padding:14px;background:#fff;text-align:center;box-shadow:0 4px 16px rgba(22,119,255,.15);position:relative;cursor:pointer}
+.center-node .cn-big{font-size:17px;font-weight:700;color:var(--primary)}
+.center-node .cn-meta{font-size:12px;color:var(--text-2);margin-top:6px;line-height:1.7}
+.dir-title{font-size:12px;color:var(--text-2);font-weight:600;margin:2px 0 8px;display:flex;align-items:center;gap:6px}
+.line-flow{display:flex;justify-content:space-between;align-items:center;color:var(--primary);font-weight:600;font-size:12px;margin:8px 0}
+/* 抽屉 */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:60}
+.drawer{position:fixed;top:0;right:-560px;width:540px;height:100vh;background:#fff;z-index:61;transition:right .2s;box-shadow:-6px 0 24px rgba(0,0,0,.12);display:flex;flex-direction:column}
+.drawer.open{right:0}
+.d-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.d-head .dh-title{font-size:15px;font-weight:700}
+.d-body{flex:1;overflow-y:auto;padding:14px 18px}
+.d-tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.d-tabs .dt{padding:6px 12px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;font-size:13px}
+.d-tabs .dt.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.d-pane{display:none}
+.d-pane.on{display:block}
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#fafafa;text-align:left;padding:6px 8px;color:var(--text-2);font-weight:600;border-bottom:1px solid var(--border)}
+td{padding:6px 8px;border-bottom:1px solid #f2f2f2}
+.kv{display:flex;margin:4px 0;font-size:12px}
+.kv b{width:76px;color:var(--text-3);font-weight:400;flex-shrink:0}
+/* 影响树 */
+.itree{margin-left:6px}
+.ilv{display:flex;gap:8px;margin:6px 0}
+.ilv .lvbadge{width:56px;flex-shrink:0;font-size:11px;color:var(--text-3);padding-top:2px}
+.impcard{border:1px solid var(--border);border-left:3px solid var(--primary);background:#fafbfc;border-radius:6px;padding:7px 10px;flex:1}
+.impcard.deep{border-left-color:var(--cyan);background:#fff}
+.impcard .i1{display:flex;align-items:center;gap:8px;font-weight:600;font-size:12px}
+.impcard .i2{font-size:12px;color:var(--text-2);margin-top:2px}
+.impcard.hit-red{border-left-color:var(--red);background:var(--red-weak)}
+/* 通知单 */
+.ncard{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;background:#fff}
+.ncard .l b{font-size:13px}
+.ncard .l .dim{display:block;margin-top:3px}
+.foot{color:var(--text-3);font-size:11px;margin-top:14px;border-top:1px dashed var(--border);padding-top:8px;line-height:1.8}
+/* 追踪链 */
+.chain{display:flex;align-items:stretch;overflow-x:auto;padding:8px 0 4px}
+.cn2{flex-shrink:0;width:150px}
+.cn2 .cb{border:1px solid var(--border);border-radius:8px;padding:8px;background:#fafbfc;height:100%}
+.cn2 .ct{font-weight:600;font-size:12px}
+.cn2 .cm{font-size:11px;color:var(--text-3);margin-top:3px}
+.cl2{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 3px;font-size:10px;color:var(--text-3);width:74px}
+.cl2 b{background:#fff;border:1px solid var(--border);border-radius:9px;padding:0 5px;font-weight:400;margin:2px 0}
+.cl2 .ln{font-size:13px;color:var(--primary);font-weight:700}
+.branch{border:1px dashed var(--border);border-radius:8px;padding:8px;margin-top:6px;font-size:12px;background:#fff}
+.branch .bt{color:var(--text-2);margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="logo"><i>数</i>数据资产 · 血缘</div>
+  <div class="nav" id="nav">
+    <div class="ni on" data-v="g">血缘图谱</div>
+    <div class="ni" data-v="t">字段级追踪</div>
+    <div class="ni" data-v="i">影响分析</div>
+    <div class="ni" data-v="n">变更通知单 <span class="tag t-red" style="margin-left:4px">2</span></div>
+  </div>
+  <div class="right">
+    <span>自动打标已开启: <span class="tag t-cyan">核心资产</span> <span class="tag t-cyan">高影响</span></span>
+    <span class="bell">🔔<span class="dot">2</span></span>
+    <span>👤 admin</span>
+  </div>
+</div>
+
+<div class="page">
+
+<!-- ============ ① 血缘图谱 ============ -->
+<div class="view on" id="g">
+  <div class="toolbar">
+    <div class="searchbox">🔍 <input id="gq" value="customer_wide"><span class="dim" style="cursor:pointer" onclick="document.getElementById('gq').value='t_order_model'">试:t_order_model</span></div>
+    <button class="btn primary">查询</button>
+    <span class="chip on">表级</span><span class="chip">字段级</span><span class="chip">含规则/任务</span><span class="chip">仅敏感路径</span>
+    <span class="dim" style="margin-left:auto">最近全量解析: 2min 前 · 事件增量解析: 实时</span>
+  </div>
+  <div class="graph">
+    <div>
+      <div class="dir-title">▲ 上游 · 谁产出我(3)</div>
+      <div class="node" onclick="openDrawer('src')"><div class="n-title">🗄 t_user_base <span class="tag t-blue">demo-db MySQL</span><span class="tag t-gray">同步 #12</span></div><div class="n-meta">7 字段映射 · CDC 增量</div></div>
+      <div class="node" onclick="openDrawer('src2')"><div class="n-title">🗄 t_user_org <span class="tag t-blue">demo-db MySQL</span></div><div class="n-meta">同构合并 · 2 字段</div></div>
+      <div class="node" onclick="openDrawer('rule')"><div class="n-title">⚙️ 规则 r4 净支付超限 <span class="tag t-purple">visual</span></div><div class="n-meta">产出 amount · 打标任务 T7</div></div>
+    </div>
+    <div>
+      <div class="center-node" onclick="openDrawer('asset')">
+        <div class="cn-big">customer_wide</div>
+        <div class="cn-meta">
+          <div>模型 M1 · DWD · 客户域</div>
+          <div style="margin:4px 0"><span class="tag t-green">健康 98</span> <span class="tag t-orange">密级 L2</span> <span class="auto-tag t-cyan" style="background:var(--cyan-weak);color:var(--cyan)">核心资产</span> <span class="auto-tag" style="background:var(--purple-weak);color:var(--purple)">高影响</span></div>
+          <div style="font-size:11px;color:var(--text-3)">9 列 · 7 行 · 每 5min 同步 · owner 王工</div>
+        </div>
+      </div>
+      <div class="line-flow"><span>▲ 解析自 field_mapping + 规则依赖声明</span><span>▼ 解析自订阅契约 view_json</span></div>
+    </div>
+    <div>
+      <div class="dir-title">▼ 下游 · 谁消费我(4)</div>
+      <div class="node" onclick="openDrawer('sub1')"><div class="n-title">📮 契约 #34 大额日快照 <span class="tag t-blue">pull</span><span class="tag t-gray">dwh-batch</span></div><div class="n-meta">6 列 · amount≥5000</div></div>
+      <div class="node" onclick="openDrawer('sub2')"><div class="n-title">📮 契约 #47 人群宽表回表 <span class="tag t-blue">pull</span><span class="tag t-gray">mkt-ext</span></div><div class="n-meta">3 列回表</div></div>
+      <div class="node" onclick="openDrawer('sub3')"><div class="n-title">📮 契约 #48 金额档推送 <span class="tag t-red">push kafka</span></div><div class="n-meta">经标签 · 定时 5min</div></div>
+      <div class="node"><div class="n-title">⬇️ Iceberg 湖表 <span class="tag t-gray">入湖</span></div><div class="n-meta">15min 快照</div></div>
+      <div class="dim" style="margin:4px 0 0">点击节点查看详情/映射/影响 →</div>
+    </div>
+  </div>
+  <div class="foot">节点点击弹出右侧详情抽屉(基本信息/字段表/映射矩阵/上下游)。自动标签「核心资产/高影响」由血缘自动打标引擎生成(被 N 个下游依赖 / 跨 2+ 源汇聚), 落在治理标签子树, 可手改。</div>
+</div>
+
+<!-- ============ ② 字段级追踪 ============ -->
+<div class="view" id="t">
+  <div class="toolbar">
+    <div class="searchbox">🔍 <input value="customer_wide.amount"></div>
+    <button class="btn primary">追踪</button>
+    <span class="chip on">全链路</span><span class="chip">只看敏感</span><span class="chip">多路径展开</span>
+    <span class="dim" style="margin-left:auto">列元数据: <b>amount</b> DECIMAL(12,2) · 派生列(规则 r4 产出) · <span class="tag t-orange">密级 L2</span></span>
+  </div>
+  <div class="card">
+    <div class="sec">主链路(6 跳)</div>
+    <div class="chain">
+      <div class="cn2"><div class="cb"><div class="ct">🗄 t_user_base<br>user_balance</div><div class="cm">demo-db · 源列</div></div></div>
+      <div class="cl2"><b>直映射</b><div class="ln">→</div><b>同步 #12</b></div>
+      <div class="cn2"><div class="cb"><div class="ct">customer_wide<br>net_amt</div><div class="cm">模型字段</div></div></div>
+      <div class="cl2"><b>依赖声明</b><div class="ln">→</div><b>规则 r4</b></div>
+      <div class="cn2"><div class="cb"><div class="ct">⚙️ 净支付额计算<br>net_amt − fee</div><div class="cm">规则(visual)<br>条件 ≥5000</div></div></div>
+      <div class="cl2"><b>产出写回</b><div class="ln">→</div><b>任务 T7</b></div>
+      <div class="cn2"><div class="cb"><div class="ct" style="color:var(--primary)">customer_wide<br><b>amount</b> 🔒L2</div><div class="cm">当前字段</div></div></div>
+      <div class="cl2"><b>契约引用</b><div class="ln">→</div><b>#34 #47</b></div>
+      <div class="cn2"><div class="cb"><div class="ct">📮 契约 #34<br>dwh-batch</div><div class="cm">下游消费</div></div></div>
+    </div>
+    <div class="sec" style="margin-top:14px">其它来源 / 分支(3)</div>
+    <div class="branch"><div class="bt">① 同构合并来源</div><div class="frow" style="font-size:12px">t_user_org.amount <span style="margin:0 6px;color:var(--primary)">→</span> amount · 冲突策略: 后写覆盖(job #12 merge 键 user_id)</div></div>
+    <div class="branch"><div class="bt">② ⚠️ 规则 r6(DRL) 疑似产出</div><div class="frow" style="font-size:12px"><span class="tag t-orange">依赖未声明</span> 无法自动解析 · 补边按钮: <button class="btn sm link" style="color:var(--primary)">人工补边 →</button> 补完即入血缘</div></div>
+    <div class="branch"><div class="bt">③ 敏感路径提示</div><div class="frow" style="font-size:12px">amount 非敏感; 同表 phone 列敏感 🔒L3 → 追踪其流向请切「只看敏感」</div></div>
+  </div>
+</div>
+
+<!-- ============ ③ 影响分析 ============ -->
+<div class="view" id="i">
+  <div class="card">
+    <div class="sec">变更影响分析</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><div class="dim" style="margin-bottom:4px">资产</div><div class="searchbox" style="width:200px"><input value="customer_wide"></div></div>
+      <div><div class="dim" style="margin-bottom:4px">字段(空=整表)</div><div class="searchbox" style="width:160px"><input value="amount"></div></div>
+      <div><div class="dim" style="margin-bottom:4px">变更类型</div>
+        <select style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px">
+          <option>改语义 / 删列</option><option>改密级 L2→L3</option><option>改类型/精度</option><option>源字段替换</option>
+        </select></div>
+      <button class="btn primary">分析影响</button>
+    </div>
+    <div class="warn" style="background:var(--orange-weak);border:1px solid #ffd591;color:#ad4e00;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:10px" id="iwarn">
+      ⚠️ 变更 <b>customer_wide.amount · 改语义/删列</b> —— 命中直接下游 4 个; 其中契约 #48 经「标签:金额档」间接依赖(第 2 层)。
+    </div>
+  </div>
+  <div class="two" style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px">
+    <div class="card">
+      <div class="sec">影响分层 <span class="sub">按依赖深度递归, 自动去环</span></div>
+      <div class="itree">
+        <div class="ilv"><div class="lvbadge">第 1 层</div><div style="flex:1">
+          <div class="impcard hit-red"><div class="i1">📮 契约 #34 · 大额日快照 <span class="tag t-red">列命中 · 直接</span><span style="margin-left:auto" class="dim">dwh-batch · pull</span></div><div class="i2">引用列: id customer_id region status amount(6 列) · 变更后快照/增量将缺列</div></div>
+          <div class="impcard hit-red" style="margin-top:6px"><div class="i1">📮 契约 #47 · 人群宽表回表 <span class="tag t-red">列命中 · 直接</span></div><div class="i2">宽表 join 回表取 amount · 回表列需收窄/再审批</div></div>
+          <div class="impcard" style="margin-top:6px"><div class="i1">⬇️ Iceberg 湖表 customer_wide <span class="tag t-blue">表级命中</span></div><div class="i2">入湖 15min 快照 · schema 演进自动同步</div></div>
+        </div></div>
+        <div class="ilv"><div class="lvbadge">第 2 层</div><div style="flex:1">
+          <div class="impcard deep"><div class="i1">📮 契约 #48 · 金额档推送 <span class="tag t-cyan">间接(经标签 金额档)</span><span style="margin-left:auto" class="dim">mkt-k · push kafka</span></div><div class="i2">规则 r1(金额档)依赖 amount → 标签事实 → 圈选矩阵; amount 语义变化会改变圈选结果</div></div>
+          <div class="impcard deep" style="margin-top:6px"><div class="i1">🎯 圈选订阅(标签维) 3 个 <span class="tag t-cyan">间接</span></div><div class="i2">引用标签「金额档」的实体订阅, 触发重算后名单变化</div></div>
+        </div></div>
+        <div class="ilv"><div class="lvbadge">第 3 层</div><div style="flex:1"><div class="dim" style="padding:4px 2px">— 无(已达叶子: 订阅契约/入湖为终节点)</div></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec">动作 <span class="sub">生成变更通知单</span></div>
+      <div class="dim" style="margin-bottom:8px">通知对象(按血缘自动圈选, 可手改):</div>
+      <div style="margin-bottom:6px"><label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 0"><input type="checkbox" checked> 契约 #34 订阅方 dwh-batch(owner 王工)</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 0"><input type="checkbox" checked> 契约 #47 订阅方 mkt-ext(owner 李敏)</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 0"><input type="checkbox"> 契约 #48 订阅方 mkt-k(间接, 建议知会)</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 0"><input type="checkbox" checked> 资产 owner 王工 · 任务 T7</label></div>
+      <textarea rows="3" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:8px;font-size:12px" placeholder="变更说明: amount 语义改为净支付额(含退款), 预计 09-10 上线">amount 语义变更: 由"消费金额"改为"净支付额(含退款)", schema 不变, 数值口径变化。</textarea>
+      <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary">生成变更通知单</button><button class="btn">仅记录审计</button></div>
+      <div class="dim" style="margin-top:8px">通知单落库 + 审计; 订阅方确认后回执状态流转(见下页)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ④ 变更通知单 ============ -->
+<div class="view" id="n">
+  <div class="toolbar">
+    <span class="dim" style="margin-right:auto">共 3 张 · 变更由结构探测器(信息 schema 对比)+ 血缘影响分析生成</span>
+    <span class="chip on">全部</span><span class="chip">待确认 1</span><span class="chip">已确认 2</span><span class="chip">草稿 0</span>
+  </div>
+  <div class="ncard">
+    <div class="l"><b>#N-1024 · customer_wide.amount 口径变更</b><span class="dim">2026-09-09 04:00 由 admin 生成 · 收件 4: dwh-batch / mkt-ext / mkt-k(知会)/ 任务 T7 · 影响层 1+2</span></div>
+    <div class="r"><span class="tag t-orange">待确认 2/4</span> <button class="btn sm">详情</button></div>
+  </div>
+  <div class="ncard">
+    <div class="l"><b>#N-1018 · t_user_base.phone 源字段脱敏计划</b><span class="dim">2026-09-08 16:20 · 自动(敏感路径扫描)· 收件: 入湖任务 owner · 影响: 湖表快照明文</span></div>
+    <div class="r"><span class="tag t-green">已确认</span> <button class="btn sm">详情</button></div>
+  </div>
+  <div class="ncard">
+    <div class="l"><b>#N-1011 · 契约 #34 到期续期提醒</b><span class="dim">2026-09-08 10:00 · 自动(生命周期)· ttl 2026-12-31 前 30 天</span></div>
+    <div class="r"><span class="tag t-green">已确认</span> <button class="btn sm">详情</button></div>
+  </div>
+  <div class="foot">通知单不是邮件系统 —— 落库 + 审计 + 页面回执确认, 订阅方在「订阅中心-我的契约」可见待确认项(演示闭环)。真实外发(邮件/IM)留扩展。</div>
+</div>
+
+</div>
+
+<!-- 抽屉: 节点详情 -->
+<div class="mask" id="mask" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="d-head">
+    <div class="dh-title" id="dh-title">节点详情</div>
+    <button class="btn link" style="margin-left:auto" onclick="closeDrawer()">✕ 关闭</button>
+  </div>
+  <div class="d-body" id="d-body"></div>
+</div>
+
+<script>
+let cur='asset';
+const DATA = {
+  asset:{t:'customer_wide', meta:'模型 M1 · DWD · 客户域 · owner 王工', tabs:['基本信息','字段表','映射矩阵','影响']},
+  src:{t:'🗄 t_user_base', meta:'demo-db MySQL · 源表', tabs:['基本信息','字段映射','下游']},
+  rule:{t:'⚙️ 规则 r4 · 净支付额超限', meta:'规则资产(visual) · 打标任务 T7', tabs:['规则定义','依赖/产出','影响']},
+  sub1:{t:'📮 契约 #34 · 大额日快照', meta:'dwh-batch · pull 定时 · 审批通过', tabs:['契约信息','引用列','血缘']}
+};
+function bodyOf(k){
+  if(k==='asset') return `<div class="kv"><b>库.表</b>target_db.customer_wide</div>
+    <div class="kv"><b>层/域</b>DWD · 客户域</div><div class="kv"><b>密级</b><span class="tag t-orange">L2 内部</span></div>
+    <div class="kv"><b>健康</b><span class="tag t-green">98</span> 同步及时 5min / 行数 +3%/日</div>
+    <div class="kv"><b>自动标签</b><span class="tag t-cyan">核心资产</span><span class="tag t-purple">高影响</span> <button class="btn sm link">管理标签</button></div>
+    <div class="kv"><b>同步节奏</b>每 5min(任务 #12) · CDC</div>
+    <div class="d-tabs" style="margin-top:12px"><div class="dt on">字段表(9)</div><div class="dt">映射矩阵</div><div class="dt">上游(3)</div><div class="dt">下游(4)</div></div>
+    <table><tr><th>字段</th><th>类型</th><th>来源</th><th>密级</th></tr>
+    <tr><td><b>id</b></td><td>bigint</td><td>直映射 t_user_base.user_id</td><td>L1</td></tr>
+    <tr><td><b>phone</b> 🔒</td><td>varchar</td><td>直映射(源敏感)</td><td><span class="tag t-red">L3</span></td></tr>
+    <tr><td><b>amount</b></td><td>decimal</td><td><span class="tag t-purple">派生: 规则 r4 产出</span></td><td>L2</td></tr>
+    <tr><td><b>name</b></td><td>varchar</td><td>加工 concat(org, user)</td><td>L1</td></tr></table>`;
+  if(k==='src') return `<div class="kv"><b>类型</b>外部源表(MySQL demo-db)</div>
+    <div class="kv"><b>同步任务</b>#12 · CDC 增量</div>
+    <div class="d-tabs" style="margin-top:12px"><div class="dt on">字段映射(7)</div></div>
+    <table><tr><th>源字段</th><th>→ 目标字段</th><th>转换</th><th>规则</th></tr>
+    <tr><td>user_id</td><td>id</td><td>直映射</td><td>—</td></tr>
+    <tr><td>phone</td><td>phone</td><td>直映射</td><td><span class="tag t-orange">源敏感</span></td></tr>
+    <tr><td>user_balance</td><td>net_amt</td><td>直映射</td><td>—</td></tr>
+    <tr><td>org_name+user_name</td><td>name</td><td>concat</td><td>org_name,user_name</td></tr></table>
+    <div class="dim" style="margin-top:8px">来源: field_mapping(任务 #12) —— 血缘同步层真实解析源</div>`;
+  if(k==='rule') return `<div class="kv"><b>类型</b>规则资产 · visual</div>
+    <div class="kv"><b>定义</b>net_amt − fee ≥ 5000 → 金额档/超限</div>
+    <div class="kv"><b>依赖</b>net_amt, fee <span class="tag t-green">已声明</span></div>
+    <div class="kv"><b>产出</b>写回 customer_wide.amount · 标签「金额档」</div>
+    <div class="warn" style="background:var(--orange-weak);border:1px solid #ffd591;color:#ad4e00;border-radius:6px;padding:6px 10px;font-size:12px;margin-top:8px">规则 r6 为 DRL 类型, 依赖不收集 → 其产出列标记「来源未知」, 需人工补边</div>`;
+  if(k==='sub1') return `<div class="kv"><b>订阅方</b>dwh-batch</div>
+    <div class="kv"><b>模式</b>pull · 定时 · max_secret 3</div>
+    <div class="kv"><b>视图</b>logical: customer_wide(6 列, amount≥5000)</div>
+    <div class="d-tabs" style="margin-top:12px"><div class="dt on">引用列(6)</div></div>
+    <table><tr><th>列</th><th>来源边</th></tr>
+    <tr><td>amount</td><td><span class="tag t-orange">命中本次变更</span></td></tr>
+    <tr><td>id/customer_id/region/status</td><td>直映射</td></tr></table>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary sm">查看契约详情</button><button class="btn sm">加入变更通知</button></div>`;
+  return '';
+}
+function openDrawer(k){ cur=k; document.getElementById('mask').style.display='block';
+  const d=DATA[k]||DATA.asset;
+  document.getElementById('dh-title').textContent=d.t;
+  document.getElementById('d-body').innerHTML=`<div class="dim" style="margin-bottom:10px">${d.meta}</div>`+bodyOf(k);
+  document.getElementById('drawer').classList.add('open'); }
+function closeDrawer(){ document.getElementById('drawer').classList.remove('open'); document.getElementById('mask').style.display='none'; }
+document.getElementById('nav').addEventListener('click',e=>{const n=e.target.closest('.ni');if(!n)return;
+  document.querySelectorAll('.ni').forEach(x=>x.classList.remove('on')); document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  n.classList.add('on'); document.getElementById(n.dataset.v).classList.add('on');});
+</script>
+</body>
+</html>

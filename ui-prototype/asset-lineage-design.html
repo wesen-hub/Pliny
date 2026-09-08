@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据资产目录 · 血缘设计稿 v1</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --bg:#f0f2f5; --card:#fff;
+  --border:#e8e8e8; --text:#1f2329; --text-2:#646a73; --text-3:#8f959e;
+  --green:#52c41a; --green-weak:#f6ffed; --orange:#fa8c16; --orange-weak:#fff7e6;
+  --red:#f5222d; --red-weak:#fff1f0; --blue:#1677ff; --blue-weak:#e6f4ff;
+  --purple:#722ed1; --purple-weak:#f9f0ff; --cyan:#13c2c2;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.page{max-width:1280px;margin:0 auto;padding:16px 20px 40px}
+/* ===== 顶栏 ===== */
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.title{font-size:18px;font-weight:700}
+.title small{font-weight:400;font-size:12px;color:var(--text-3);margin-left:8px}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px}
+.bg-green{background:var(--green-weak);color:var(--green)} .bg-orange{background:var(--orange-weak);color:var(--orange)}
+.bg-red{background:var(--red-weak);color:var(--red)} .bg-blue{background:var(--blue-weak);color:var(--blue)}
+.bg-purple{background:var(--purple-weak);color:var(--purple)} .bg-gray{background:#f5f5f5;color:var(--text-3)}
+/* ===== 视图 Tab ===== */
+.tabs{display:flex;gap:6px;border-bottom:2px solid var(--border);margin-bottom:14px}
+.tab{padding:8px 16px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-2px;user-select:none}
+.tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.view{display:none}
+.view.on{display:block}
+/* ===== 通用 ===== */
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:12px}
+.sec{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec .sub{font-weight:400;color:var(--text-3);font-size:12px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tag{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px}
+.t-green{background:var(--green-weak);color:var(--green)} .t-blue{background:var(--blue-weak);color:var(--blue)}
+.t-orange{background:var(--orange-weak);color:var(--orange)} .t-purple{background:var(--purple-weak);color:var(--purple)}
+.t-red{background:var(--red-weak);color:var(--red)} .t-gray{background:#f5f5f5;color:var(--text-3)}
+.kv{display:flex;font-size:12px;margin:3px 0} .kv b{width:64px;color:var(--text-3);font-weight:400;flex-shrink:0}
+.dim{color:var(--text-3);font-size:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+/* 节点卡片 */
+.node{border:1px solid var(--border);border-radius:8px;background:#fafbfc;padding:8px 10px;margin-bottom:8px;position:relative}
+.node .n-title{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.node .n-meta{font-size:12px;color:var(--text-2);margin-top:3px}
+.node .n-fields{margin-top:6px;border-top:1px dashed var(--border);padding-top:6px;display:none}
+.node.open .n-fields{display:block}
+.frow{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0}
+.frow .fname{font-weight:600;color:#0b5bd3}
+.frow .arrow{color:var(--text-3)}
+.lock{color:var(--orange);font-size:11px}
+.warn{background:var(--orange-weak);border:1px solid #ffd591;color:#ad4e00;border-radius:6px;padding:6px 10px;font-size:12px;margin:6px 0}
+.ok-line{color:var(--green);font-weight:600}
+/* 方向标注 */
+.dir{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);margin:10px 0 4px}
+.dir .bar{flex:1;height:1px;background:var(--border)}
+/* 影响卡片 */
+.imp{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.imp .l b{font-size:13px}
+.imp .l .dim{display:block;margin-top:2px}
+.imp .r{text-align:right;flex-shrink:0}
+/* 链路 */
+.chain{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 0 14px}
+.ch-node{flex-shrink:0;width:170px}
+.ch-node .cbox{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fafbfc;height:100%}
+.ch-node .cbox .ct{font-weight:600;font-size:12px;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.ch-node .cbox .cm{font-size:11px;color:var(--text-3);margin-top:3px}
+.ch-link{flex-shrink:0;display:flex;align-items:center;padding:0 4px;color:var(--text-3);font-size:11px;flex-direction:column;justify-content:center;width:86px}
+.ch-link .lbl{background:#fff;border:1px solid var(--border);border-radius:10px;padding:0 6px;white-space:nowrap;margin-bottom:2px}
+.ch-link .ln{font-size:16px;line-height:1}
+/* 表级血缘三列 */
+.dag{display:grid;grid-template-columns:280px 300px 1fr;gap:0;align-items:start}
+.dag .col{padding:0 8px}
+.dag-col-title{font-size:12px;color:var(--text-2);font-weight:600;margin:4px 0 8px;text-align:center}
+.center-card{border:2px solid var(--primary);border-radius:10px;padding:12px;background:#fff;box-shadow:0 2px 8px rgba(22,119,255,.12);position:relative;text-align:center}
+.center-card .big{font-size:16px;font-weight:700;color:var(--primary)}
+.center-arrows{display:flex;justify-content:space-between;align-items:center;color:var(--primary);font-size:14px;margin:6px 0 2px;font-weight:700}
+.dag .node{margin-bottom:6px;cursor:pointer}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.searchbox{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:6px;padding:5px 10px;width:340px}
+.searchbox input{border:none;outline:none;font-size:13px;flex:1}
+.btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:13px;color:var(--text)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.sm{padding:2px 10px;font-size:12px}
+.btn.link{border:none;color:var(--primary);background:none;padding:0 4px}
+.table{width:100%;border-collapse:collapse;font-size:12px}
+.table th{background:#fafafa;text-align:left;padding:7px 8px;color:var(--text-2);font-weight:600;border-bottom:1px solid var(--border)}
+.table td{padding:7px 8px;border-bottom:1px solid #f2f2f2}
+.foot{color:var(--text-3);font-size:11px;margin-top:16px;border-top:1px dashed var(--border);padding-top:8px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="top">
+    <div class="title">数据资产目录 · 血缘分析设计稿 <small>v1 · 全部为 mock 展示, 素材取自平台真实模块(模型/规则/契约)</small></div>
+    <div><span class="badge bg-blue">设计稿</span> <span class="badge bg-gray">未接后端</span></div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab on" data-v="v1">① 资产详情 · 血缘区块</div>
+    <div class="tab" data-v="v2">② 血缘检索(表级)</div>
+    <div class="tab" data-v="v3">③ 字段级溯源链路</div>
+    <div class="tab" data-v="v4">④ 影响分析(改列)</div>
+    <div class="tab" data-v="v5">⑤ 敏感字段追踪</div>
+  </div>
+
+  <!-- ================= ① 资产详情 · 血缘区块 ================= -->
+  <div class="view on" id="v1">
+    <div class="card">
+      <div class="sec">customer_wide <span class="badge bg-purple">宽表(模型 M1)</span>
+        <span class="badge bg-gray">DWD</span> <span class="badge bg-gray">客户域</span>
+        <span class="tag t-green">健康 98</span>
+        <span style="margin-left:auto" class="dim">9 列 · 7 行 · 每 5min 同步 · owner: 王工</span>
+      </div>
+      <div class="dim" style="margin-bottom:8px">数据血缘区块(详情页中部) —— 上游:谁产出我; 下游:我喂给谁。点击节点内「字段明细」展开列级边。</div>
+      <div class="two">
+        <div>
+          <div class="dir"><span class="tag t-blue">▲ 上游(4)</span><div class="bar"></div></div>
+          <div class="node open">
+            <div class="n-title">🗄 demo-db(MySQL) t_user_base <span class="tag t-blue">源表</span><span class="tag t-gray">同步任务 #12</span></div>
+            <div class="n-meta">直映射 5 列 + 加工 2 列 · 每 5min CDC 增量</div>
+            <div class="n-fields">
+              <div class="frow"><span class="fname">user_id</span><span class="arrow">→</span> id(直映射)</div>
+              <div class="frow"><span class="fname">phone</span><span class="arrow">→</span> phone <span class="lock">🔒敏感 mask</span></div>
+              <div class="frow"><span class="fname">region</span><span class="arrow">→</span> region(直映射)</div>
+            </div>
+          </div>
+          <div class="node">
+            <div class="n-title">🗄 demo-db(MySQL) t_user_org <span class="tag t-blue">源表</span><span class="tag t-gray">同步任务 #12</span></div>
+            <div class="n-meta">同构合并(与 t_user_base 按 user_id 关联) · 2 列</div>
+            <div class="n-fields">
+              <div class="frow"><span class="fname">org_name</span><span class="arrow">→</span> name(加工 concat)</div>
+            </div>
+          </div>
+          <div class="node">
+            <div class="n-title">⚙️ 规则 r4 · 净支付额超限 <span class="tag t-purple">规则(visual)</span></div>
+            <div class="n-meta">依赖: net_amt, limit · 产出派生列 → 写回 amount</div>
+            <div class="n-fields">
+              <div class="frow"><span class="fname">net_amt</span><span class="arrow">→(产出)</span> amount <span class="ok-line">✓ 已声明</span></div>
+            </div>
+          </div>
+          <div class="warn">⚠️ 规则 r6(DRL 直写)依赖未声明 → 字段级上游缺边, 此规则产出的列标记「来源未知」</div>
+        </div>
+        <div>
+          <div class="dir"><div class="bar"></div><span class="tag t-green">▼ 下游(3)</span></div>
+          <div class="node open">
+            <div class="n-title">📮 契约 #34 · 数仓大额日快照 <span class="tag t-blue">订阅 pull</span><span class="tag t-gray">dwh-batch</span></div>
+            <div class="n-meta">逻辑表视图 amount≥5000 · 增量游标 · 每日 02:00</div>
+            <div class="n-fields">
+              <div class="frow"><span class="fname">引用列(6):</span> id customer_id region status amount … <span class="tag t-orange">改 amount 会命中</span></div>
+            </div>
+          </div>
+          <div class="node">
+            <div class="n-title">📮 契约 #47 · 大额人群宽表 <span class="tag t-blue">订阅 pull</span><span class="tag t-gray">mkt-ext</span></div>
+            <div class="n-meta">标签圈选 → 回表 customer_wide(id 关联取 region/status/amount)</div>
+          </div>
+          <div class="node">
+            <div class="n-title">⬇️ 湖同步任务 · customer_wide → Iceberg <span class="tag t-gray">入湖</span></div>
+            <div class="n-meta">每 15min 快照入湖(权威+历史)</div>
+          </div>
+          <div class="dim" style="margin-top:6px">下游点击 = 影响分析入口(见 ④)</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm primary">查看全链路(Lineage 页)</button>
+        <button class="btn sm">仅看字段级</button>
+        <button class="btn sm">敏感路径高亮</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= ② 血缘检索(表级) ================= -->
+  <div class="view" id="v2">
+    <div class="card">
+      <div class="toolbar">
+        <div class="searchbox">🔍 <input placeholder="输入表名 / 逻辑表 / 源表, 如 customer_wide" value="customer_wide"></div>
+        <button class="btn primary">查询</button>
+        <button class="btn">全量重扫血缘</button>
+        <button class="btn">导出血缘(JSON)</button>
+        <span class="dim" style="margin-left:auto">粒度: 表级 · 深度: 3 层 · 环形已合并</span>
+      </div>
+      <div class="dag">
+        <div class="col">
+          <div class="dag-col-title">▲ 上游(2 源表 / 1 规则)</div>
+          <div class="node" onclick="this.classList.toggle('open')">
+            <div class="n-title">🗄 t_user_base <span class="tag t-blue">MySQL demo-db</span></div>
+            <div class="n-meta">同步任务 #12 · 直映射+加工</div>
+          </div>
+          <div class="node" onclick="this.classList.toggle('open')">
+            <div class="n-title">🗄 t_user_org <span class="tag t-blue">MySQL demo-db</span></div>
+            <div class="n-meta">同构合并源</div>
+          </div>
+          <div class="node" onclick="this.classList.toggle('open')">
+            <div class="n-title">⚙️ 规则 r4 净支付额超限 <span class="tag t-purple">打标任务 T7</span></div>
+            <div class="n-meta">产出 amount / 标签:金额档</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="dag-col-title"></div>
+          <div class="center-card">
+            <div class="big">customer_wide</div>
+            <div class="dim">模型 M1 · DWD · 客户域</div>
+            <div style="margin:6px 0"><span class="badge bg-green">健康 98</span> <span class="tag t-orange">密级 L2</span></div>
+            <div style="display:flex;justify-content:center;gap:6px">
+              <button class="btn sm primary">详情</button><button class="btn sm">字段级</button>
+            </div>
+          </div>
+          <div class="center-arrows">▲ 上游解析自 field_mapping+规则装配 ▼ 下游解析自订阅契约 view_json</div>
+        </div>
+        <div class="col">
+          <div class="dag-col-title">▼ 下游(3 订阅 / 1 入湖)</div>
+          <div class="node"><div class="n-title">📮 契约 #34 大额日快照 <span class="tag t-gray">dwh-batch</span></div><div class="n-meta">pull · 6 列 · amount≥5000</div></div>
+          <div class="node"><div class="n-title">📮 契约 #47 人群宽表回表 <span class="tag t-gray">mkt-ext</span></div><div class="n-meta">pull · 3 列回表</div></div>
+          <div class="node"><div class="n-title">📮 契约 #48 金额档推送 <span class="tag t-red">push kafka</span><span class="tag t-gray">mkt-k</span></div><div class="n-meta">定时 5min · 自动投递中</div></div>
+          <div class="node"><div class="n-title">⬇️ Iceberg 湖表 customer_wide <span class="tag t-gray">入湖任务</span></div><div class="n-meta">15min 快照</div></div>
+        </div>
+      </div>
+      <div class="dim" style="margin-top:10px">画布说明: 节点可点击展开字段明细; 表级边由字段级边自动聚合。真实数据源: field_mapping / logical_table / 规则依赖声明 / data_contract.view_json。</div>
+    </div>
+  </div>
+
+  <!-- ================= ③ 字段级溯源链路 ================= -->
+  <div class="view" id="v3">
+    <div class="card">
+      <div class="sec">字段溯源: customer_wide.<span class="mono" style="color:var(--primary)">amount</span> 从哪来 <span class="sub">链路自上游至下游, 共 6 跳 · 每跳可展开详情/跳转</span></div>
+      <div class="chain">
+        <div class="ch-node"><div class="cbox"><div class="ct">🗄 t_user_base<br>user_balance</div><div class="cm">源列<br>demo-db MySQL</div></div></div>
+        <div class="ch-link"><div class="lbl">直映射</div><div class="ln">→</div><div class="lbl">job #12</div></div>
+        <div class="ch-node"><div class="cbox"><div class="ct">customer_wide<br>net_amt</div><div class="cm">模型字段<br>同步写入</div></div></div>
+        <div class="ch-link"><div class="lbl">规则依赖</div><div class="ln">→</div><div class="lbl">r4(visual)</div></div>
+        <div class="ch-node"><div class="cbox"><div class="ct">⚙️ 净支付额计算<br>net_amt - fee</div><div class="cm">规则 r4<br>条件: 超限 5000</div></div></div>
+        <div class="ch-link"><div class="lbl">产出写回</div><div class="ln">→</div><div class="lbl">任务 T7</div></div>
+        <div class="ch-node"><div class="cbox"><div class="ct">customer_wide<br><b>amount</b> 🔒L2</div><div class="cm">派生字段<br>当前资产</div></div></div>
+        <div class="ch-link"><div class="lbl">契约引用</div><div class="ln">→</div><div class="lbl">#34 #47</div></div>
+        <div class="ch-node"><div class="cbox"><div class="ct">📮 契约 #34<br>dwh-batch</div><div class="cm">下游消费方<br>大额日快照</div></div></div>
+      </div>
+      <div class="two" style="margin-top:8px">
+        <div>
+          <div class="sec" style="font-size:12px">同一列的其他上游(多源合并)</div>
+          <div class="frow"><span class="fname">t_user_org.amount</span> <span class="arrow">→</span> amount(同构合并, 去重规则: 后写覆盖)</div>
+          <div class="frow"><span class="fname">⚠️ r6(DRL) 产出?</span> <span class="arrow">→</span> <span class="tag t-orange">依赖未声明 · 来源未知</span></div>
+        </div>
+        <div>
+          <div class="sec" style="font-size:12px">操作</div>
+          <div class="frow"><button class="btn sm">查看加工规则 r4 详情</button> <button class="btn sm">查看同步映射 job #12</button> <button class="btn sm">影响分析(此列)</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= ④ 影响分析 ================= -->
+  <div class="view" id="v4">
+    <div class="card">
+      <div class="sec">影响分析: 变更 <span class="mono" style="color:var(--primary)">customer_wide.amount</span>(改语义 / 删列 / 改密级) <span class="sub">自资产详情「下游」或字段操作入口进入</span></div>
+      <div class="warn">变更类型: <b>改语义/删列</b> → 下游全部命中; <b>改密级</b>(L2→L3) → 仅命中密级门槛不足的订阅。下方按两类分别列示。</div>
+      <div class="sec" style="font-size:12px">A. 直接消费方(3 契约 · 1 入湖) <span class="tag t-red">删列将全部不可用</span></div>
+      <div class="imp">
+        <div class="l"><b>📮 契约 #34 · 数仓客户视图·大额日快照</b><span class="dim">dwh-batch · pull 定时 · 引用列: amount status region …(6) · 审批人 admin 09-08</span></div>
+        <div class="r"><span class="tag t-orange">列命中</span><br><button class="btn link" style="margin-top:2px">查看视图定义</button></div>
+      </div>
+      <div class="imp">
+        <div class="l"><b>📮 契约 #47 · 大额人群宽表</b><span class="dim">mkt-ext · pull 实时 · 宽表回表取 amount</span></div>
+        <div class="r"><span class="tag t-orange">列命中</span><br><button class="btn link">查看视图定义</button></div>
+      </div>
+      <div class="imp">
+        <div class="l"><b>📮 契约 #48 · 金额档人群推送</b><span class="dim">mkt-k · push kafka 定时 5min · 打标视图(matrix 金额档)</span></div>
+        <div class="r"><span class="tag t-gray">间接(经标签)</span><br><button class="btn link">血缘路径</button></div>
+      </div>
+      <div class="imp">
+        <div class="l"><b>⬇️ Iceberg 湖表 customer_wide</b><span class="dim">入湖同步 · 15min 快照 · schema 自动演进</span></div>
+        <div class="r"><span class="tag t-blue">表级命中</span><br><span class="dim">schema 变更自动同步</span></div>
+      </div>
+      <div class="sec" style="font-size:12px;margin-top:14px">B. 密级变更影响(L2 → L3) <span class="tag t-orange">门槛不足的订阅会被停</span></div>
+      <div class="imp">
+        <div class="l"><b>📮 契约 #34</b><span class="dim">max_secret=3(机密) → 可继续</span></div>
+        <div class="r"><span class="tag t-green">不受影响</span></div>
+      </div>
+      <div class="imp" style="border-color:#ffd591;background:#fffbe6">
+        <div class="l"><b>📮 契约 #47</b><span class="dim">max_secret=2(内部) → 超出门槛, 需管理员再审批或收窄</span></div>
+        <div class="r"><span class="tag t-red">命中 · 待处理</span><br><button class="btn link">去订阅中心处理</button></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary sm">生成变更通知单(审计)</button><button class="btn sm">导出影响清单</button></div>
+    </div>
+  </div>
+
+  <!-- ================= ⑤ 敏感字段追踪 ================= -->
+  <div class="view" id="v5">
+    <div class="card">
+      <div class="sec">敏感字段追踪: <span class="mono" style="color:var(--red)">phone</span>(手机号 · 密级 L3 · mask 脱敏) 流向全景 <span class="sub">合规视图: 敏感列从哪进、往哪出、何处裸奔</span></div>
+      <div class="two">
+        <div>
+          <div class="dir"><span class="tag t-red">▲ 来源(2)</span><div class="bar"></div></div>
+          <div class="node"><div class="n-title">🗄 demo-db t_user_base.phone</div><div class="n-meta">源库明文</div></div>
+          <div class="node"><div class="n-title">📥 事件接入 appKey dcp-oms · 字段 phone</div><div class="n-meta">Kafka 实时事件 → 逻辑表落库</div></div>
+        </div>
+        <div>
+          <div class="dir"><div class="bar"></div><span class="tag t-red">▼ 出口(3)</span></div>
+          <div class="node"><div class="n-title">customer_wide.phone <span class="lock">🔒 mask 138****1234</span></div><div class="n-meta">详情预览/导出默认脱敏</div></div>
+          <div class="node"><div class="n-title">📮 契约 #50 · 营销触达名单 <span class="tag t-red">含 phone 明文?</span></div><div class="n-meta">视图含 phone · max_secret=3 · 审批通过 —— 需人工复核是否明文交付</div></div>
+          <div class="node"><div class="n-title">⬇️ 湖表快照 phone(明文)</div><div class="n-meta">入湖未脱敏 · <span class="tag t-orange">湖权限治理项</span></div></div>
+        </div>
+      </div>
+      <div class="warn" style="margin-top:10px">规则: 目录标记「敏感」的列, 其全部下游边在追踪视图中红色高亮; 若某出口未配置 mask / 密级低于来源 → 生成治理项(列表在右侧治理待办)。</div>
+      <div class="sec" style="font-size:12px;margin-top:12px">治理待办(2)</div>
+      <div class="imp"><div class="l"><b>契约 #50 可能明文交付 phone</b><span class="dim">建议: 交付列移除 phone 或改为脱敏视图</span></div><div class="r"><button class="btn sm primary">去处理</button> <button class="btn sm">标记已复核</button></div></div>
+      <div class="imp"><div class="l"><b>湖表 customer_wide.phone 未脱敏</b><span class="dim">建议: 入湖前 mask 或湖权限收紧(依赖湖 serving 权限落地)</span></div><div class="r"><span class="tag t-gray">挂起 · 依赖湖权限</span></div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    设计说明: ① 血缘边全部解析自平台存量(模型/field_mapping/规则依赖声明/data_contract.view_json), 节点复用现有实体 id, 无独立资产体系; ② DRL 规则依赖盲区与逻辑表字段级盲区明确标注「来源未知」, 不伪造血缘; ③ 消费层边(契约→列)实时解析不入库, 审批即最新; ④ 本稿仅覆盖血缘相关页面, 资产目录列表与详情其余区块另稿。素材: customer_wide / 规则 r4 / 契约 #34 #47 #48 均对应演示库真实对象。
+  </div>
+</div>
+
+<script>
+document.getElementById('tabs').addEventListener('click', function(e){
+  const t = e.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on'); document.getElementById(t.dataset.v).classList.add('on');
+});
+</script>
+</body>
+</html>

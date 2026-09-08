@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据血缘分析 · 页面设计(标准方案) v5</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --bg:#f0f2f5; --card:#fff;
+  --border:#e8e8e8; --text:#1f2329; --text-2:#646a73; --text-3:#8f959e;
+  --green:#52c41a; --green-weak:#f6ffed; --orange:#fa8c16; --orange-weak:#fff7e6;
+  --red:#f5222d; --red-weak:#fff1f0; --purple:#722ed1; --purple-weak:#f9f0ff;
+  --cyan:#13c2c2; --cyan-weak:#e6fffb;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.appbar{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:24px;position:sticky;top:0;z-index:50}
+.logo{display:flex;align-items:center;gap:8px;padding:12px 0;font-weight:700;font-size:15px}
+.logo i{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1677ff,#722ed1);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-size:13px}
+.nav{display:flex;gap:2px;height:48px}
+.nav .ni{display:flex;align-items:center;padding:0 14px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;user-select:none}
+.nav .ni.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.appbar .right{margin-left:auto;color:var(--text-2);font-size:12px;display:flex;gap:12px;align-items:center}
+.page{max-width:1440px;margin:0 auto;padding:16px 20px 40px}
+.view{display:none}.view.on{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.sec{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec .sub{font-weight:400;color:var(--text-3);font-size:12px}
+.tag{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px;white-space:nowrap}
+.t-blue{background:var(--blue,var(--primary-weak));color:var(--primary)} .t-green{background:var(--green-weak);color:var(--green)}
+.t-orange{background:var(--orange-weak);color:var(--orange)} .t-purple{background:var(--purple-weak);color:var(--purple)}
+.t-red{background:var(--red-weak);color:var(--red)} .t-gray{background:#f5f5f5;color:var(--text-3)}
+.dim{color:var(--text-3);font-size:12px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:13px;color:var(--text)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.sm{padding:2px 10px;font-size:12px}
+.searchbox{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px}
+.searchbox input{border:none;outline:none;flex:1;font-size:13px}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+/* 节点卡片 */
+.asset{border:1px solid var(--border);border-radius:10px;background:#fafbfc;padding:9px 11px;margin-bottom:9px;border-left:4px solid #b3c6e6}
+.asset.sys{border-left-color:#faad14}.asset.ods{border-left-color:#52c41a}.asset.dwd{border-left-color:#1677ff}
+.asset.dws{border-left-color:#722ed1}.asset.app{border-left-color:#13c2c2}.asset.dim{border-left-color:#8c8c8c}
+.asset .a1{font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.asset .a2{font-size:12px;color:var(--text-2);margin-top:3px;line-height:1.6}
+.owner{font-size:11px;color:var(--text-3)}
+/* 中心资产 */
+.center{border:2px solid var(--primary);border-radius:12px;background:#fff;padding:14px;box-shadow:0 4px 16px rgba(22,119,255,.13);text-align:center}
+.center .big{font-size:16px;font-weight:700;color:var(--primary)}
+.center .meta{font-size:12px;color:var(--text-2);margin:6px 0;line-height:1.8}
+.center .fields{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:6px}
+.fmini{border:1px solid #cfe0f8;background:var(--primary-weak);border-radius:4px;font-size:11px;padding:1px 6px;color:#0b5bd3}
+/* dag 三列 */
+.dag{display:grid;grid-template-columns:250px 340px 1fr;gap:14px;align-items:start}
+.dag .col-title{font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+/* 矩阵表 */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#fafafa;text-align:left;padding:7px 9px;color:var(--text-2);font-weight:600;border-bottom:1px solid var(--border)}
+td{padding:7px 9px;border-bottom:1px solid #f2f2f2}
+tr:hover td{background:#fafcff}
+/* 影响树 */
+.ilv{display:flex;gap:8px;margin:8px 0}
+.ilv .lv{width:62px;flex-shrink:0;font-size:11px;color:var(--text-3);padding-top:6px}
+.ic{border:1px solid var(--border);border-left:3px solid var(--primary);background:#fafbfc;border-radius:6px;padding:6px 10px;margin-bottom:6px}
+.ic .i1{font-size:12px;font-weight:600;display:flex;gap:6px;align-items:center}
+.ic .i2{font-size:12px;color:var(--text-2);margin-top:2px}
+.summary{border:1px solid #ffd591;background:var(--orange-weak);border-radius:8px;padding:10px 14px;font-size:12px;color:#874d00;line-height:1.9;margin-bottom:12px}
+.summary b{color:#ad4e00}
+/* 溯源路径 */
+.path{border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.path .ph{background:#fafafa;padding:6px 10px;font-size:12px;color:var(--text-2);border-bottom:1px solid var(--border)}
+.ps{display:flex;align-items:center;overflow-x:auto;padding:9px 10px;font-size:12px;background:#fff}
+.pn{flex-shrink:0;border:1px solid #adc6ff;background:#f0f5ff;color:#0b5bd3;border-radius:6px;padding:3px 9px;white-space:nowrap}
+.pn.src{border-color:#ffe58f;background:#fffbe6;color:#ad6800}
+.pn.tr{border-style:dashed;border-color:#d3adf7;background:var(--purple-weak);color:var(--purple)}
+.pa{flex-shrink:0;margin:0 4px;color:var(--text-3)}
+.pa b{color:#0b5bd3;font-weight:400;background:#fff;border:1px solid var(--border);border-radius:8px;padding:0 5px;font-size:11px}
+.final{border:1px solid #b7eb8f;background:var(--green-weak);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#237804}
+/* 通知 */
+.notice{border:1px solid var(--border);border-left:4px solid var(--orange);border-radius:10px;background:#fff;padding:14px 16px;font-size:13px;line-height:1.9}
+.notice .nt{font-size:15px;font-weight:700;margin-bottom:8px}
+.notice .kv{display:flex;margin:3px 0} .notice .kv b{width:110px;color:var(--text-3);font-weight:400}
+.foot{color:var(--text-3);font-size:11px;margin-top:14px;border-top:1px dashed var(--border);padding-top:8px;line-height:1.8}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="logo"><i>血</i>数据血缘分析</div>
+  <div class="nav" id="nav">
+    <div class="ni on" data-v="v">血缘可视化</div>
+    <div class="ni" data-v="f">字段级血缘</div>
+    <div class="ni" data-v="i">影响分析</div>
+    <div class="ni" data-v="u">溯源分析</div>
+    <div class="ni" data-v="n">变更影响通知</div>
+  </div>
+  <div class="right"><span>节点: System / Job / DataAsset / Field / Report / API</span><span>存储: Neo4j</span></div>
+</div>
+
+<div class="page">
+
+<!-- ============ ① 血缘可视化(标准方案 5.1) ============ -->
+<div class="view on" id="v">
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="searchbox" style="width:340px">🔍 <input value="DWD.unified_orders"></div>
+      <button class="btn primary">查询</button>
+      <span style="margin-left:auto"></span>
+      <button class="btn">展开全部</button><button class="btn">收起</button><button class="btn">字段级视图</button><button class="btn">导出</button>
+    </div>
+  </div>
+  <div class="dag">
+    <div>
+      <div class="col-title">▲ 上游来源 · 溯源(4)</div>
+      <div class="asset sys"><div class="a1">🏭 ERP.orders <span class="tag t-gray">系统 ERP</span></div><div class="a2">订单主表 · 源系统<br><span class="owner">Owner: 李工</span></div></div>
+      <div class="asset sys"><div class="a1">🏭 CRM.orders <span class="tag t-gray">系统 CRM</span></div><div class="a2">渠道订单<br><span class="owner">Owner: 赵工</span></div></div>
+      <div class="asset sys"><div class="a1">🏭 SCM.orders <span class="tag t-gray">系统 SCM</span></div><div class="a2">采购订单<br><span class="owner">Owner: 孙工</span></div></div>
+      <div class="asset dim"><div class="a1">👥 维表 dim_user <span class="tag t-gray">维表关联</span></div><div class="a2">用户维度 · JOIN 补维度<br><span class="owner">Owner: 李工</span></div></div>
+    </div>
+    <div>
+      <div class="center">
+        <div class="big">DWD.unified_orders</div>
+        <div class="meta">统一订单明细 · <span class="tag t-blue">DWD</span> <span class="tag t-purple">由 ERP+CRM+SCM 融合</span><br>字段: order_id / user_id / amount / status / region / system_source</div>
+        <div class="fields"><span class="fmini">order_id</span><span class="fmini">user_id</span><span class="fmini">amount</span><span class="fmini">status</span><span class="fmini">region</span><span class="fmini">system_source</span></div>
+        <div class="dim" style="margin-top:6px">Owner: 张工 · 日增量 · Job: 每日订单融合</div>
+      </div>
+      <div style="text-align:center;color:var(--text-3);font-size:11px;margin:8px 0">SOURCE_OF / DERIVED_FROM(字段映射+类型转换) ▼ PRODUCES / DEPENDS_ON</div>
+    </div>
+    <div>
+      <div class="col-title">▼ 下游使用 · 影响(3 + 2 级联)</div>
+      <div class="asset app"><div class="a1">📊 报表 · 日订单统计 <span class="tag t-gray">Report</span></div><div class="a2">基于该表生成<br><span class="owner">Owner: 王工</span></div></div>
+      <div class="asset app"><div class="a1">🔌 API · 订单查询接口 <span class="tag t-gray">API</span></div><div class="a2">GET /orders/{id}<br><span class="owner">Owner: 李工</span></div></div>
+      <div class="asset dws"><div class="a1">DWS.daily_summary <span class="tag t-gray">日汇总</span></div><div class="a2">依赖该表汇总<br><span class="owner">Owner: 张工</span></div></div>
+      <div class="asset app" style="opacity:.85"><div class="a1">🖥 数据大屏 · 实时交易看板 <span class="tag t-gray">经 API</span></div><div class="a2">依赖 API: 订单查询 · 二级<br><span class="owner">Owner: 王工</span></div></div>
+      <div class="asset dws" style="opacity:.85"><div class="a1">DWS.monthly_summary <span class="tag t-gray">月汇总</span></div><div class="a2">依赖 daily_summary · 二级<br><span class="owner">Owner: 张工</span></div></div>
+      <div style="margin-top:6px" class="dim">[字段级视图] 后卡片展开显示字段映射入口(见下页)</div>
+    </div>
+  </div>
+  <div class="foot">标准方案图模型: (ERP.orders)-[SOURCE_OF]->(ODS.ods_orders)-[DERIVED_FROM {字段映射+类型转换}]->(DWD.unified_orders)-[PRODUCES]->(报表/API/DWS); 字段节点经 CONTAINS 挂在资产下, 字段间经 FIELD_MAPPING {transform} 相连。</div>
+</div>
+
+<!-- ============ ② 字段级血缘矩阵(标准方案 5.4) ============ -->
+<div class="view" id="f">
+  <div class="toolbar">
+    <div class="searchbox" style="width:300px">🔍 <input value="DWD.unified_orders"></div>
+    <button class="btn primary">查看字段映射</button>
+    <span class="dim">字段级血缘 · 目标: DWD.unified_orders ← 上游: ODS.ods_orders(ERP/CRM/SCM 融合)</span>
+  </div>
+  <div class="card">
+    <table>
+      <tr><th>目标字段</th><th>源字段</th><th>转换类型</th><th>转换规则</th><th>来源路径</th></tr>
+      <tr><td><b>order_id</b></td><td>order_no</td><td><span class="tag t-blue">直接映射</span></td><td class="mono">STRING → BIGINT</td><td class="dim">ERP.orders.order_no</td></tr>
+      <tr><td><b>user_id</b></td><td>customer_id</td><td><span class="tag t-blue">直接映射</span></td><td class="mono">BIGINT</td><td class="dim">ERP.orders.customer_id</td></tr>
+      <tr><td><b>amount</b></td><td>total_price</td><td><span class="tag t-blue">直接映射</span></td><td class="mono">DECIMAL</td><td class="dim">ERP.orders.total_price</td></tr>
+      <tr><td><b>status</b></td><td>status</td><td><span class="tag t-purple">枚举映射</span></td><td class="mono">1→PENDING, 2→PAID, 3→COMPLETED</td><td class="dim">CRM.orders.status(拼接 CASE)</td></tr>
+      <tr><td><b>created_at</b></td><td>create_time</td><td><span class="tag t-blue">直接映射</span></td><td class="mono">TIMESTAMP</td><td class="dim">ERP.orders.create_time</td></tr>
+      <tr><td><b>region</b></td><td>—</td><td><span class="tag t-orange">常量赋值</span></td><td class="mono">'AP'</td><td class="dim">—</td></tr>
+      <tr><td><b>system_source</b></td><td>—</td><td><span class="tag t-orange">常量赋值</span></td><td class="mono">'ERP'/'CRM'/'SCM'(多源分流)</td><td class="dim">按来源系统标识</td></tr>
+    </table>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn sm">查看 order_id 完整链路 →</button><button class="btn sm">导出映射 JSON</button></div>
+  </div>
+  <div class="card">
+    <div class="sec">字段级链路示例 <span class="sub">order_id: ERP + CRM 多源 → ODS 拼接 → DWD</span></div>
+    <div class="ps">
+      <div class="pn src">ERP.orders.order_no</div><div class="pa">→</div>
+      <div class="pn tr">拼接 CONCAT</div><div class="pa">→</div>
+      <div class="pn">ODS.ods_orders.order_id</div><div class="pa"><b>直接映射</b></div>
+      <div class="pn">DWD.unified_orders.order_id</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ③ 影响分析(标准方案 5.2) ============ -->
+<div class="view" id="i">
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div class="sec" style="margin:0">变更对象</div>
+      <div class="searchbox" style="width:260px"><input value="DWD.unified_orders"></div>
+      <select style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px"><option>加字段</option><option>删字段</option><option>改类型</option><option>整表下线</option></select>
+      <button class="btn primary">分析影响</button>
+    </div>
+  </div>
+  <div class="summary">
+    <b>⚠ 影响评估: 共影响 8 个下游资产</b><br>
+    涉及 <b>3</b> 个报表、<b>2</b> 个 API、<b>1</b> 个数据大屏、2 个汇总表<br>
+    建议变更前通知相关 Owner(通知单见"变更影响通知"页)
+  </div>
+  <div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="card">
+      <div class="sec">影响范围 · 3 层依赖</div>
+      <div class="ilv"><div class="lv">第 1 层<br>直接依赖</div><div style="flex:1">
+        <div class="ic"><div class="i1">DWS.daily_summary <span class="tag t-purple">汇总表</span><span style="margin-left:auto" class="dim">Owner 张工</span></div><div class="i2">依赖该表汇总</div></div>
+        <div class="ic"><div class="i1">📊 报表: 日订单统计 <span class="tag t-green">报表</span><span style="margin-left:auto" class="dim">Owner 王工</span></div><div class="i2">基于该表生成</div></div>
+        <div class="ic"><div class="i1">🔌 API: 订单查询接口 <span class="tag t-green">API</span><span style="margin-left:auto" class="dim">Owner 李工</span></div><div class="i2">查询该表</div></div>
+      </div></div>
+      <div class="ilv"><div class="lv">第 2 层<br>间接依赖</div><div style="flex:1">
+        <div class="ic" style="border-left-color:var(--cyan)"><div class="i1">DWS.monthly_summary <span class="tag t-purple">汇总表</span><span style="margin-left:auto" class="dim">Owner 张工</span></div><div class="i2">依赖 DWS.daily_summary</div></div>
+        <div class="ic" style="border-left-color:var(--cyan)"><div class="i1">📊 报表: 月订单统计 <span class="tag t-green">报表</span><span style="margin-left:auto" class="dim">Owner 王工</span></div><div class="i2">依赖 DWS.monthly_summary</div></div>
+        <div class="ic" style="border-left-color:var(--cyan)"><div class="i1">🖥 数据大屏: 实时交易看板 <span class="tag t-green">大屏</span><span style="margin-left:auto" class="dim">Owner 王工</span></div><div class="i2">依赖 API: 订单查询接口</div></div>
+      </div></div>
+      <div class="ilv"><div class="lv">第 3 层<br>三级依赖</div><div style="flex:1">
+        <div class="ic" style="border-left-color:#b37feb"><div class="i1">📊 报表: 年度经营分析 <span class="tag t-green">报表</span><span style="margin-left:auto" class="dim">Owner 陈工</span></div><div class="i2">依赖 月订单统计</div></div>
+        <div class="ic" style="border-left-color:#b37feb"><div class="i1">🎯 战略决策看板 <span class="tag t-green">看板</span><span style="margin-left:auto" class="dim">Owner 陈工</span></div><div class="i2">依赖 年度经营分析</div></div>
+      </div></div>
+    </div>
+    <div class="card">
+      <div class="sec">变更动作</div>
+      <div style="font-size:12px;line-height:2;color:var(--text-2)">通知对象(按血缘自动圈选, 可勾选):</div>
+      <div style="font-size:12px;margin:6px 0;line-height:2">
+        <label><input type="checkbox" checked> DWS Owner 张工</label><br>
+        <label><input type="checkbox" checked> 报表/大屏 Owner 王工</label><br>
+        <label><input type="checkbox" checked> API Owner 李工</label><br>
+        <label><input type="checkbox"> 年度分析 Owner 陈工(3 层, 建议知会)</label>
+      </div>
+      <textarea rows="3" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:8px;font-size:12px" placeholder="变更说明…">计划在 unified_orders 增加 discount_rate 字段(见"变更影响通知"示例)。</textarea>
+      <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary">生成变更影响通知</button><button class="btn">仅记录审计</button></div>
+      <div class="dim" style="margin-top:8px">通知按 5.5 模板生成, 收件人=受影响资产 Owner 去重</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ④ 溯源分析(标准方案 5.3) ============ -->
+<div class="view" id="u">
+  <div class="toolbar">
+    <div class="searchbox" style="width:340px">🔍 <input value="DWD.unified_orders.order_id"></div>
+    <button class="btn primary">溯源</button>
+    <span class="dim">字段数据来源链路 · 最终来源 + 备选来源</span>
+  </div>
+  <div class="final">✔ <b>最终来源: ERP.orders.order_no</b> —— 主链路(直接映射, 占比最高)</div>
+  <div class="path"><div class="ph">路径 1 · 最终来源(主)</div><div class="ps">
+    <div class="pn src">ERP.orders.order_no</div><div class="pa">→</div><div class="pn">ODS.ods_orders.order_no</div><div class="pa"><b>直接映射</b></div><div class="pn">DWD.unified_orders.order_id</div></div></div>
+  <div class="path"><div class="ph">路径 2 · 备选来源(CRM)</div><div class="ps">
+    <div class="pn src">CRM.orders.order_id</div><div class="pa">→</div><div class="pn">ODS.ods_orders.order_no</div><div class="pa"><b>类型转换</b></div><div class="pn">DWD.unified_orders.order_id</div></div></div>
+  <div class="path"><div class="ph">路径 3 · 备选来源(SCM, 拼接生成)</div><div class="ps">
+    <div class="pn src">SCM.orders.purchase_order_no</div><div class="pa">→</div><div class="pn tr">拼接生成</div><div class="pa">→</div><div class="pn">ODS.ods_orders.order_no</div><div class="pa"><b>直接映射</b></div><div class="pn">DWD.unified_orders.order_id</div></div></div>
+  <div class="card" style="background:#fafcff">
+    <div class="sec">多源说明 <span class="sub">同一目标字段存在多条来源路径(合流)</span></div>
+    <div style="font-size:12px;color:var(--text-2);line-height:1.9">unified_orders 融合 ERP/CRM/SCM 三系统订单, order_id 经 ODS 归一化拼接 —— 溯源返回<b>全路径集</b>(非单链), 每条路径标注最终来源/备选来源与转换语义; 变更任一上游时影响分析沿全路径评估。</div>
+  </div>
+</div>
+
+<!-- ============ ⑤ 变更影响通知(标准方案 5.5) ============ -->
+<div class="view" id="n">
+  <div class="toolbar"><span class="dim" style="margin-right:auto">触发: 结构变更探测器(上游表新增/删除/改类型字段) → 沿血缘找全部下游 Owner</span><button class="btn sm">全部标记已读</button></div>
+  <div class="notice">
+    <div class="nt">📋 数据变更影响通知</div>
+    <div class="kv"><b>变更资产</b>ERP.orders(系统 ERP)</div>
+    <div class="kv"><b>变更类型</b>表结构变更(新增字段 <span class="mono">discount_rate</span>)</div>
+    <div class="kv"><b>变更时间</b>2026-09-09 14:30:00</div>
+    <div style="border-top:1px dashed var(--border);margin:8px 0"></div>
+    <div style="font-weight:600;margin-bottom:4px">受影响下游资产(共 3 个):</div>
+    <div>├── ODS.ods_orders <span class="tag t-gray">Owner: 李工</span><br>│&nbsp;&nbsp;&nbsp;└── 建议: 评估是否需要同步新增字段</div>
+    <div style="margin:4px 0">├── DWD.unified_orders <span class="tag t-gray">Owner: 张工</span><br>│&nbsp;&nbsp;&nbsp;└── 建议: 评估是否需要在模型中增加该字段</div>
+    <div>└── 📊 报表: 订单明细报表 <span class="tag t-gray">Owner: 王工</span><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 建议: 评估报表是否需要展示该字段</div>
+    <div style="border-top:1px dashed var(--border);margin:8px 0"></div>
+    <div class="dim">请相关 Owner 在 <b>3 个工作日</b>内完成评估反馈。</div>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary sm">确认收到(回执)</button><button class="btn sm">查看影响全图</button><button class="btn sm">转派</button></div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="sec">通知列表 <span class="sub">落库 + 审计 + 回执状态</span></div>
+    <table><tr><th>通知单</th><th>触发</th><th>收件</th><th>状态</th><th></th></tr>
+      <tr><td><b>#L-101 ERP.orders 新增 discount_rate</b></td><td>结构探测</td><td>李工/张工/王工</td><td><span class="tag t-orange">待反馈 3/3</span></td><td><button class="btn sm">详情</button></td></tr>
+      <tr><td><b>#L-100 DWD.unified_orders.amount 精度变更</b></td><td>DDL 对比</td><td>张工/王工</td><td><span class="tag t-green">已确认</span></td><td><button class="btn sm">详情</button></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="foot">页面严格按标准方案 §5 五大功能(5.1 可视化 / 5.2 影响分析 / 5.3 溯源 / 5.4 字段矩阵 / 5.5 变更通知)设计; 图模型与素材使用方案原文(ERP/CRM/SCM→ODS→DWD→DWS + 报表/API/大屏; 六类节点 System/Job/DataAsset/Field/Report/API; 关系 SOURCE_OF/DERIVED_FROM/PRODUCES/DEPENDS_ON/FIELD_MAPPING/CONTAINS)。</div>
+</div>
+
+<script>
+document.getElementById('nav').addEventListener('click',e=>{const n=e.target.closest('.ni');if(!n)return;
+  document.querySelectorAll('.ni').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  n.classList.add('on');document.getElementById(n.dataset.v).classList.add('on');});
+</script>
+</body>
+</html>

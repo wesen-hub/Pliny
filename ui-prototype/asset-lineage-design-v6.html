@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据血缘 · 知识图谱 v6(交互完善 + 标准方案信息)</title>
+<style>
+:root{
+  --bg:#0b1420; --panel:#0d1626; --line:#1e2a3d; --line2:#2a3b56;
+  --text:#e6edf5; --text2:#8b98ab; --muted:#5a6a7d;
+  --c-sys:#f59e0b; --c-task:#38bdf8; --c-core:#22d3ee; --c-rule:#c084fc;
+  --c-sub:#34d399; --c-lake:#f472b6; --c-field:#fbbf24; --c-report:#a78bfa;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;overflow:hidden}
+.appbar{height:48px;background:#0b1220;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 18px;gap:16px}
+.logo{font-weight:700;font-size:14px;display:flex;gap:8px;align-items:center;flex-shrink:0}
+.logo i{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#22d3ee,#a78bfa);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:12px}
+.nav{display:flex;gap:2px;height:48px}
+.nav .ni{display:flex;align-items:center;padding:0 13px;cursor:pointer;color:var(--text2);border-bottom:2px solid transparent;user-select:none;white-space:nowrap}
+.nav .ni.on{color:#fff;border-bottom-color:var(--c-core);font-weight:600}
+.main{display:flex;height:calc(100vh - 48px)}
+.stage{flex:1;position:relative;overflow:hidden;background:radial-gradient(ellipse at 30% 20%,#12202f 0%,#0b1420 60%)}
+svg{width:100%;height:100%;display:block}
+/* 工具条 */
+.gbar{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;z-index:20;pointer-events:none}
+.gbar>*{pointer-events:auto}
+.q{display:flex;align-items:center;gap:8px;background:rgba(13,22,38,.92);border:1px solid var(--line2);border-radius:8px;padding:5px 12px;width:340px;backdrop-filter:blur(4px)}
+.q input{background:none;border:none;outline:none;color:#fff;flex:1;font-size:13px}
+.q input::placeholder{color:var(--muted)}
+.btn{border:1px solid var(--line2);background:rgba(13,22,38,.92);color:#cfe3ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px}
+.btn.on{background:#164e63;border-color:var(--c-core);color:#a5f3fc}
+.btn:hover{border-color:#3d5a80}
+.btn.sm{padding:2px 8px;font-size:11px}
+.btn.primary{background:#0e7490;border-color:#22d3ee;color:#fff}
+.gstats{margin-left:auto;font-size:11px;color:var(--muted);display:flex;gap:12px}
+.zoom{position:absolute;right:14px;bottom:80px;display:flex;flex-direction:column;gap:4px;z-index:20}
+.zoom button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line2);background:rgba(13,22,38,.9);color:#cfe3ff;cursor:pointer;font-size:16px}
+/* 图例 + 过滤 */
+.legend{position:absolute;left:12px;bottom:12px;background:rgba(13,22,38,.9);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;font-size:11px;color:var(--text2);z-index:20;line-height:1.8;user-select:none}
+.legend .lg{display:flex;align-items:center;gap:6px;cursor:pointer;padding:1px 4px;border-radius:4px}
+.legend .lg:hover{background:#12203a}
+.legend .lg.off{opacity:.35;text-decoration:line-through}
+.legend .sw{width:20px;border-top:2px solid;display:inline-block}
+.legend .sw.dash{border-top-style:dashed}
+.legend .hint{margin-top:4px;color:var(--muted);border-top:1px solid var(--line);padding-top:4px}
+/* tooltip */
+#tip{position:absolute;display:none;background:#0d1626f2;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:40;max-width:300px;box-shadow:0 8px 24px rgba(0,0,0,.5);backdrop-filter:blur(3px)}
+/* 节点 */
+.nd{cursor:grab}
+.nd.drag{cursor:grabbing}
+.nd .bkg{fill:#16223a;stroke:var(--line2);stroke-width:1;transition:filter .15s}
+.nd:hover .bkg{filter:brightness(1.35)}
+.nd .lb{fill:#dbe7f5;font-size:11px;font-weight:600}
+.nd .sb{fill:#6b7d94;font-size:9.5px}
+.nd.core .bkg{fill:rgba(34,211,238,.09);stroke:var(--c-core);stroke-width:1.7}
+.nd.core .lb{fill:#7ce7f7;font-size:13px}
+.nd.core .sb{fill:#9ae8f5}
+.nd.dim{opacity:.14}
+.nd.dim .bkg{opacity:.14}
+.nd.blink .bkg{stroke:#fff;stroke-width:2.5}
+.nd.drag .bkg{filter:brightness(1.5)}
+.nd.hit .bkg{stroke:#fde68a;stroke-width:2.4;filter:brightness(1.3)}
+.edge{fill:none;stroke-width:1.7;opacity:.8;transition:opacity .15s}
+.edge.dim{opacity:.05}
+.edge.hit{stroke-width:3.2;opacity:1}
+.edge:hover{stroke-width:3;filter:brightness(1.4)}
+.edge .el{fill:#5f7activity3d94;font-size:9.5px;pointer-events:none}
+.el{fill:#5a6a7d;font-size:9.5px;pointer-events:none}
+.edge.hit .el{fill:#a5b4fc}
+/* 右侧抽屉 */
+.panel{width:420px;background:var(--panel);border-left:1px solid var(--line);display:none;flex-direction:column}
+.panel.open{display:flex}
+.ph{padding:12px 16px;border-bottom:1px solid var(--line)}
+.ph .pt{font-size:15px;font-weight:700;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ph .pm{font-size:12px;color:var(--text2);margin-top:3px}
+.pb{flex:1;overflow-y:auto;padding:10px 16px 20px;font-size:12px}
+.ptabs{display:flex;border-bottom:1px solid var(--line);margin:8px 0;position:sticky;top:0;background:var(--panel)}
+.pt{flex:1;text-align:center;padding:7px 0;cursor:pointer;color:var(--text2);font-size:12px;border-bottom:2px solid transparent}
+.pt.on{color:#fff;border-bottom-color:var(--c-core)}
+.pg{display:none;line-height:1.85}
+.pg.on{display:block}
+.kv{display:flex;margin:5px 0} .kv b{width:72px;color:var(--muted);font-weight:400;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:5px 6px;border-bottom:1px solid var(--line2)}
+td{padding:5px 6px;border-bottom:1px solid var(--line)}
+.chip{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px}
+.c-blue{background:rgba(56,189,248,.15);color:#7dd3fc}.c-purple{background:rgba(192,132,252,.15);color:#d8b4fe}
+.c-green{background:rgba(52,211,153,.15);color:#6ee7b7}.c-orange{background:rgba(251,191,36,.15);color:#fcd34d}
+.c-gray{background:#1e293b;color:#94a3b8}.c-red{background:rgba(248,113,113,.15);color:#fca5a5}
+.warn{background:rgba(251,191,36,.1);border:1px solid #854d0e;color:#fcd34d;border-radius:8px;padding:7px 10px;font-size:12px;margin:8px 0;line-height:1.7}
+/* 子页(矩阵/影响/溯源/通知 深色化) */
+.subpage{display:none;height:calc(100vh - 48px);overflow-y:auto;padding:18px 26px 60px}
+.subpage.on{display:block}
+.sp-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.sp-sub{color:var(--text2);font-size:12px;margin-bottom:14px}
+.scard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.psteps{display:flex;align-items:center;overflow-x:auto;padding:4px 0}
+.pn{flex-shrink:0;border:1px solid #2f6f8f;background:#0c2737;color:#7dd3fc;border-radius:6px;padding:3px 10px;white-space:nowrap;font-size:12px}
+.pn.src{border-color:#92600a;background:#2a2108;color:#fcd34d}
+.pn.tr{border-style:dashed;border-color:#6d4a9e;background:#1d1330;color:#d8b4fe}
+.pn.app{border-color:#147d60;background:#08251d;color:#6ee7b7}
+.pa{flex-shrink:0;margin:0 3px;color:var(--muted);font-size:11px}
+.ilv{display:flex;gap:8px;margin:7px 0}
+.ilv .lv{width:76px;flex-shrink:0;color:var(--muted);font-size:11px;padding-top:7px;line-height:1.4}
+.ic{border:1px solid var(--line);border-left:3px solid var(--c-core);background:#0f1b2e;border-radius:7px;padding:7px 10px;margin-bottom:6px;flex:1}
+.ic .i1{font-size:12px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ic .i2{font-size:12px;color:var(--text2);margin-top:2px}
+.sum{background:#2a2108;border:1px solid #92600a;border-radius:9px;padding:10px 14px;font-size:12px;color:#fcd34d;line-height:1.9;margin-bottom:12px}
+.sum b{color:#fde68a}
+.final{border:1px solid #147d60;background:#08251d;border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#6ee7b7}
+.notice{border:1px solid var(--line2);border-left:4px solid var(--c-field);border-radius:10px;background:var(--panel);padding:14px 16px;line-height:1.9}
+.notice .nt{font-size:15px;font-weight:700;margin-bottom:8px}
+.notice .kv{display:flex;margin:3px 0} .notice .kv b{width:100px;color:var(--muted);font-weight:400}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="logo"><i>⛓</i>数据血缘分析</div>
+  <div class="nav" id="nav">
+    <div class="ni on" data-v="g">⛓ 血缘图谱</div>
+    <div class="ni" data-v="f">字段映射矩阵</div>
+    <div class="ni" data-v="i">影响分析</div>
+    <div class="ni" data-v="u">溯源分析</div>
+    <div class="ni" data-v="n">变更影响通知</div>
+  </div>
+  <div style="margin-left:auto;font-size:12px;color:var(--text2)">图存储 Neo4j · 解析: 映射/依赖/契约 · <span id="syncst" class="chip c-green">同步正常</span></div>
+</div>
+
+<div class="main">
+<!-- ========== 图谱 ========== -->
+<div class="stage" id="stage">
+  <svg id="svg" viewBox="0 0 1500 860"></svg>
+  <div class="gbar">
+    <div class="q">🔍 <input id="q" placeholder="输入节点名定位, 如 customer_wide / amount / 订阅 #47"><span class="chip c-gray" id="qhit" style="display:none"></span></div>
+    <button class="btn" onclick="goNode('CW')">定位核心表</button>
+    <button class="btn" id="btnFocus" onclick="focusField('FAMT')">聚焦 amount 子图</button>
+    <button class="btn" id="btnFields" onclick="toggleFields()">字段: 展开</button>
+    <button class="btn" onclick="clearFocus()">清除聚焦</button>
+    <div class="gstats"><span id="stN"></span><span id="stE"></span><span>最近解析 2min 前</span></div>
+  </div>
+  <div class="zoom">
+    <button onclick="zoomBy(1.2)">+</button>
+    <button onclick="zoomBy(1/1.2)">−</button>
+    <button onclick="fitAll()">⤢</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div id="tip"></div>
+</div>
+
+<!-- ========== 子页 字段矩阵 ========== -->
+<div class="subpage" id="f">
+  <div class="sp-title">字段级血缘矩阵 <span class="chip c-gray">标准方案 §5.4</span></div>
+  <div class="sp-sub">目标: customer_wide(逻辑表) ← 上游: 同步任务 field_mapping + 规则产出 · <button class="btn sm" onclick="goNode('CW')">回到图谱</button></div>
+  <div class="scard">
+    <table>
+      <tr><th>目标字段</th><th>源字段</th><th>转换类型</th><th>转换规则</th><th>来源</th><th>密级</th></tr>
+      <tr><td><b>id</b></td><td>user_id</td><td><span class="chip c-blue">直接映射</span></td><td class="mono" style="color:#9fd3ff">BIGINT</td><td class="dim">系统A #12</td><td>L1</td></tr>
+      <tr><td><b>customer_id</b></td><td>user_id</td><td><span class="chip c-blue">直接映射</span></td><td class="mono" style="color:#9fd3ff">别名</td><td class="dim">系统A #12</td><td>L1</td></tr>
+      <tr><td><b>phone</b></td><td>phone</td><td><span class="chip c-blue">直接映射</span></td><td class="mono" style="color:#9fd3ff">VARCHAR</td><td class="dim">系统A #12(源敏感)</td><td><span class="chip c-red">L3</span></td></tr>
+      <tr><td><b>name</b></td><td>org_name + user_name</td><td><span class="chip c-purple">拼接</span></td><td class="mono" style="color:#d8b4fe">CONCAT(org,user)</td><td class="dim">系统C #33</td><td>L1</td></tr>
+      <tr><td><b>amount</b></td><td>user_balance / bal</td><td><span class="chip c-orange">多源合流</span></td><td class="mono" style="color:#fcd34d">#12 直映射 + #21 后写覆盖</td><td class="dim">系统A #12 + 系统B #21</td><td>L2</td></tr>
+      <tr><td><b>amount</b>(派生)</td><td>net_amt − fee</td><td><span class="chip c-purple">规则产出</span></td><td class="mono" style="color:#d8b4fe">r4: ≥5000 判定</td><td class="dim">规则 r4 · 任务 T7</td><td>L2</td></tr>
+      <tr><td><b>region</b></td><td>region</td><td><span class="chip c-blue">直接映射</span></td><td class="mono" style="color:#9fd3ff">VARCHAR</td><td class="dim">系统A #12</td><td>L1</td></tr>
+      <tr><td><b>status</b></td><td>status</td><td><span class="chip c-blue">直接映射</span></td><td class="mono" style="color:#9fd3ff">枚举</td><td class="dim">系统A #12</td><td>L1</td></tr>
+    </table>
+    <div style="margin-top:10px"><button class="btn sm">导出映射 JSON</button> <button class="btn sm">查看合流字段 amount 完整链路</button></div>
+  </div>
+</div>
+
+<!-- ========== 子页 影响分析 ========== -->
+<div class="subpage" id="i">
+  <div class="sp-title">影响分析 <span class="chip c-gray">标准方案 §5.2 · 3 层依赖</span></div>
+  <div class="sp-sub">变更对象: <b style="color:#7ce7f7">customer_wide.amount</b> · 类型: 改语义/删列(合流字段: 3 来源 · 4 消费路径)</div>
+  <div class="sum"><b>⚠ 影响评估:</b> 共影响 <b>6</b> 个下游 —— 订阅契约 <b>3</b>、BI 报表 <b>1</b>、检索服务 <b>1</b>(预留)、Iceberg 湖 <b>1</b>;经长链路触及金额档圈选订阅 <b>3</b> 个。建议变更前通知相关 Owner(见变更影响通知)。</div>
+  <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:12px">
+    <div class="scard">
+      <div class="ilv"><div class="lv">第 1 层<br>直接依赖</div><div style="flex:1">
+        <div class="ic"><div class="i1">📮 订阅 #34 大额日快照 <span class="chip c-green">SUBSCRIBE</span><span style="margin-left:auto" class="dim">dwh-batch · Owner 王工</span></div><div class="i2">6 列视图含 amount(≥5000 条件)</div></div>
+        <div class="ic"><div class="i1">📮 订阅 #47 人群宽表 <span class="chip c-green">SUBSCRIBE</span><span style="margin-left:auto" class="dim">mkt-ext · Owner 李敏</span></div><div class="i2">宽表回表取 amount</div></div>
+        <div class="ic"><div class="i1">⬇️ Iceberg 湖表 <span class="chip c-blue">LAKE</span><span style="margin-left:auto" class="dim">Owner 张工</span></div><div class="i2">15min 快照 · schema 演进自动同步</div></div>
+      </div></div>
+      <div class="ilv"><div class="lv">第 2 层<br>经加工/长链路</div><div style="flex:1">
+        <div class="ic" style="border-left-color:#a78bfa"><div class="i1">🎯 规则 r1 金额档 <span class="chip c-purple">RULE</span><span style="margin-left:auto" class="dim">依赖 amount</span></div><div class="i2">标签事实重算 → 圈选名单变化</div></div>
+        <div class="ic" style="border-left-color:#a78bfa"><div class="i1">📊 BI 报表 · 客户经营分析 <span class="chip c-gray">REPORT 预留</span><span style="margin-left:auto" class="dim">Owner 陈工</span></div><div class="i2">路径: amount → 金额档 → dws_customer_weekly → BI</div></div>
+      </div></div>
+      <div class="ilv"><div class="lv">第 3 层<br>圈选订阅</div><div style="flex:1"><div class="ic" style="border-left-color:#f59e0b"><div class="i1">🎯 金额档实体订阅 ×3 <span class="chip c-orange">间接</span></div><div class="i2">订阅 #48(push kafka)· #50 · #52 —— 依赖标签「金额档」</div></div></div></div>
+    </div>
+    <div>
+      <div class="scard">
+        <div style="font-weight:600;margin-bottom:8px">变更动作</div>
+        <div style="line-height:2.1;color:var(--text2)">通知对象(血缘自动圈选, 可勾选):<br>
+          <label><input type="checkbox" checked> dwh-batch 王工</label> &nbsp;<label><input type="checkbox" checked> mkt-ext 李敏</label><br>
+          <label><input type="checkbox" checked> BI/检索 陈工</label> &nbsp;<label><input type="checkbox" checked> 湖任务 张工</label><br>
+          <label><input type="checkbox"> 金额档圈选 Owner(3 个, 知会)</label></div>
+        <textarea rows="3" style="width:100%;background:#0f1b2e;border:1px solid var(--line2);border-radius:8px;padding:8px;color:#e6edf5;font-size:12px" placeholder="变更说明…">amount 由"消费金额"改为"净支付额(含退款)" — 语义口径变化, schema 不变</textarea>
+        <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary">生成变更影响通知</button><button class="btn">仅记录审计</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 子页 溯源 ========== -->
+<div class="subpage" id="u">
+  <div class="sp-title">溯源分析 <span class="chip c-gray">标准方案 §5.3 · 最终来源 + 备选</span></div>
+  <div class="sp-sub">字段: <b style="color:#7ce7f7">customer_wide.amount</b> —— 多源合流字段 · 返回全路径集(非单链)</div>
+  <div class="final">✔ <b>最终来源(主): 系统A(t_user_base.user_balance)</b> —— 直映射, 占比最高</div>
+  <div class="scard"><div class="psteps">
+    <div class="pn src">系统A t_user_base.user_balance</div><div class="pa">—直映射(#12)→</div><div class="pn">customer_wide.net_amt</div><div class="pa">—规则 r4 依赖→</div><div class="pn tr">净支付额 net_amt−fee</div><div class="pa">—产出写回→</div><div class="pn" style="border-color:#22d3ee;color:#7ce7f7;font-weight:700">customer_wide.amount</div>
+  </div></div>
+  <div class="scard"><div class="psteps">
+    <div class="pn src">系统B t_acct.bal</div><div class="pa">—合流 #21(后写覆盖)→</div><div class="pn">customer_wide.amount</div><div class="pa" style="margin-left:8px">↳ 备选来源: 与主来源并存, 冲突策略=后写覆盖</div>
+  </div></div>
+  <div class="scard"><div class="psteps">
+    <div class="pn src">规则 r4(net_amt − fee)</div><div class="pa">—派生写回(任务 T7)→</div><div class="pn">customer_wide.amount</div>
+  </div></div>
+  <div class="scard" style="background:#0f1b2e">
+    <div style="font-weight:600;margin-bottom:6px">多源合流说明(方案 §5.3 扩展)</div>
+    <div style="color:var(--text2);font-size:12px;line-height:1.9">amount 存在 3 条来源路径(两同步任务 + 一规则), 任一上游变更均沿<b>全部路径</b>评估影响; 未声明依赖(DRL 规则 r6)标 <span class="chip c-orange">来源未知</span>, 补边后自动入图。</div>
+  </div>
+</div>
+
+<!-- ========== 子页 变更通知 ========== -->
+<div class="subpage" id="n">
+  <div class="sp-title">变更影响通知 <span class="chip c-gray">标准方案 §5.5</span></div>
+  <div class="sp-sub">触发: 结构变更探测器 + 影响分析生成 · 落库/审计/回执</div>
+  <div class="scard">
+    <div class="notice">
+      <div class="nt">📋 数据变更影响通知</div>
+      <div class="kv"><b>变更资产</b>customer_wide.amount(逻辑表)</div>
+      <div class="kv"><b>变更类型</b>字段语义变更(口径: 消费金额 → 净支付额含退款)</div>
+      <div class="kv"><b>变更时间</b>2026-09-09 15:00:00 · 由 admin 发起</div>
+      <div style="border-top:1px dashed var(--line2);margin:8px 0"></div>
+      <div style="font-weight:600;margin-bottom:4px">受影响下游(4 直接 + 1 长链路):</div>
+      <div>├── 📮 订阅 #34 dwh-batch <span class="chip c-gray">Owner 王工</span> — 建议: 评估口径影响并确认是否再审批<br>
+      ├── 📮 订阅 #47 mkt-ext <span class="chip c-gray">Owner 李敏</span> — 建议: 回表数值口径复核<br>
+      ├── 📊 BI 经营分析(预留) <span class="chip c-gray">Owner 陈工</span> — 经金额档长链路<br>
+      └── ⬇️ Iceberg 湖表 <span class="chip c-gray">Owner 张工</span> — 快照自动同步</div>
+      <div style="border-top:1px dashed var(--line2);margin:8px 0"></div>
+      <div style="color:var(--muted)">请相关 Owner 在 <b style="color:#fcd34d">3 个工作日</b>内完成评估反馈。</div>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary sm">确认收到(回执)</button><button class="btn sm">查看影响全图</button><button class="btn sm">转派</button></div>
+    </div>
+  </div>
+  <div class="scard">
+    <table><tr><th>通知单</th><th>触发</th><th>收件</th><th>状态</th><th></th></tr>
+      <tr><td><b>#N-1024 customer_wide.amount 口径变更</b></td><td>人工/影响分析</td><td>王工/李敏/陈工/张工</td><td><span class="chip c-orange">待确认 2/4</span></td><td><button class="btn sm">详情</button></td></tr>
+      <tr><td><b>#N-1018 phone 源脱敏计划</b></td><td>敏感路径扫描</td><td>张工/湖 Owner</td><td><span class="chip c-green">已确认</span></td><td><button class="btn sm">详情</button></td></tr>
+      <tr><td><b>#N-1011 契约 #34 到期续期提醒</b></td><td>生命周期</td><td>dwh-batch</td><td><span class="chip c-green">已确认</span></td><td><button class="btn sm">详情</button></td></tr>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- 右抽屉 -->
+<div class="panel" id="panel">
+  <div class="ph"><div class="pt" id="pt"></div><div class="pm" id="pm"></div></div>
+  <div class="pb">
+    <div class="ptabs" id="ptabs"></div>
+    <div id="pgwrap"></div>
+  </div>
+</div>
+
+<script>
+const NS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('svg');
+const stage=document.getElementById('stage');
+const tip=document.getElementById('tip');
+
+/* ============ 图谱数据 ============ */
+const NODES=[
+ {id:'A',k:'sys',x:70,y:160,icon:'🗄',label:'系统A',sub:'核心交易 MySQL',own:'李工'},
+ {id:'B',k:'sys',x:70,y:330,icon:'🗄',label:'系统B',sub:'账务 PostgreSQL',own:'孙工'},
+ {id:'C',k:'sys',x:70,y:500,icon:'🗄',label:'系统C',sub:'CRM Oracle',own:'赵工'},
+ {id:'T12',k:'task',x:250,y:160,icon:'⇄',label:'同步 #12',sub:'CDC · 字段映射7',own:'王工'},
+ {id:'T21',k:'task',x:250,y:330,icon:'⇄',label:'同步 #21',sub:'批量日切',own:'王工'},
+ {id:'T33',k:'task',x:250,y:500,icon:'⇄',label:'同步 #33',sub:'实时',own:'王工'},
+ {id:'R4',k:'rule',x:250,y:690,icon:'⚙️',label:'规则 r4',sub:'净支付额 → amount',own:'张工'},
+ {id:'CW',k:'core',x:540,y:330,icon:'▤',label:'customer_wide',sub:'逻辑表 · DWD 客户域 · L2',own:'王工', meta:'模型 M1 · 9 列 · 每5min · 健康98'},
+ {id:'R1',k:'rule',x:790,y:180,icon:'🎯',label:'规则 r1',sub:'金额档(依赖 amount)',own:'张工'},
+ {id:'DWS',k:'task',x:790,y:310,icon:'▤',label:'dws_weekly',sub:'派生周汇总表',own:'陈工'},
+ {id:'S34',k:'sub',x:1060,y:80,icon:'📮',label:'订阅 #34',sub:'dwh-batch · pull',own:'王工'},
+ {id:'S47',k:'sub',x:1060,y:190,icon:'📮',label:'订阅 #47',sub:'mkt-ext · 宽表回表',own:'李敏'},
+ {id:'S48',k:'sub',x:1060,y:300,icon:'📮',label:'订阅 #48',sub:'mkt-k · push',own:'李敏'},
+ {id:'BI',k:'app',x:1060,y:430,icon:'📊',label:'BI 经营分析',sub:'REPORT 预留',own:'陈工'},
+ {id:'API',k:'app',x:1060,y:530,icon:'🔌',label:'订单 API',sub:'API 预留',own:'李工'},
+ {id:'SEARCH',k:'app',x:1060,y:630,icon:'🔎',label:'检索服务',sub:'SEARCH 预留',own:'陈工'},
+ {id:'LAKE',k:'app',x:1060,y:740,icon:'⬇️',label:'Iceberg 湖',sub:'15min 快照',own:'张工'},
+];
+const FIELDS=[ // 字段节点(kind field), 挂在 CW
+ {id:'FAMT',k:'field',fx:540,fy:420,label:'amount',sub:'合流 3源',rel:'amt'},
+ {id:'FPH',k:'field',fx:540,fy:455,label:'phone 🔒',sub:'L3 mask',rel:'sen'},
+];
+const EDGES=[
+ {f:'A',to:'T12',t:'sync'},{f:'B',to:'T21',t:'sync'},{f:'C',to:'T33',t:'sync'},
+ {f:'T12',to:'CW',t:'sync',l:'user_id→id · phone · user_balance→amount',amt:1},
+ {f:'T21',to:'CW',t:'sync',l:'bal→amount 合流②(后写覆盖)',amt:1},
+ {f:'T33',to:'CW',t:'sync',l:'org+user→name(concat)'},
+ {f:'R4',to:'CW',t:'prod',l:'net_amt−fee→amount 派生③',amt:1},
+ {f:'CW',to:'S34',t:'sub',l:'6列视图 amount≥5000',amt:1},
+ {f:'CW',to:'S47',t:'sub',l:'宽表回表(含 amount)',amt:1},
+ {f:'CW',to:'S48',t:'sub',l:'经标签 金额档',amt:1},
+ {f:'CW',to:'BI',t:'chain',l:'经 r1→dws_weekly 长链路',amt:1},
+ {f:'CW',to:'API',t:'reserve',l:'预留'},
+ {f:'CW',to:'SEARCH',t:'reserve',l:'预留'},
+ {f:'CW',to:'LAKE',t:'sub',l:'15min 快照'},
+ {f:'CW',to:'R1',t:'chain',l:'amount→金额档',amt:1},
+ {f:'R1',to:'DWS',t:'chain',l:'金额档→周聚合',amt:1},
+ {f:'DWS',to:'BI',t:'chain',l:'周表→报表',amt:1},
+];
+const COL={sync:'#38bdf8',prod:'#c084fc',sub:'#34d399',chain:'#fbbf24',reserve:'#64748b'};
+const KTYPE={sys:['系统',COL.sys],task:['同步任务',COL.sys],rule:['规则/加工',COL.rule],core:['逻辑表',COL.core],sub:['订阅',COL.sub],app:['应用(预留)',COL.reserve],field:['字段',COL.field]};
+const SZ={sys:[168,48],task:[150,46],rule:[170,50],core:[196,74],sub:[172,48],app:[172,48],field:[128,30]};
+const TYPELEGEND=['sys','task','rule','core','sub','app','field'];
+let nodeEls={}, edgeEls=[], fieldOn=false, scale=1, panX=0, panY=0, curFocus=null;
+
+function makeEl(t,c){const n=document.createElementNS(NS,t);if(c)n.setAttribute('class',c);return n;}
+function svgInit(){
+  const g=makeEl('g'); g.setAttribute('id','world'); svg.appendChild(g);
+  world=document.getElementById('world'); build(); attachViewport();
+}
+let world;
+function build(){
+  // defs
+  const defs=makeEl('defs'); world.appendChild(defs);
+  EDGES.forEach((e,i)=>{const m=makeEl('marker');m.setAttribute('id','ar'+i);m.setAttribute('viewBox','0 0 10 10');m.setAttribute('refX','9');m.setAttribute('refY','5');m.setAttribute('markerWidth','6.5');m.setAttribute('markerHeight','6.5');m.setAttribute('orient','auto');
+    const p=makeEl('path');p.setAttribute('d','M0,0 L10,5 L0,10 z');p.setAttribute('fill',COL[e.t]);m.appendChild(p);defs.appendChild(m);e._ar='ar'+i;});
+  // edges
+  EDGES.forEach(e=>{const g=makeEl('g');
+    const p=makeEl('path');p.setAttribute('class','edge');p.setAttribute('stroke',COL[e.t]);p.setAttribute('marker-end','url(#'+e._ar+')');
+    const t=makeEl('text');t.setAttribute('class','el');t.textContent=e.l||'';
+    g.appendChild(p);g.appendChild(t);world.appendChild(g);
+    e._p=p;e._t=t;edgeEls.push(e);
+    p.addEventListener('click',ev=>{ev.stopPropagation();selEdge(e);});
+    p.style.cursor='pointer';
+  });
+  // nodes
+  NODES.forEach(n=>{n.ox=0;n.oy=0;nodeEls[n.id]=makeNode(n);});
+  FIELDS.forEach(n=>{n.ox=0;n.oy=0;n.nodeEl=makeNode(n,true);nodeEls[n.id]=n.nodeEl;n.nodeEl.style.display='none';});
+  refreshAll(); buildLegend(); refreshStats();
+}
+function makeNode(n,isField){
+  const [w,h]=SZ[n.k];
+  const g=makeEl('g');g.setAttribute('class','nd'+(n.k==='core'?' core':''));
+  const bkg=makeEl('rect');bkg.setAttribute('class','bkg');g.appendChild(bkg);
+  const ic=makeEl('text');ic.setAttribute('class','ico');g.appendChild(ic);
+  const lb=makeEl('text');lb.setAttribute('class','lb');lb.setAttribute('text-anchor','middle');g.appendChild(lb);
+  const sb=makeEl('text');sb.setAttribute('class','sb');sb.setAttribute('text-anchor','middle');g.appendChild(sb);
+  g._meta={n,w,h}; world.appendChild(g);
+  placeNode(g,n,w,h,isField);
+  g.addEventListener('mouseenter',ev=>{if(ev.target.closest('.edge'))return;showTip(ev,n);});
+  g.addEventListener('mousemove',ev=>moveTip(ev));
+  g.addEventListener('mouseleave',()=>tip.style.display='none');
+  g.addEventListener('click',ev=>{if(ev.target.closest('.edge'))return;selNode(n);});
+  // drag
+  g.addEventListener('pointerdown',ev=>{if(ev.button!==0)return;ev.preventDefault();dragStart(ev,g,n);});
+  return g;
+}
+function placeNode(g,n,w,h,isField){
+  const x=isField?n.fx:n.x,y=isField?n.fy:n.y;
+  const b=g.querySelector('.bkg');
+  b.setAttribute('x',x-w/2);b.setAttribute('y',y-h/2);b.setAttribute('width',w);b.setAttribute('height',h);b.setAttribute('rx',10);
+  const ic=g.querySelector('.ico');ic.setAttribute('x',x-w/2+13);ic.setAttribute('y',y+4);ic.setAttribute('text-anchor','middle');ic.textContent=n.icon;
+  const lb=g.querySelector('.lb');lb.setAttribute('x',x+4);lb.setAttribute('y',y-2);lb.setAttribute('font-size',n.k==='core'?'13':'11');lb.textContent=n.label;
+  const sb=g.querySelector('.sb');sb.setAttribute('x',x+4);sb.setAttribute('y',y+14);sb.setAttribute('text-anchor','middle');sb.textContent=n.sub||'';
+}
+function cx(n){return (n.k==='field'?n.fx:n.x)+n.ox;}
+function cy(n){return (n.k==='field'?n.fy:n.y)+n.oy;}
+function refreshAll(){
+  EDGES.forEach(e=>{const a=NODES.find(x=>x.id===e.f),b=NODES.find(x=>x.id===e.to);if(!a||!b)return;
+    const fx=cx(a)+SZ[a.k][0]/2, tx=cx(b)-SZ[b.k][0]/2, my=Math.min(cy(a),cy(b))-4;
+    e._p.setAttribute('d',`M${fx},${cy(a)} C${(fx+tx)/2},${cy(a)} ${(fx+tx)/2},${cy(b)} ${tx},${cy(b)}`);
+    e._t.setAttribute('x',(fx+tx)/2);e._t.setAttribute('y',my);
+  });
+}
+/* ===== drag ===== */
+let drag=null;
+function dragStart(ev,g,n){drag={g,n,sx:ev.clientX,sy:ev.clientY,ox:n.ox,oy:n.oy};g.setPointerCapture(ev.pointerId);g.classList.add('drag');}
+svg.addEventListener('pointermove',ev=>{if(drag){const dx=ev.clientX-drag.sx,dy=ev.clientY-drag.sy;
+  drag.n.ox=drag.ox+dx/(scale);drag.n.oy=drag.oy+dy/scale;
+  placeNode(drag.g,drag.n,SZ[drag.n.k][0],SZ[drag.n.k][1],drag.n.k==='field');refreshAll();}});
+svg.addEventListener('pointerup',()=>{if(drag){drag.g.classList.remove('drag');drag=null;}});
+/* ===== tip ===== */
+function tipHtml(n){let h=`<b>${n.icon} ${n.label}</b><br>${KTYPE[n.k][0]}`+(n.own?` · Owner ${n.own}`:'');
+  if(n.k==='core')h+='<br>'+n.meta;
+  if(n.id==='FAMT')h+='<br>⚠ 合流 3 源: #12/#21(后写覆盖)/r4 · 点击聚焦';
+  if(n.id==='FPH')h+='<br>🔒 敏感 L3 · 入口: #12 直映射';
+  return h;}
+function showTip(ev,n){tip.innerHTML=tipHtml(n);tip.style.display='block';moveTip(ev);}
+function moveTip(ev){const r=stage.getBoundingClientRect();tip.style.left=(ev.clientX-r.left+12)+'px';tip.style.top=(ev.clientY-r.top+12)+'px';}
+/* ===== zoom/pan ===== */
+function applyView(){world.setAttribute('transform',`translate(${panX},${panY}) scale(${scale})`);}
+function zoomBy(f){scale=Math.min(2.4,Math.max(.5,scale*f));applyView();}
+function fitAll(){scale=1;panX=0;panY=0;applyView();}
+let panning=null;
+svg.addEventListener('pointerdown',ev=>{if(ev.target===svg||ev.target.getAttribute('id')==='world'){panning={x:ev.clientX,y:ev.clientY,px:panX,py:panY};svg.setPointerCapture(ev.pointerId);}});
+svg.addEventListener('pointermove',ev=>{if(panning){panX=panning.px+(ev.clientX-panning.x);panY=panning.py+(ev.clientY-panning.y);applyView();}});
+svg.addEventListener('pointerup',()=>panning=null);
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const f=ev.deltaY<0?1.15:1/1.15;zoomBy(f);},{passive:false});
+/* ===== 聚焦 ===== */
+function focusField(){
+  curFocus='FAMT';
+  EDGES.forEach(e=>{const on=!!e.amt;e._p.classList.toggle('hit',on);e._p.classList.toggle('dim',!on);e._t.style.display=on?'':'none';});
+  const keep=['A','T12','B','T21','R4','CW','S34','S47','S48','R1','DWS','BI'];
+  NODES.forEach(n=>{const el=nodeEls[n.id];el.classList.toggle('dim',!keep.includes(n.id));el.classList.toggle('hit',n.id==='CW');});
+  nodeEls['FAMT'].classList.remove('dim');nodeEls['FAMT'].classList.add('hit');
+  document.getElementById('btnFocus').classList.add('on');
+}
+function clearFocus(){curFocus=null;
+  EDGES.forEach(e=>{e._p.classList.remove('hit','dim');e._t.style.display='';});
+  NODES.forEach(n=>{nodeEls[n.id].classList.remove('dim','hit');});
+  nodeEls['FAMT'].classList.remove('hit');
+  document.getElementById('btnFocus').classList.remove('on');
+}
+function toggleFields(){fieldOn=!fieldOn;
+  FIELDS.forEach(n=>{n.nodeEl.style.display=fieldOn?'':'none';});
+  document.getElementById('btnFields').textContent=fieldOn?'字段: 收起':'字段: 展开';
+  refreshAll();}
+function goNode(id){const n=NODES.find(x=>x.id===id);if(!n)return;
+  clearFocus(); blink(n); const el=nodeEls[id]; if(el) selNode(n);
+  const r=stage.getBoundingClientRect(); scale=1;
+  panX=r.width/2-cx(n); panY=r.height/2-cy(n); applyView();}
+function blink(n){const el=nodeEls[n.id];el.classList.add('blink');setTimeout(()=>el.classList.remove('blink'),1400);}
+function selNode(n){const el=nodeEls[n.id];el.classList.add('hit');openDetail(n);document.getElementById('panel').classList.add('open');}
+function selEdge(e){openEdge(e);document.getElementById('panel').classList.add('open');}
+/* ===== 图例 ===== */
+function buildLegend(){
+  const l=document.getElementById('legend');
+  l.innerHTML='<div style="font-weight:600;color:#cfe3ff;margin-bottom:2px">图例(点按过滤)</div>';
+  [['sync','同步任务映射','#38bdf8',false],['prod','规则产出','#c084fc',false],['sub','订阅消费','#34d399',false],['chain','长链路/加工','#fbbf24',true],['reserve','预留应用','#64748b',true],['own','字段归属','#2f4a6b',true]].forEach(x=>{
+    const d=document.createElement('div');d.className='lg';d.innerHTML=`<span class="sw ${x[3]?'dash':''}" style="border-color:${x[2]}"></span>${x[1]}`;
+    l.appendChild(d);});
+  const h=document.createElement('div');h.className='hint';
+  h.innerHTML='拖节点调位 · 滚轮缩放 · 拖空白平移 · 悬停摘要 · 点击详情 · 双击聚焦字段 amount';
+  l.appendChild(h);
+}
+/* ===== 检索 ===== */
+const q=document.getElementById('q');
+q.addEventListener('keydown',ev=>{if(ev.key==='Enter'){
+  const v=q.value.trim();if(!v)return;
+  const all=[...NODES,...FIELDS];
+  const hit=all.find(n=>(n.label+' '+n.id+' '+(n.sub||'')).includes(v));
+  if(hit){document.getElementById('qhit').style.display='';document.getElementById('qhit').textContent='已定位: '+hit.label;goTo(hit);}
+  else document.getElementById('qhit').textContent='未找到: '+v;}});
+function goTo(n){const r=stage.getBoundingClientRect();scale=1;
+  panX=r.width/2-cx(n);panY=r.height/2-cy(n);applyView();blink(n);
+  if(n.k!=='field')selNode(n);}
+/* ===== 详情抽屉 ===== */
+const DETAIL={
+ CW:{tabs:['字段表','字段矩阵','上游','下游','操作']},
+ FAMT:{tabs:['合流来源','消费路径']},FPH:{tabs:['来源','出口']},
+ R4:{tabs:['规则','依赖/产出']},S34:{tabs:['契约','引用列']},S48:{tabs:['契约','血缘路径']},
+ BI:{tabs:['说明']},DWS:{tabs:['加工','上下游']},LAKE:{tabs:['说明']}
+};
+function openDetail(n){
+  const d=DETAIL[n.id]||{tabs:['概要']};
+  document.getElementById('pt').innerHTML=`${n.icon} ${n.label}`;
+  document.getElementById('pm').innerHTML=`${KTYPE[n.k][0]} · Owner ${n.own||'—'}`+(n.meta?'<br>'+n.meta:'')+(n.sub?`<br>${n.sub}`:'');
+  const pt=document.getElementById('ptabs');pt.innerHTML=d.tabs.map((t,i)=>`<div class="pt ${i?'':'on'}" data-i="${i}" onclick="tabAt(this,${i})">${t}</div>`).join('');
+  document.getElementById('pgwrap').innerHTML=d.tabs.map((_,i)=>`<div class="pg ${i?'':'on'}" id="pg${i}"></div>`).join('');
+  fillPg(n);
+}
+function tabAt(el,i){el.parentNode.querySelectorAll('.pt').forEach(x=>x.classList.remove('on'));el.classList.add('on');
+  el.parentNode.parentNode.querySelectorAll('.pg').forEach((x,j)=>x.classList.toggle('on',j===i));}
+function pg(n,i){const e=document.getElementById('pg'+i);return e;}
+function fillPg(n){
+  const set=(i,h)=>document.getElementById('pg'+i).innerHTML=h;
+  if(n.id==='CW'){
+    set(0,`<table><tr><th>字段</th><th>类型</th><th>密级</th></tr>
+      <tr><td><b>amount</b> ⚠3源</td><td>decimal</td><td>L2</td></tr>
+      <tr><td>phone 🔒</td><td>varchar</td><td><span class="chip c-red">L3</span></td></tr>
+      <tr><td>id</td><td>bigint</td><td>L1</td></tr>
+      <tr><td>name</td><td>varchar</td><td>L1</td></tr></table>`);
+    set(1,`<table><tr><th>目标</th><th>源</th><th>转换</th></tr>
+      <tr><td>id</td><td>user_id</td><td>直映射 #12</td></tr>
+      <tr><td>phone</td><td>phone</td><td>直映射(敏感)</td></tr>
+      <tr><td>amount</td><td>user_balance</td><td>#12 直映射</td></tr>
+      <tr><td>amount</td><td>bal</td><td>#21 合流(后写覆盖)</td></tr>
+      <tr><td>amount</td><td>net_amt−fee</td><td>r4 派生</td></tr>
+      <tr><td>name</td><td>org+user</td><td>#33 concat</td></tr></table>`);
+    set(2,`3 同步任务 + 1 规则(上游)<br><button class="btn sm" onclick="goNode('T12')">同步 #12</button> <button class="btn sm" onclick="goNode('R4')">规则 r4</button>`);
+    set(3,`订阅 #34/#47/#48 · 湖 · BI/API/检索(预留)<br><button class="btn sm" onclick="goNode('S34')">订阅 #34</button>`);
+    set(4,`<button class="btn primary sm" onclick="focusField()">图谱聚焦 amount</button> <button class="btn sm" onclick="goPage('i')">影响分析</button> <button class="btn sm" onclick="goPage('n')">发变更通知</button>`);
+  } else if(n.id==='FAMT'){
+    set(0,`<span class="chip c-blue">源①</span> 系统A #12 user_balance → amount(直映射)<br>
+      <span class="chip c-orange">源②</span> 系统B #21 bal → amount(合流 · 后写覆盖)<br>
+      <span class="chip c-purple">源③</span> 规则 r4 net_amt−fee → amount(派生)<br><br>
+      <button class="btn primary sm" onclick="focusField()">图谱聚焦</button>`);
+    set(1,`订阅 #34(6列视图) / #47(宽表回表)<br>长链路: → r1 金额档 → dws_weekly → BI<br><span class="chip c-gray">4 消费路径</span>`);
+  } else if(n.id==='FPH'){
+    set(0,`系统A #12: phone → phone(源敏感, 直映射)`);
+    set(1,`详情/预览 mask(138****1234)<br>湖快照明文(治理项)<br>契约 #50 待复核`);
+  } else if(n.id==='R4'){
+    set(0,`visual · net_amt − fee ≥ 5000 → 金额档/超限<br>任务 T7 装配 · 写回 amount`);
+    set(1,`依赖: net_amt, fee(已声明)<br>产出: amount + 标签「金额档」`);
+  } else if(n.id==='S34'){ set(0,`pull 定时 · token 生效 · 增量 _seq 游标`); set(1,`引用 6 列(amount≥5000 条件行)<br><span class="chip c-orange">命中 amount 变更</span>`); }
+  else if(n.id==='S48'){ set(0,`push kafka · 定时 5min · 经标签矩阵`); set(1,`amount → r1 金额档 → tag_fact → 圈选矩阵(间接)`); }
+  else if(n.id==='DWS'){ set(0,`由 customer_wide 周聚合(r1 金额档分档)`); set(1,`上游 CW · 下游 BI(预留)`); }
+  else set(0,`${n.sub||''}${n.own?'<br>Owner: '+n.own:''}<br>节点类型 ${KTYPE[n.k][0]} 已建模, 接入后自动挂边`);
+}
+function openEdge(e){
+  const a=NODES.find(x=>x.id===e.f),b=NODES.find(x=>x.id===e.to);
+  document.getElementById('pt').innerHTML='边: '+(a?a.label:'')+' → '+(b?b.label:'');
+  document.getElementById('pm').innerHTML=`关系类型: ${e.t.toUpperCase()} · ${COL[e.t]}`;
+  document.getElementById('ptabs').innerHTML='<div class="pt on">边详情</div>';
+  document.getElementById('pgwrap').innerHTML='<div class="pg on"></div>';
+  document.getElementById('pg0').innerHTML=`<div class="kv"><b>类型</b><span class="chip c-blue">${e.t.toUpperCase()}</span></div>
+    <div class="kv"><b>载荷</b>${e.l||'—'}</div>
+    <div class="kv"><b>来源</b>解析自 field_mapping / 依赖声明 / 契约 view_json</div>
+    <div style="margin-top:8px"><button class="btn sm" onclick="clearFocus()">清除高亮</button></div>`;
+}
+/* ===== 页面切换 ===== */
+function goPage(id){
+  document.getElementById('nav').querySelectorAll('.ni').forEach(x=>x.classList.toggle('on',x.dataset.v===id));
+  document.querySelectorAll('.subpage').forEach(x=>x.classList.toggle('on',x.id===id));
+  if(id!=='g'){document.getElementById('stage').style.display='none';document.getElementById('panel').classList.remove('open');}
+  else document.getElementById('stage').style.display='block';
+}
+document.getElementById('nav').addEventListener('click',e=>{const n=e.target.closest('.ni');if(n)goPage(n.dataset.v);});
+/* ===== stats ===== */
+function refreshStats(){document.getElementById('stN').textContent='节点 '+NODES.length+' · ';document.getElementById('stE').textContent='边 '+EDGES.length+' · ';}
+svgInit();
+const __h=(location.hash||'').replace('#','');
+if(__h&&['f','i','u','n'].includes(__h))goPage(__h);
+</script>
+</body>
+</html>

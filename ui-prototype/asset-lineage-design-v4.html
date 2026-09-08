@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据血缘 · 知识图谱可视化 v4</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --bg:#0f1722; --card:#fff;
+  --text:#e6edf5; --text-2:#8b98ab; --muted:#5a6a7d;
+  --c-sys:#f59e0b; --c-task:#38bdf8; --c-core:#22d3ee; --c-rule:#c084fc; --c-app:#34d399; --c-lake:#f472b6; --c-field:#fbbf24;
+  --c-sync:#38bdf8; --c-prod:#c084fc; --c-sub:#34d399; --c-chain:#fbbf24; --c-reserve:#64748b;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;overflow:hidden}
+/* 顶栏 */
+.appbar{height:48px;background:#0b1220;border-bottom:1px solid #1e2a3d;display:flex;align-items:center;padding:0 20px;gap:18px}
+.logo{font-weight:700;font-size:14px;display:flex;gap:8px;align-items:center}
+.logo i{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#22d3ee,#a78bfa);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:12px}
+.nav{display:flex;gap:2px;height:48px}
+.nav .ni{display:flex;align-items:center;padding:0 13px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent}
+.nav .ni.on{color:#fff;border-bottom-color:var(--c-core);font-weight:600}
+.rt{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text-2)}
+/* 主布局 */
+.main{display:flex;height:calc(100vh - 48px)}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:radial-gradient(ellipse at 30% 20%,#12202f 0%,#0b1420 60%)}
+svg{width:100%;height:100%;display:block}
+.gridline{stroke:#16233a;stroke-width:1}
+/* 图例 */
+.legend{position:absolute;left:14px;bottom:12px;background:rgba(11,18,32,.85);border:1px solid #223250;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.9;color:var(--text-2)}
+.legend .lg{display:flex;align-items:center;gap:6px}
+.legend .sw{width:22px;height:0;border-top:2px solid;display:inline-block}
+.legend .sw.dash{border-top-style:dashed}
+/* tooltip */
+#tip{position:absolute;display:none;background:#0d1626;border:1px solid #2a3b56;border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:30;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+#tip b{color:#fff}
+/* 右侧抽屉 */
+.panel{width:380px;background:#0d1626;border-left:1px solid #1e2a3d;display:none;flex-direction:column;overflow-y:auto}
+.panel.open{display:flex}
+.p-head{padding:14px 16px;border-bottom:1px solid #1e2a3d;position:sticky;top:0;background:#0d1626}
+.p-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.p-meta{font-size:12px;color:var(--text-2);margin-top:4px}
+.p-body{padding:12px 16px;flex:1}
+.ptabs{display:flex;gap:2px;border-bottom:1px solid #1e2a3d;margin:10px 0}
+.pt{flex:1;text-align:center;padding:6px 0;cursor:pointer;color:var(--text-2);font-size:12px;border-bottom:2px solid transparent}
+.pt.on{color:#fff;border-bottom-color:var(--c-core)}
+.pg{display:none;font-size:12px} .pg.on{display:block}
+.kv{display:flex;margin:5px 0;font-size:12px} .kv b{width:70px;color:var(--muted);font-weight:400;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:5px 6px;border-bottom:1px solid #223250}
+td{padding:5px 6px;border-bottom:1px solid #16233a}
+.chip{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px}
+.c-blue{background:rgba(56,189,248,.15);color:#7dd3fc}.c-purple{background:rgba(192,132,252,.15);color:#d8b4fe}
+.c-green{background:rgba(52,211,153,.15);color:#6ee7b7}.c-orange{background:rgba(251,191,36,.15);color:#fcd34d}
+.c-gray{background:#1e293b;color:#94a3b8}.c-red{background:rgba(248,113,113,.15);color:#fca5a5}
+.btn{border:1px solid #2a3b56;background:#14203a;color:#cfe3ff;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px}
+.btn.hl{border-color:var(--c-core);color:#67e8f9}
+/* 节点 SVG 样式 */
+.nd{cursor:pointer}
+.nd .ring{opacity:0}
+.nd:hover .ring{opacity:.25}
+.nd.core .ring{opacity:.2}
+.nd .bkg{fill:#16223a;stroke:#2a3b56;stroke-width:1}
+.nd .ico{font-size:13px}
+.nd .lb{fill:#dbe7f5;font-size:11px;font-weight:600}
+.nd .sb{fill:#6b7d94;font-size:9.5px}
+.nd.core .bkg{fill:rgba(34,211,238,.08);stroke:var(--c-core);stroke-width:1.6}
+.nd.core .lb{fill:#7ce7f7;font-size:13px}
+.nd.core .sb{fill:#7ce7f7aa;font-size:10px}
+.nd.dim .bkg,.nd.dim .lb,.nd.dim .sb{opacity:.18}
+.nd.dim .ring{opacity:0}
+.nd.hit .bkg{fill:rgba(34,211,238,.14);stroke:#67e8f9;stroke-width:2.2}
+.fnode .bkg{fill:rgba(251,191,36,.12);stroke:#fbbf24;stroke-width:1.4}
+.fnode .lb{fill:#fcd34d}
+.edge{fill:none;stroke-width:1.6;opacity:.85;transition:opacity .2s}
+.edge.dim{opacity:.06}
+.edge.hit{stroke-width:3;opacity:1}
+.edge .el{fill:#64748b;font-size:9px}
+.edge.hit .el{fill:#a5b4fc;font-weight:600}
+.marker-arrow{fill:#64748b}
+.marker-arrow.hit{fill:#a5b4fc}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="logo"><i>⛓</i>数据血缘 · 知识图谱</div>
+  <div class="nav" id="nav">
+    <div class="ni on">⛓ 知识图谱</div>
+    <div class="ni" data-note>字段级追踪(页③)</div>
+    <div class="ni" data-note>影响分析(页④)</div>
+    <div class="ni" data-note>变更通知单(页⑤)</div>
+  </div>
+  <div class="rt">
+    <span>图存储: Neo4j</span>
+    <span class="chip c-gray">amount 路径聚焦中: 3 源 → 4 消费</span>
+    <button class="btn hl" onclick="focusField()">聚焦 amount</button>
+    <button class="btn" onclick="clearFocus()">清除聚焦</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="canvas-wrap" id="wrap">
+    <svg id="svg" viewBox="0 0 1500 860"></svg>
+    <div class="legend">
+      <div class="lg"><span class="sw" style="border-color:var(--c-sync)"></span>同步任务映射(field_mapping)</div>
+      <div class="lg"><span class="sw" style="border-color:var(--c-prod)"></span>规则产出/依赖</div>
+      <div class="lg"><span class="sw" style="border-color:var(--c-sub)"></span>订阅消费</div>
+      <div class="lg"><span class="sw dash" style="border-color:var(--c-chain)"></span>长链路(表→表/加工)</div>
+      <div class="lg"><span class="sw dash" style="border-color:var(--c-reserve)"></span>预留应用</div>
+      <div class="lg" style="margin-top:4px">拖动节点可微调 · 悬停看摘要 · 点击看详情(右栏)</div>
+    </div>
+    <div id="tip"></div>
+  </div>
+  <div class="panel" id="panel">
+    <div class="p-head">
+      <div class="p-title" id="pt"></div>
+      <div class="p-meta" id="pm"></div>
+    </div>
+    <div class="p-body" id="pb"></div>
+  </div>
+</div>
+
+<script>
+/* ============ 图谱数据(逻辑表 customer_wide 为核心) ============ */
+const NS = 'http://www.w3.org/2000/svg';
+const W = 1500, H = 860;
+
+/* 节点: x,y 中心; kind: sys/task/rule/core/field/logic/app */
+const NODES = [
+  // 上游系统
+  {id:'A',  kind:'sys', x:60,  y:150, icon:'🗄', label:'系统A', sub:'核心交易 MySQL'},
+  {id:'B',  kind:'sys', x:60,  y:330, icon:'🗄', label:'系统B', sub:'账务 PostgreSQL'},
+  {id:'C',  kind:'sys', x:60,  y:520, icon:'🗄', label:'系统C', sub:'CRM Oracle'},
+  // 同步任务
+  {id:'T12',kind:'task',x:230, y:150, icon:'⇄', label:'同步 #12', sub:'CDC 增量'},
+  {id:'T21',kind:'task',x:230, y:330, icon:'⇄', label:'同步 #21', sub:'批量日切'},
+  {id:'T33',kind:'task',x:230, y:520, icon:'⇄', label:'同步 #33', sub:'实时'},
+  // 规则(加工上游)
+  {id:'R4', kind:'rule',x:230, y:700, icon:'⚙️', label:'规则 r4', sub:'净支付额 → amount'},
+  // 核心逻辑表
+  {id:'CW', kind:'core',x:520, y:320, icon:'▤', label:'customer_wide', sub:'模型 M1 · DWD 客户域 · L2'},
+  // 字段挂点(展开字段: 从逻辑表拉出的字段级节点)
+  {id:'FAMT',kind:'field',x:520, y:470, icon:'#', label:'amount', sub:'合流字段 · 3源 · 4消费'},
+  {id:'FPH', kind:'field',x:520, y:540, icon:'#', label:'phone', sub:'敏感 🔒L3 mask'},
+  {id:'FID', kind:'field',x:520, y:610, icon:'#', label:'id', sub:'主键 · 单源'},
+  // 加工/衍生逻辑表(长链路)
+  {id:'R1', kind:'rule',x:790, y:200, icon:'🎯', label:'规则 r1', sub:'金额档(依赖 amount)'},
+  {id:'DWS',kind:'logic',x:790, y:330, icon:'▤', label:'dws_customer_weekly', sub:'派生逻辑表 · DWS'},
+  // 下游应用
+  {id:'S34',kind:'app',x:1060,y:90,  icon:'📮', label:'订阅 #34', sub:'dwh-batch · pull'},
+  {id:'S47',kind:'app',x:1060,y:200, icon:'📮', label:'订阅 #47', sub:'mkt-ext · 宽表回表'},
+  {id:'S48',kind:'app',x:1060,y:310, icon:'📮', label:'订阅 #48', sub:'mkt-k · push kafka'},
+  {id:'SEARCH',kind:'app',x:1060,y:430, icon:'🔎', label:'检索服务', sub:'预留 · SEARCH'},
+  {id:'BI', kind:'app',x:1060,y:560, icon:'📊', label:'BI 经营分析', sub:'预留 · 长链路末端'},
+  {id:'LAKE',kind:'app',x:1060,y:690, icon:'⬇️', label:'Iceberg 湖表', sub:'快照 · 权威+历史'},
+];
+
+/* 边: from/to 节点id; t: sync|prod|sub|chain|reserve; amt: 是否属 amount 路径 */
+const EDGES = [
+  {f:'A',to:'T12',t:'sync'},
+  {f:'B',to:'T21',t:'sync'},
+  {f:'C',to:'T33',t:'sync'},
+  {f:'T12',to:'CW',t:'sync',l:'user_id→id · phone→phone · user_balance→amount',amt:1},
+  {f:'T21',to:'CW',t:'sync',l:'bal→amount(合流②, 后写覆盖)',amt:1},
+  {f:'T33',to:'CW',t:'sync',l:'org+user→name(concat)'},
+  {f:'R4',to:'CW',t:'prod',l:'net_amt−fee → amount(派生③)',amt:1},
+  // 字段→逻辑表 归属(细线)
+  {f:'CW',to:'FAMT',t:'own'}, {f:'CW',to:'FPH',t:'own'}, {f:'CW',to:'FID',t:'own'},
+  // amount 消费(字段级边 → 应用)
+  {f:'CW',to:'S34',t:'sub',l:'6列视图 · amount≥5000',amt:1},
+  {f:'CW',to:'S47',t:'sub',l:'宽表回表 3列(含 amount)',amt:1},
+  {f:'CW',to:'S48',t:'sub',l:'经标签 金额档',amt:1},
+  {f:'CW',to:'LAKE',t:'sub',l:'15min 快照'},
+  {f:'CW',to:'SEARCH',t:'reserve',l:'预留'},
+  // 长链路
+  {f:'CW',to:'R1',t:'chain',l:'amount → 金额档',amt:1},
+  {f:'R1',to:'DWS',t:'chain',l:'金额档 → 周聚合',amt:1},
+  {f:'DWS',to:'BI',t:'chain',l:'周宽表 → 报表',amt:1},
+];
+
+const COL = {sync:'#38bdf8',prod:'#c084fc',sub:'#34d399',chain:'#fbbf24',reserve:'#64748b',own:'#33415e'};
+const KIND = {sys:['系统','#f59e0b'],task:['同步任务','#38bdf8'],rule:['规则/加工','#c084fc'],core:['逻辑表','#22d3ee'],logic:['逻辑表','#22d3ee'],field:['字段','#fbbf24'],app:['数据应用','#34d399']};
+const SIZES = {sys:[170,46],task:[150,42],rule:[168,46],core:[190,70],logic:[180,52],field:[130,32],app:[170,46]};
+const ICON = {sys:'🗄',task:'⇄',rule:'⚙️',core:'▤',logic:'▤',field:'#',app:'📮'};
+
+const svg = document.getElementById('svg');
+const tip = document.getElementById('tip');
+const wrap = document.getElementById('wrap');
+
+function el(name, cls){ const n=document.createElementNS(NS,name); if(cls)n.setAttribute('class',cls); return n; }
+function pathEdge(fx,fy,tx,ty){
+  const mx=(fx+tx)/2; const d=`M${fx},${fy} C${mx},${fy} ${mx},${ty} ${tx},${ty}`;
+  const p=el('path'); p.setAttribute('d',d); return p;
+}
+function center(id){ const n=NODES.find(x=>x.id===id); return n; }
+
+function build(){
+  // defs 箭头
+  const defs=el('defs'); svg.appendChild(defs);
+  EDGES.forEach((e,i)=>{ if(e.t==='own')return;
+    const m=el('marker'); m.setAttribute('id','ar'+i); m.setAttribute('viewBox','0 0 10 10');
+    m.setAttribute('refX','9'); m.setAttribute('refY','5'); m.setAttribute('markerWidth','7'); m.setAttribute('markerHeight','7');
+    m.setAttribute('orient','auto-start-reverse');
+    const p=el('path'); p.setAttribute('d','M0,0 L10,5 L0,10 z'); p.setAttribute('fill',COL[e.t]);
+    m.appendChild(p); defs.appendChild(m);
+    e._m='ar'+i; });
+  // 边
+  EDGES.forEach(e=>{
+    const a=center(e.f), b=center(e.to); if(!a||!b)return;
+    const aS=SIZES[a.kind], bS=SIZES[b.kind];
+    const fx=a.x+aS[0]/2, tx=b.x-bS[0]/2;
+    const g=el('g'); 
+    const p=pathEdge(fx,a.y,tx,b.y);
+    if(e.t==='own'){ p.setAttribute('stroke','#2a3b56'); p.setAttribute('stroke-width','1'); p.setAttribute('stroke-dasharray','3 3'); }
+    else { p.setAttribute('class','edge'); p.setAttribute('stroke',COL[e.t]); p.setAttribute('marker-end','url(#'+e._m+')'); }
+    g.appendChild(p); e._path=p; e._g=g;
+    if(e.l){ const t=el('text'); t.setAttribute('class','el'); t.textContent=e.l; t.setAttribute('text-anchor','middle');
+      const my=Math.min(a.y,b.y)+(Math.abs(b.y-a.y)/2)-4; t.setAttribute('x',(fx+tx)/2); t.setAttribute('y',my); g.appendChild(t); }
+    svg.appendChild(g);
+  });
+  // 节点
+  NODES.forEach(n=>{
+    const [w,h]=SIZES[n.kind];
+    const g=el('g'); g.setAttribute('class','nd '+n.kind); g.setAttribute('id','n_'+n.id);
+    const rx=w/2+8, ry=h/2+10; const ring=el('rect'); ring.setAttribute('class','ring');
+    ring.setAttribute('x',n.x-rx); ring.setAttribute('y',n.y-ry); ring.setAttribute('width',rx*2); ring.setAttribute('height',ry*2);
+    ring.setAttribute('rx',12); ring.setAttribute('fill','#22d3ee'); g.appendChild(ring);
+    const bkg=el('rect'); bkg.setAttribute('class','bkg'); bkg.setAttribute('x',n.x-w/2); bkg.setAttribute('y',n.y-h/2);
+    bkg.setAttribute('width',w); bkg.setAttribute('height',h); bkg.setAttribute('rx',10); g.appendChild(bkg);
+    const ic=el('text'); ic.setAttribute('class','ico'); ic.setAttribute('x',n.x-w/2+13); ic.setAttribute('y',n.y+4);
+    ic.setAttribute('text-anchor','middle'); ic.textContent=ICON[n.kind]; g.appendChild(ic);
+    const lb=el('text'); lb.setAttribute('class','lb'); lb.setAttribute('x',n.x+4); lb.setAttribute('y',n.y-2);
+    lb.setAttribute('text-anchor','middle'); lb.textContent=n.label; g.appendChild(lb);
+    const sb=el('text'); sb.setAttribute('class','sb'); sb.setAttribute('x',n.x+4); sb.setAttribute('y',n.y+14);
+    sb.setAttribute('text-anchor','middle'); sb.textContent=n.sub||''; g.appendChild(sb);
+    // 交互
+    g.addEventListener('mouseenter', ev=>showTip(ev,n));
+    g.addEventListener('mousemove', ev=>{tip.style.left=(ev.offsetX||ev.clientX-wrap.getBoundingClientRect().left+6)+'px';tip.style.top=(ev.offsetY||ev.clientY-wrap.getBoundingClientRect().top+6)+'px';});
+    g.addEventListener('mouseleave', ()=>{tip.style.display='none';});
+    g.addEventListener('click', ()=>openDetail(n));
+    svg.appendChild(g);
+  });
+}
+function showTip(ev,n){
+  const kind=KIND[n.kind][0];
+  let html=`<b>${n.icon} ${n.label}</b><br>${kind}`;
+  if(n.kind==='core') html+='<br>模型 M1 · DWD · 9 列 · 每 5min · 健康 98';
+  if(n.kind==='field'&&n.id==='FAMT') html+='<br>⚠ 多源合流: 同步#12 / 同步#21(后写覆盖) / 规则 r4 · 消费: 订阅#34 #47、金额档链路';
+  tip.innerHTML=html; tip.style.display='block';
+}
+/* ============ amount 聚焦: 高亮相关子图 ============ */
+function focusField(){
+  EDGES.forEach(e=>{ const on=!!e.amt;
+    if(e._path){ e._path.classList.toggle('hit',on); e._path.classList.toggle('dim',!on); }
+    if(e._g){ e._g.querySelectorAll('.el').forEach(t=>t.style.display=on?'':'none'); }
+  });
+  NODES.forEach(n=>{ const elm=document.getElementById('n_'+n.id); if(!elm)return;
+    const on=n.id==='CW'||n.id==='FAMT'||['A','T12','B','T21','R4','S34','S47','S48','R1','DWS','BI'].includes(n.id);
+    elm.classList.toggle('dim',!on); elm.classList.toggle('hit',n.id==='CW'||n.id==='FAMT');
+  });
+}
+function clearFocus(){
+  EDGES.forEach(e=>{ if(e._path){e._path.classList.remove('hit','dim');} if(e._g)e._g.querySelectorAll('.el').forEach(t=>t.style.display=''); });
+  NODES.forEach(n=>{ const elm=document.getElementById('n_'+n.id); if(elm){elm.classList.remove('dim','hit');} });
+}
+/* ============ 详情抽屉(细节保留) ============ */
+const DETAIL={
+  CW:{t:'customer_wide',m:'逻辑表 · 模型 M1 · DWD 客户域 · 密级 L2 · 健康 98',tabs:['字段表','合流字段','下游']},
+  FAMT:{t:'字段 amount',m:'DECIMAL(12,2) · 合流字段(3 来源 · 4 消费)',tabs:['合流来源','消费路径']},
+  FPH:{t:'字段 phone',m:'varchar · 敏感 🔒 L3 · 脱敏 mask',tabs:['来源','出口']},
+  R4:{t:'规则 r4 · 净支付额超限',m:'visual · 打标任务 T7 · 产出 amount',tabs:['规则','依赖/产出']},
+  S34:{t:'订阅 #34 · 大额日快照',m:'dwh-batch · pull 定时 · max_secret 3',tabs:['契约','引用列']},
+  S48:{t:'订阅 #48 · 金额档推送',m:'mkt-k · push kafka · 经标签',tabs:['契约','血缘路径']},
+  DWS:{t:'dws_customer_weekly',m:'派生逻辑表 · DWS · 由 customer_wide 周聚合',tabs:['加工','上游/下游']},
+  BI:{t:'BI · 客户经营分析(预留)',m:'下游应用 SEARCH/BI 类型待接入后自动挂边',tabs:['说明']},
+  LAKE:{t:'Iceberg 湖表',m:'LAKE · 15min 快照 · 权威+历史',tabs:['同步','说明']}
+};
+function body(tabs, id){
+  let s='<div class="ptabs">'+tabs.map((t,i)=>`<div class="pt ${i?'':'on'}" data-i="${i}">${t}</div>`).join('')+'</div>';
+  s+='<div class="pg on" id="pg0"></div>'; for(let i=1;i<tabs.length;i++)s+=`<div class="pg" id="pg${i}"></div>`;
+  s+='<div id="pginner"></div>';
+  return s;
+}
+function openDetail(n){
+  document.getElementById('panel').classList.add('open');
+  const d=DETAIL[n.id]||{t:n.label,m:(KIND[n.kind]||['',''])[0],tabs:['概要']};
+  document.getElementById('pt').innerHTML=n.icon+' '+d.t;
+  document.getElementById('pm').textContent=d.m;
+  let inner='';
+  if(n.id==='CW') inner=`<table><tr><th>字段</th><th>来源</th><th>密级</th></tr>
+    <tr><td><b>amount</b> ⚠3源</td><td>同步#12/#21 + 规则r4</td><td>L2</td></tr>
+    <tr><td>phone 🔒</td><td>同步#12(源敏感)</td><td><span class="chip c-red">L3</span></td></tr>
+    <tr><td>id</td><td>同步#12</td><td>L1</td></tr>
+    <tr><td>name</td><td>同步#33(concat)</td><td>L1</td></tr></table>
+    <div style="margin:8px 0;font-size:12px"><button class="btn hl" onclick="focusField()">聚焦 amount 子图</button> <button class="btn">查看全部字段映射</button></div>`;
+  if(n.id==='FAMT') inner=`<div class="chip c-blue">源①</div> 系统A 同步#12: user_balance→amount(直映射)<br>
+    <div class="chip c-orange">源②</div> 系统B 同步#21: bal→amount(合流, 后写覆盖)<br>
+    <div class="chip c-purple">源③</div> 规则 r4: net_amt−fee→amount(派生写回)<br>
+    <div style="margin:8px 0">消费: 订阅#34(6列视图) · #47(宽表回表) · 长链路: r1 金额档 → dws → BI</div>
+    <button class="btn hl" onclick="focusField()">在图谱中聚焦</button>`;
+  if(n.id==='S34') inner=`视图: logical · customer_wide 6列(amount≥5000)<br>token 生效中 · 增量游标 _seq<br><button class="btn">查看契约详情</button> <button class="btn">加入变更通知</button>`;
+  if(n.id==='R4') inner=`定义: net_amt − fee ≥ 5000 → 金额档/超限<br>依赖: net_amt, fee(已声明)<br>产出: 写回 customer_wide.amount + 标签「金额档」`;
+  if(n.id==='S48') inner=`血缘路径: amount → 规则r1(金额档) → tag_fact_view → 订阅矩阵<br>间接依赖 amount: 语义变化改变圈选结果`;
+  document.getElementById('pb').innerHTML='<div style="font-size:12px;line-height:1.9">'+inner+'</div>';
+}
+build();
+</script>
+</body>
+</html>

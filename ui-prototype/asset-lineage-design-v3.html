@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据血缘 · 设计稿 v3(逻辑表核心 · 多源合流 · Neo4j)</title>
+<style>
+:root{
+  --primary:#1677ff; --primary-weak:#e6f4ff; --bg:#f0f2f5; --card:#fff;
+  --border:#e8e8e8; --text:#1f2329; --text-2:#646a73; --text-3:#8f959e;
+  --green:#52c41a; --green-weak:#f6ffed; --orange:#fa8c16; --orange-weak:#fff7e6;
+  --red:#f5222d; --red-weak:#fff1f0; --purple:#722ed1; --purple-weak:#f9f0ff;
+  --cyan:#13c2c2; --cyan-weak:#e6fffb;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.appbar{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:26px;position:sticky;top:0;z-index:50}
+.logo{display:flex;align-items:center;gap:8px;padding:12px 0;font-weight:700;font-size:15px}
+.logo i{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1677ff,#36cfc9);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-size:13px}
+.nav{display:flex;gap:4px;height:48px}
+.nav .ni{display:flex;align-items:center;padding:0 14px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;user-select:none}
+.nav .ni.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.appbar .right{margin-left:auto;color:var(--text-2);font-size:12px}
+.page{max-width:1500px;margin:0 auto;padding:14px 20px 40px}
+.view{display:none} .view.on{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.sec{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec .sub{font-weight:400;color:var(--text-3);font-size:12px}
+.tag{display:inline-block;padding:0 7px;border-radius:3px;font-size:11px;line-height:18px;white-space:nowrap}
+.t-green{background:var(--green-weak);color:var(--green)} .t-blue{background:var(--blue-weak);color:var(--blue)}
+.t-orange{background:var(--orange-weak);color:var(--orange)} .t-purple{background:var(--purple-weak);color:var(--purple)}
+.t-red{background:var(--red-weak);color:var(--red)} .t-gray{background:#f5f5f5;color:var(--text-3)}
+.t-cyan{background:var(--cyan-weak);color:var(--cyan)}
+.dim{color:var(--text-3);font-size:12px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:13px;color:var(--text)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.sm{padding:2px 10px;font-size:12px}
+.searchbox{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 12px;width:380px;font-size:13px}
+.searchbox input{border:none;outline:none;flex:1;font-size:13px}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+/* 图节点 */
+.sys{border:1px solid var(--border);border-radius:10px;background:#fafbfc;padding:8px;margin-bottom:10px}
+.sys-h{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;margin-bottom:6px}
+.sys-h .src-tag{font-size:10px;padding:0 5px;border-radius:3px;background:#f0f0f0;color:var(--text-2)}
+.task{border:1px dashed #c9d6e8;border-radius:6px;background:#fff;padding:6px 8px;margin-bottom:6px;font-size:12px}
+.task .th{font-weight:600;color:#0b5bd3;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.task .fm{color:var(--text-2);line-height:1.7;margin-top:2px}
+.task .fm .f{display:inline-block;margin-right:8px}
+.fs{color:var(--text-3)} .fd{color:var(--primary);font-weight:600}
+.multi{display:inline-block;background:var(--orange-weak);color:#d46b08;border:1px solid #ffd591;border-radius:3px;font-size:10px;padding:0 4px;margin-left:4px}
+/* 中心 */
+.core{border:2px solid var(--primary);border-radius:12px;background:#fff;padding:12px;box-shadow:0 4px 16px rgba(22,119,255,.14)}
+.core .cn{font-size:16px;font-weight:700;color:var(--primary);text-align:center}
+.core .cm{text-align:center;color:var(--text-2);font-size:12px;margin:4px 0 8px}
+.fmerge{background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12px}
+.fmerge .fh{font-weight:600;color:#874d00;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.frow{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;flex-wrap:wrap}
+/* 下游应用 */
+.app{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--border);border-left:3px solid var(--cyan);background:#fafbfc;border-radius:8px;padding:7px 10px;margin-bottom:8px}
+.app.sub{border-left-color:var(--blue)} .app.bi{border-left-color:var(--purple)} .app.lake{border-left-color:var(--green)} .app.search{border-left-color:var(--orange)}
+.app .aic{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.app .a1{font-weight:600;font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.app .a2{font-size:12px;color:var(--text-2);margin-top:2px}
+/* 链路/路径 */
+.pathcard{border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.pathcard .ph{background:#fafafa;padding:6px 10px;font-size:12px;color:var(--text-2);border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center}
+.psteps{display:flex;align-items:center;overflow-x:auto;padding:8px 10px;font-size:12px}
+.pstep{flex-shrink:0;background:#f0f5ff;border:1px solid #adc6ff;color:#0b5bd3;border-radius:6px;padding:3px 8px;white-space:nowrap}
+.pstep.k{background:var(--purple-weak);border-color:#d3adf7;color:var(--purple)}
+.pstep.app{background:var(--cyan-weak);border-color:#87e8de;color:#08979c}
+.parrow{flex-shrink:0;margin:0 4px;color:var(--text-3)}
+.hit{background:var(--red-weak);border-color:#ffa39e;color:var(--red)}
+/* 影响树/通知单沿用 */
+.impcard{border:1px solid var(--border);border-left:3px solid var(--blue);background:#fafbfc;border-radius:6px;padding:7px 10px;margin:4px 0}
+.impcard .i1{display:flex;align-items:center;gap:8px;font-weight:600;font-size:12px}
+.impcard .i2{font-size:12px;color:var(--text-2);margin-top:2px}
+.ncard{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;background:#fff}
+.ncard .l b{font-size:13px} .ncard .l .dim{display:block;margin-top:3px}
+.foot{color:var(--text-3);font-size:11px;margin-top:14px;border-top:1px dashed var(--border);padding-top:8px;line-height:1.8}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="logo"><i>血</i>数据血缘</div>
+  <div class="nav" id="nav">
+    <div class="ni on" data-v="g">血缘图谱</div>
+    <div class="ni" data-v="t">字段级追踪</div>
+    <div class="ni" data-v="i">影响分析</div>
+    <div class="ni" data-v="n">变更通知单</div>
+  </div>
+  <div class="right">图存储: Neo4j · 解析: 配置/声明/契约 + 事件增量 · <span class="tag t-green">同步正常</span></div>
+</div>
+
+<div class="page">
+
+<!-- ================= ① 血缘图谱 ================= -->
+<div class="view on" id="g">
+  <div class="toolbar">
+    <div class="searchbox">🔍 <input value="customer_wide"></div>
+    <button class="btn primary">查询</button>
+    <span class="chip" style="border:1px solid var(--border);border-radius:14px;padding:2px 10px;background:#fff;color:var(--text-2)">逻辑表/模型</span>
+    <span class="dim" style="margin-left:auto">核心: 逻辑表 · 上游: 同步任务(多系统合流)· 下游: 数据应用(订阅/检索/BI/湖)</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:270px 320px 1fr;gap:14px">
+    <!-- 上游: 系统 → 任务 → 字段 -->
+    <div>
+      <div class="sec" style="font-size:12px">▲ 上游 · 数据同步任务(3 系统 / 4 任务 / 1 规则)</div>
+      <div class="sys">
+        <div class="sys-h">🗄 系统 A · 核心交易 <span class="src-tag">MySQL demo-db</span></div>
+        <div class="task">
+          <div class="th">同步任务 #12 <span class="tag t-blue">CDC</span></div>
+          <div class="fm"><span class="f"><span class="fs">user_id</span>→<span class="fd">id</span></span><span class="f"><span class="fs">phone</span>→<span class="fd">phone</span> 🔒</span><span class="f"><span class="fs">user_balance</span>→<span class="fd">amount</span><span class="multi">源①</span></span></div>
+        </div>
+      </div>
+      <div class="sys">
+        <div class="sys-h">🗄 系统 B · 账务 <span class="src-tag">PostgreSQL</span></div>
+        <div class="task">
+          <div class="th">同步任务 #21 <span class="tag t-blue">批量</span></div>
+          <div class="fm"><span class="f"><span class="fs">bal</span>→<span class="fd">amount</span><span class="multi">源② 合流</span></span></div>
+        </div>
+      </div>
+      <div class="sys">
+        <div class="sys-h">🗄 系统 C · CRM <span class="src-tag">Oracle</span></div>
+        <div class="task">
+          <div class="th">同步任务 #33 <span class="tag t-blue">实时</span></div>
+          <div class="fm"><span class="f"><span class="fs">org+user</span>→<span class="fd">name</span>(concat)</span></div>
+        </div>
+      </div>
+      <div class="task" style="border-color:#d3adf7">
+        <div class="th">⚙️ 规则 r4 · 净支付额 <span class="tag t-purple">产出</span></div>
+        <div class="fm"><span class="f"><span class="fs">net_amt−fee</span>→<span class="fd">amount</span><span class="multi">源③ 派生</span></span></div>
+      </div>
+    </div>
+
+    <!-- 中心: 逻辑表 + 字段合流 -->
+    <div>
+      <div class="core">
+        <div class="cn">customer_wide <span class="tag t-gray" style="font-size:10px">逻辑表 / 模型 M1</span></div>
+        <div class="cm">DWD · 客户域 · 9 列 · 每 5min · <span class="tag t-green">健康 98</span> <span class="tag t-orange">L2</span></div>
+        <div class="fmerge">
+          <div class="fh">⚠ amount 字段 · 多源合流(3)</div>
+          <div class="frow"><span class="multi">源①</span> 系统A #12 user_balance 直映射 <span class="multi">源②</span> 系统B #21 bal 合流(后写覆盖) <span class="multi">源③</span> 规则 r4 派生写回</div>
+          <div style="text-align:right"><button class="btn sm" style="margin-top:2px">查看全部合流路径</button></div>
+        </div>
+        <div class="frow"><span class="dim">同表其他字段:</span> id(①) phone🔒(①) name(③) region(①)…</div>
+      </div>
+      <div style="text-align:center;color:var(--text-3);font-size:11px;margin:6px 0">▲ 上游解析: 同步任务字段映射(合流保留多边) ▼ 下游: 应用边(SUBSCRIBE/SEARCH/BI/LAKE)</div>
+    </div>
+
+    <!-- 下游: 多应用 + 长链路 -->
+    <div>
+      <div class="sec" style="font-size:12px">▼ 下游 · 数据应用(订阅 3 · 湖 1 · 预留 2)</div>
+      <div class="app sub"><div class="aic" style="background:var(--blue-weak)">📮</div><div style="flex:1">
+        <div class="a1">订阅契约 #34 · 大额日快照 <span class="tag t-blue">pull</span> <span class="tag t-gray">dwh-batch</span></div>
+        <div class="a2">6 列 · amount≥5000 · 增量游标</div></div></div>
+      <div class="app sub"><div class="aic" style="background:var(--blue-weak)">📮</div><div style="flex:1">
+        <div class="a1">订阅契约 #47 · 人群宽表 <span class="tag t-blue">pull</span> <span class="tag t-gray">mkt-ext</span></div>
+        <div class="a2">标签圈选 → 回表取 3 列</div></div></div>
+      <div class="app sub"><div class="aic" style="background:var(--blue-weak)">📮</div><div style="flex:1">
+        <div class="a1">订阅契约 #48 · 金额档推送 <span class="tag t-red">push kafka</span></div>
+        <div class="a2">经标签「金额档」· 定时 5min</div></div></div>
+      <div class="app lake"><div class="aic" style="background:var(--green-weak)">⬇️</div><div style="flex:1">
+        <div class="a1">Iceberg 湖表 · customer_wide <span class="tag t-gray">LAKE</span></div>
+        <div class="a2">15min 快照 · 权威+历史</div></div></div>
+
+      <div style="border-top:1px dashed var(--border);margin:10px 0 6px;padding-top:8px">
+        <div class="a1" style="font-size:12px;font-weight:600;margin-bottom:6px">🔗 长链路(表 → 表 → 应用)</div>
+        <div class="psteps">
+          <div class="pstep">customer_wide.amount</div><div class="parrow">→</div>
+          <div class="pstep k">规则 r1 金额档</div><div class="parrow">→</div>
+          <div class="pstep">dws_customer_weekly(派生逻辑表)</div><div class="parrow">→</div>
+          <div class="pstep app">📊 BI 报表 · 客户经营分析 <span class="tag t-gray">预留</span></div>
+        </div>
+        <div class="psteps" style="margin-top:4px">
+          <div class="pstep">customer_wide</div><div class="parrow">→</div>
+          <div class="pstep app">🔎 检索服务 · 客户检索 <span class="tag t-gray">预留</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">v3 语义: ①血缘以<b>逻辑表/模型为核心节点</b>; ②上游=同步任务为主要来源, <b>同一字段允许多条来源边(合流)</b>——系统A/系统B/规则 r4 都指向 amount, 边上带任务/策略; ③下游=数据应用节点(app_type: SUBSCRIBE/SEARCH/BI/LAKE/EXPORT), 预留应用可先占位; ④长链路由逻辑表→逻辑表(加工/级联)延展。存储: Neo4j(多对多合流/分流 + 任意深度遍历), 解析器把 field_mapping/规则依赖/契约 view_json 写成图边。</div>
+</div>
+
+<!-- ================= ② 字段级追踪 ================= -->
+<div class="view" id="t">
+  <div class="toolbar">
+    <div class="searchbox">🔍 <input value="customer_wide.amount"></div>
+    <button class="btn primary">追踪</button>
+    <span class="dim" style="margin-left:auto">amount: DECIMAL(12,2) · <b>合流字段</b>(3 来源)· <span class="tag t-orange">密级 L2</span></span>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="sec">▲ 来源(3 条边 · 全部列出)</div>
+      <div class="pathcard"><div class="ph">源① 直映射 · 系统A 同步任务 #12</div><div class="psteps"><div class="pstep">t_user_base.user_balance</div><div class="parrow">→(直映射)</div><div class="pstep">amount</div></div></div>
+      <div class="pathcard"><div class="ph">源② 合流 · 系统B 同步任务 #21 <span class="tag t-orange">策略: 后写覆盖</span></div><div class="psteps"><div class="pstep">t_acct.bal</div><div class="parrow">→(直映射)</div><div class="pstep">amount</div></div></div>
+      <div class="pathcard"><div class="ph">源③ 派生 · 规则 r4(visual)</div><div class="psteps"><div class="pstep">net_amt − fee</div><div class="parrow">→(写回)</div><div class="pstep">amount</div></div></div>
+      <div class="pathcard"><div class="ph" style="color:#d46b08">⚠ 未解析(DRL r6)</div><div class="psteps"><div class="pstep" style="border-style:dashed">r6 疑似写 amount</div><div class="parrow">→?</div><div class="pstep" style="border-style:dashed">依赖未声明</div><button class="btn sm" style="margin-left:8px">人工补边</button></div></div>
+    </div>
+    <div class="card">
+      <div class="sec">▼ 消费方(3 应用 / 1 长链路)</div>
+      <div class="pathcard"><div class="ph">📮 订阅 #34 dwh-batch</div><div class="psteps"><div class="pstep hit">amount</div><div class="parrow">→</div><div class="pstep">契约视图 6 列</div></div></div>
+      <div class="pathcard"><div class="ph">📮 订阅 #47 mkt-ext(宽表回表)</div><div class="psteps"><div class="pstep hit">amount</div><div class="parrow">→</div><div class="pstep">回表列</div></div></div>
+      <div class="pathcard"><div class="ph">🔗 长链路</div><div class="psteps"><div class="pstep hit">amount</div><div class="parrow">→</div><div class="pstep k">规则 r1 金额档</div><div class="parrow">→</div><div class="pstep">dws_customer_weekly.amt_band</div><div class="parrow">→</div><div class="pstep app">📊 BI 经营分析(预留)</div></div></div>
+      <div class="impcard" style="border-left-color:var(--orange)"><div class="i2">注: amount 语义变化会同时改 3 条来源边的口径与下游 3+1 个消费点 —— 图中展示全部路径, 不做单链截断</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ③ 影响分析 ================= -->
+<div class="view" id="i">
+  <div class="card">
+    <div class="sec">影响分析(按路径集)</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><div class="dim" style="margin-bottom:4px">变更源(可选到系统/任务/字段)</div>
+        <div class="searchbox" style="width:320px"><input value="系统B(t_acct.bal) → customer_wide.amount"></div></div>
+      <div><div class="dim" style="margin-bottom:4px">变更类型</div>
+        <select style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px"><option>改语义 / 删列</option><option>改密级</option><option>源字段下线</option></select></div>
+      <button class="btn primary">分析</button>
+    </div>
+    <div style="background:var(--orange-weak);border:1px solid #ffd591;color:#ad4e00;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:10px">
+      ⚠️ 系统B 同步任务 #21 的 bal 下线 → 命中 amount 的<b>合流边 ②</b>(非唯一来源, 由 ①②③ 共同供数)→ 直接下游受影响: 订阅 #34/#47; 长链路经金额档影响 BI; amount 变为"双源"需评估口径。
+    </div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="sec">第 1 层 · 直接(4)</div>
+      <div class="impcard"><div class="i1">📮 契约 #34 大额日快照 <span class="tag t-orange">列命中</span><span style="margin-left:auto" class="dim">dwh-batch</span></div><div class="i2">6 列视图 · 合流边②移除后 amount 仍由①③供给, 数值口径受影响</div></div>
+      <div class="impcard"><div class="i1">📮 契约 #47 人群宽表 <span class="tag t-orange">列命中</span></div><div class="i2">回表 amount</div></div>
+      <div class="impcard"><div class="i1">⬇️ 湖表快照 <span class="tag t-blue">表级</span></div></div>
+      <div class="impcard"><div class="i1">规则 r1 金额档 <span class="tag t-purple">依赖 amount</span></div><div class="i2">标签事实将重算</div></div>
+    </div>
+    <div class="card">
+      <div class="sec">第 2 层 · 经长链路(2)</div>
+      <div class="impcard" style="border-left-color:var(--purple)"><div class="i1">📊 BI 客户经营分析 <span class="tag t-gray">预留</span></div><div class="i2">路径: bal → amount → r1 金额档 → dws_customer_weekly → BI</div></div>
+      <div class="impcard" style="border-left-color:var(--orange)"><div class="i1">🎯 金额档圈选订阅 ×3 <span class="tag t-cyan">间接</span></div></div>
+      <div class="sec" style="margin-top:14px">动作</div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:6px">通知: 契约 #34/#47 owner、BI(预留)、任务 #21 owner</div>
+      <div style="display:flex;gap:8px"><button class="btn primary sm">生成变更通知单</button><button class="btn sm">仅审计</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ④ 变更通知单 ================= -->
+<div class="view" id="n">
+  <div class="toolbar"><span class="dim" style="margin-right:auto">共 3 张 · 结构探测器 + 影响分析生成</span><span style="border:1px solid var(--border);border-radius:14px;padding:2px 10px;background:#fff">全部</span><span style="border:1px solid var(--border);border-radius:14px;padding:2px 10px;background:#fff">待确认 1</span><span style="border:1px solid var(--border);border-radius:14px;padding:2px 10px;background:#fff">已确认 2</span></div>
+  <div class="ncard"><div class="l"><b>#N-1024 · customer_wide.amount 口径变更(合流边②下线评估)</b><span class="dim">2026-09-09 04:35 · admin · 收件: dwh-batch / mkt-ext / 任务#21 owner / BI(预留)· 路径 5 条</span></div><div class="r"><span class="tag t-orange">待确认 2/4</span><button class="btn sm">详情</button></div></div>
+  <div class="ncard"><div class="l"><b>#N-1018 · t_user_base.phone 源脱敏计划</b><span class="dim">自动(敏感路径)· 湖表快照明文</span></div><div class="r"><span class="tag t-green">已确认</span><button class="btn sm">详情</button></div></div>
+  <div class="ncard"><div class="l"><b>#N-1011 · 契约 #34 到期续期提醒</b><span class="dim">自动(生命周期)</span></div><div class="r"><span class="tag t-green">已确认</span><button class="btn sm">详情</button></div></div>
+  <div class="foot">通知单: 落库 + 审计 + 页面回执; 下游应用持续增加(检索/BI…)后, 影响路径集与收件人由血缘图自动推导。</div>
+</div>
+
+</div>
+<script>
+document.getElementById('nav').addEventListener('click',e=>{const n=e.target.closest('.ni');if(!n)return;
+  document.querySelectorAll('.ni').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  n.classList.add('on');document.getElementById(n.dataset.v).classList.add('on');});
+</script>
+</body>
+</html>
