@@ -532,7 +532,7 @@ public class TagEngineService {
         String mode = str(body.getOrDefault("mode", "batch"));
         String dataset = str(body.get("dataset"));
         if (name.isEmpty()) throw new IllegalArgumentException("任务名称必填");
-        if (!"batch".equals(mode) && !"online".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online(P0 批 + P1 在线; 流 stream 待 Flink 执行器)");
+        if (!"batch".equals(mode) && !"online".equals(mode) && !"stream".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online|stream");
         if (dataset.isEmpty()) throw new IllegalArgumentException("数据集(逻辑表)必填");
         String rawKey = str(body.getOrDefault("entityKey", "id")).trim();
         final String entityKey = rawKey.isEmpty() ? "id" : rawKey;
@@ -581,7 +581,7 @@ public class TagEngineService {
         String name = str(body.getOrDefault("name", exist.get("name"))).trim();
         String mode = str(body.getOrDefault("mode", exist.get("mode")));
         String dataset = str(body.getOrDefault("dataset", exist.get("dataset")));
-        if (!"batch".equals(mode) && !"online".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online(P0 批 + P1 在线; 流 stream 待 Flink 执行器)");
+        if (!"batch".equals(mode) && !"online".equals(mode) && !"stream".equals(mode)) throw new IllegalArgumentException("模式仅支持 batch|online|stream");
         String entityKey = str(body.getOrDefault("entityKey", exist.get("entityKey"))).trim();
         if (entityKey.isEmpty()) entityKey = "id";
         JsonNode bindings = toNode(body.get("bindings"));
