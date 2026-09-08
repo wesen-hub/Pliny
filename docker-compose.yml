@@ -269,6 +269,33 @@ services:
     ports:
       - "6379:6379"
 
+  # 打标流执行 Flink(P1): 事件流 → Drools → 双写(Redis 在线 + 投影事实层)
+  flink-jobmanager:
+    image: flink:1.18.1-java17
+    container_name: dcp-flink-jm
+    restart: unless-stopped
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+      - TZ=Asia/Shanghai
+    ports:
+      - "8084:8081"
+  flink-taskmanager:
+    image: flink:1.18.1-java17
+    container_name: dcp-flink-tm
+    restart: unless-stopped
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+      - TZ=Asia/Shanghai
+
   # 数据面 TiDB(单节点, MySQL 协议); 切换: SYNC_TARGET_URL=jdbc:mysql://tidb:4000/target_db...
   # 水平扩容实测: 第二个消费者实例(同镜像/同 group, Kafka rebalance 自动分摊分区)
   backend2:
