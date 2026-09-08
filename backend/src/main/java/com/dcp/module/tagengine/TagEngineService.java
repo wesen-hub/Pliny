@@ -1205,4 +1205,53 @@ public class TagEngineService {
             return null;
         }
     }
+
+    /* ---------- 标签服务查询(投影表 tag_fact_view; 湖 tag_fact 权威, 投影为圈选/订阅查询面) ---------- */
+
+    public List<Map<String, Object>> labelSummary() {
+        List<Map<String, Object>> rows = metaJdbc.queryForList(
+                "SELECT tag, COUNT(DISTINCT entity) AS entities, MAX(run_ts) AS lastRun FROM tag_fact_view GROUP BY tag ORDER BY tag");
+        // tag_fact_view 不存在(还没跑过带投影的轮次) → 空列表而非报错
+        return rows;
+    }
+
+    public Map<String, Object> labelCircle(String tagPath, String value, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT entity, MAX(value) AS value FROM tag_fact_view WHERE tag=?");
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(tagPath);
+        if (value != null && !value.isBlank()) {
+            sql.append(" AND value=?");
+            args.add(value);
+        }
+        sql.append(" GROUP BY entity ORDER BY entity LIMIT ?");
+        args.add(limit);
+        List<Map<String, Object>> rows;
+        try {
+            rows = metaJdbc.queryForList(sql.toString(), args.toArray());
+        } catch (org.springframework.dao.DataAccessException e) {
+            throw new IllegalArgumentException("标签视图不可用(投影表未建/未同步): " + e.getMessage()
+                    + " —— 请先跑一轮带 tagFactView 配置的打标任务");
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("tagPath", tagPath);
+        out.put("value", value == null || value.isBlank() ? null : value);
+        out.put("count", rows.size());
+        out.put("entities", rows);
+        return out;
+    }
+
+    public Map<String, Object> labelEntity(String entityKey) {
+        List<Map<String, Object>> rows;
+        try {
+            rows = metaJdbc.queryForList(
+                    "SELECT task_id, tag, value, run_ts FROM tag_fact_view WHERE entity=? ORDER BY tag", entityKey);
+        } catch (org.springframework.dao.DataAccessException e) {
+            throw new IllegalArgumentException("标签视图不可用(投影表未建/未同步): " + e.getMessage());
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("entity", entityKey);
+        out.put("count", rows.size());
+        out.put("labels", rows);
+        return out;
+    }
 }

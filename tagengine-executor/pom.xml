@@ -9,7 +9,7 @@
                                  不直接 import iceberg 类, 接湖语义由运行时 provider 决定(接口注释见 TagBatchJob)
     drools-engine 8.44.x(Java17 兼容版, javax 系)  scope=compile —— 打进 shade jar
     jackson-databind                              scope=compile —— 任务 JSON 解析
-    mysql-connector-j —— 本期不做(run 记录回写留 TODO, 见 README 遗留清单)
+    mysql-connector-j                             scope=compile —— 标签服务投影 tag_fact_view 写 TiDB(订阅/圈选查询面, P1)
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -76,6 +76,13 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- MySQL/TiDB JDBC: 标签服务投影写(projection sink); lakesync 同款版本 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.3.0</version>
         </dependency>
     </dependencies>
 

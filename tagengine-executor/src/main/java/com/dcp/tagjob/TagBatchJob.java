@@ -8,6 +8,7 @@ import com.dcp.tagjob.run.MatrixAccumulator;
 import com.dcp.tagjob.run.PartitionEvaluator;
 import com.dcp.tagjob.spark.DatasetAssembly;
 import com.dcp.tagjob.spark.IncrementalSnapshot;
+import com.dcp.tagjob.spark.TagFactViewWriter;
 import com.dcp.tagjob.spark.TagFactWriter;
 import com.dcp.tagjob.util.Log;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -140,6 +141,8 @@ public final class TagBatchJob {
                 } else {
                     TagFactWriter.write(dedup, spark, cfg, cfg.taskId);
                 }
+                // 标签服务投影(P1): tag_fact 当前值 → JDBC tag_fact_view(订阅/圈选查询面)
+                TagFactViewWriter.write(dedup, cfg, cfg.taskId, incr.active ? incr : null);
                 Log.info("[tag_fact] 写行数=" + written + (incr.active ? "(增量轮)" : ""));
             }
 

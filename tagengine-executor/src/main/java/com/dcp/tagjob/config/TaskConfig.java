@@ -147,6 +147,25 @@ public class TaskConfig {
 
     public Incremental incremental = new Incremental();
 
+    /**
+     * 标签服务投影(§9 P1): 打标结果当前值投影到 JDBC 表(TiDB), 供订阅/圈选/实体查标签实时查询。
+     * 湖 tag_fact 仍为权威+历史(time travel), 投影 = 可查副本(每轮全量/实体级覆盖同步)。
+     * 缺省(空 url) = 不投影(纯湖模式)。
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ViewRef {
+        public String url;          // jdbc:mysql://host:port/dcp?...(TiDB/MySQL 元库同库, 写 tag_fact_view)
+        public String user = "root";
+        public String password;
+        public String table = "tag_fact_view";
+
+        public boolean enabled() {
+            return url != null && !url.isBlank();
+        }
+    }
+
+    public ViewRef tagFactView = new ViewRef();
+
     private static boolean notBlank(String s) {
         return s != null && !s.isBlank();
     }
