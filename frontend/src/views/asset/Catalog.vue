@@ -27,22 +27,22 @@
       </div>
       <!-- 右: 资产列表 -->
       <div class="cat-list">
-        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="openDetail" :header-cell-style="{ background: '#f7f9fc', color: '#4a5568', fontWeight: 600 }" :cell-style="{ padding: '6px 8px' }">
+        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="goDetail" :header-cell-style="{ background: '#f7f9fc', color: '#4a5568', fontWeight: 600 }" :cell-style="{ padding: '6px 8px' }">
           <el-table-column width="44" align="center">
             <template #default="{ row }">
               <el-button size="small" text :type="row.fav ? 'warning' : 'info'" title="收藏" @click="toggleFav(row)" style="font-size:15px;padding:0">{{ row.fav ? '★' : '☆' }}</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="资产" min-width="170" show-overflow-tooltip>
+          <el-table-column label="资产" width="200" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="t-name" @click="openDetail(row)">{{ row.label }}</span>
+              <span class="t-name" @click="goDetail(row)">{{ row.label }}</span>
               <span class="kind-badge">{{ row.kind || 'physical' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="层 · 域" min-width="96" show-overflow-tooltip>
+          <el-table-column label="层 · 域" width="108" show-overflow-tooltip>
             <template #default="{ row }"><span class="dim2">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></span></template>
           </el-table-column>
-          <el-table-column label="数据来源" min-width="130" show-overflow-tooltip>
+          <el-table-column label="数据来源" width="150" show-overflow-tooltip>
             <template #default="{ row }">
               <template v-if="row.sources.length">
                 <span class="src-chip" v-for="s in row.sources.slice(0, 2)" :key="s">{{ s }}</span>
@@ -51,7 +51,7 @@
               <span v-else class="dim2">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="fields" label="字段" width="58" align="center" />
+          <el-table-column prop="fields" label="字段" width="56" align="center"><template #default="{ row }"><span :title="row.label + ' 字段数'">{{ row.fields }}</span></template></el-table-column>
           <el-table-column prop="jobs" label="任务" width="58" align="center" />
           <el-table-column prop="rules" label="规则" width="58" align="center" />
           <el-table-column label="订阅应用" width="72" align="center">
@@ -62,41 +62,16 @@
               <span v-else class="dim2">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="196" align="left">
+          <el-table-column label="操作" width="215" fixed="right" align="left">
             <template #default="{ row }">
               <el-button size="small" type="primary" plain @click="goLineage(row)">血缘</el-button>
               <el-button size="small" type="warning" plain @click="goLineage(row, 'i')">影响</el-button>
-              <el-button size="small" plain @click="openDetail(row)">详情</el-button>
+              <el-button size="small" plain @click="goDetail(row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
       </div>
     </div>
-
-    <!-- 详情抽屉 -->
-    <el-drawer v-model="dlg" :title="cur ? '📄 ' + cur.label : ''" size="520px">
-      <template v-if="cur">
-        <div class="dim2" style="margin-bottom:8px">{{ cur.layer || '' }} {{ cur.kind || '' }}<template v-if="cur.domain"> · {{ cur.domain }}</template> · 数据来源: {{ cur.sources.join(', ') || '—' }}</div>
-        <el-descriptions :column="2" size="small" border>
-          <el-descriptions-item label="字段">{{ cur.fields }}</el-descriptions-item>
-          <el-descriptions-item label="上游任务">{{ cur.jobs || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="依赖规则">{{ cur.rules || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="订阅应用">{{ cur.apps || '—' }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="sec" style="margin-top:12px">字段列表</div>
-        <el-table :data="fieldsOf(cur)" size="small" border max-height="240">
-          <el-table-column prop="name" label="字段" width="130" />
-          <el-table-column prop="k" label="类型/说明" />
-        </el-table>
-        <div class="sec" style="margin-top:12px">操作</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <el-button size="small" type="primary" plain @click="goLineage(cur)">进入血缘图谱(锚定本表)</el-button>
-          <el-button size="small" type="warning" plain @click="goLineage(cur, 'i')">影响分析</el-button>
-          <el-button size="small" @click="subscribe(cur)">订阅此表 →</el-button>
-        </div>
-        <div class="dim2" style="margin-top:8px">字段密级🔒/敏感 mask/样例预览 = P1(接 data_policy); Owner/业务描述 = P1(data_asset 主档); 人工打标 = P0 绑定 API</div>
-      </template>
-    </el-drawer>
   </div>
 </template>
 
@@ -116,8 +91,6 @@ const tk2 = ref('')
 const favOnly = ref(false)
 const curTag = ref('')
 const curPath = ref('')
-const dlg = ref(false)
-const cur = ref(null)
 const FAV_KEY = 'dcp_catalog_favs'
 const favs = ref([])
 
@@ -204,10 +177,6 @@ function onTag(data) {
   curTag.value = data.id === 'all' ? '' : data.id
   curPath.value = data.name
 }
-function fieldsOf(row) {
-  return L.edges.filter(e => e.type === 'CONTAINS' && e.from === row.id)
-    .map(e => { const f = byId.value[e.to]; return { name: (f || {}).label || '', k: '' } }).filter(x => x.name && !x.name.startsWith('_'))
-}
 /* ============ 收藏 ============ */
 function toggleFav(row) {
   const i = favs.value.indexOf(row.label)
@@ -222,7 +191,7 @@ function subscribe(row) {
   ElMessage.success('跳转订阅中心新建契约(视图预填 ' + row.label + ')—后端预填 P1')
   setTimeout(() => router.push({ path: '/datasub', query: { t: row.label } }), 300)
 }
-function openDetail(row) { cur.value = row; dlg.value = true }
+function goDetail(row) { router.push({ path: '/asset/detail/' + encodeURIComponent(row.label), query: { t: row.label } }) }
 onMounted(() => { favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); reload() })
 </script>
 

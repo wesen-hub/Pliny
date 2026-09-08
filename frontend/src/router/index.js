@@ -33,7 +33,8 @@ const routes = [
       { path: 'ingest/app', name: 'ingest-app', component: () => import('../views/ingest/AppList.vue'), meta: { title: '事件接入' } },
       { path: 'ingest/app/:appKey', name: 'ingest-app-detail', component: () => import('../views/ingest/AppDetail.vue'), meta: { title: '接入应用监控', active: 'ingest-app' } },
       // ---------- 数据资产(目录/血缘/详情) ----------
-      { path: 'asset/catalog', name: 'asset-catalog', component: () => import('../views/asset/Catalog.vue'), meta: { title: '资产目录' } },
+      { path: 'asset/catalog', name: 'asset-catalog', component: () => import('../views/asset/Catalog.vue'), meta: { title: '资产目录', active: 'asset-catalog' } },
+      { path: 'asset/detail/:name', name: 'asset-detail2', component: () => import('../views/asset/AssetDetail.vue'), meta: { title: '资产详情', active: 'asset-catalog' } },
       { path: 'asset/lineage', name: 'asset-lineage', component: () => import('../views/asset/Lineage.vue'), meta: { title: '数据血缘', active: 'asset-lineage' } },
       { path: 'asset/:id', name: 'asset-detail', component: () => import('../views/asset/Detail.vue'), meta: { title: '资产详情', active: 'asset-catalog' } },
       // ---------- 标签管理 ----------
