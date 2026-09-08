@@ -83,9 +83,10 @@ public class TagTaskController {
     @PostMapping("/{id}/run")
     public ApiResponse<Map<String, Object>> run(@PathVariable long id,
                                                 @RequestParam(required = false) String trigger,
-                                                @RequestParam(required = false, defaultValue = "false") boolean full) {
+                                                @RequestParam(required = false, defaultValue = "false") boolean full,
+                                                @RequestParam(required = false, defaultValue = "false") boolean matrix) {
         try {
-            return ApiResponse.ok(service.startRun(id, trigger == null ? "manual" : trigger, full));
+            return ApiResponse.ok(service.startRun(id, trigger == null ? "manual" : trigger, full, matrix));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
         }
