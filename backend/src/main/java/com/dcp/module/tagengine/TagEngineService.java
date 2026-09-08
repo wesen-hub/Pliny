@@ -157,6 +157,9 @@ public class TagEngineService {
         try {
             metaJdbc.execute("ALTER TABLE tag_run ADD COLUMN cursor_after TEXT NULL");
         } catch (DataAccessException ignored) { /* 已存在 */ }
+        try {
+            metaJdbc.execute("ALTER TABLE tag_run ADD COLUMN payload_text MEDIUMTEXT NULL COMMENT 'task-json 全文(落库, 容器重建不丢)'");
+        } catch (DataAccessException ignored) { /* 已存在 */ }
         /* P1.2 订阅推送(§17.7④): 订阅=标签条件; tag_notify=执行端标签变更审计(每 entity+tag+task 最新一次) */
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_subscription ("
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
@@ -846,11 +849,12 @@ public class TagEngineService {
             KeyHolder kh = new GeneratedKeyHolder();
             metaJdbc.update(con -> {
                 PreparedStatement ps = con.prepareStatement(
-                        "INSERT INTO tag_run(task_id,task_name,trigger_type,status) VALUES(?,?,?,'submitted')",
+                        "INSERT INTO tag_run(task_id,task_name,trigger_type,status,payload_text) VALUES(?,?,?,'submitted',?)",
                         Statement.RETURN_GENERATED_KEYS);
                 ps.setLong(1, taskId);
                 ps.setString(2, (String) task.get("name"));
                 ps.setString(3, trigger == null || trigger.isBlank() ? "manual" : trigger);
+                ps.setString(4, json);
                 return ps;
             }, kh);
             long runId = ((Number) kh.getKey()).longValue();
@@ -966,7 +970,7 @@ public class TagEngineService {
 
     public Map<String, Object> getRun(long runId) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,task_id,task_name,trigger_type,status,payload_path,submit_cmd,exit_code,summary_json,matrix_json,cursor_after,error_msg,started_at,finished_at FROM tag_run WHERE id=?",
+                "SELECT id,task_id,task_name,trigger_type,status,payload_path,payload_text,submit_cmd,exit_code,summary_json,matrix_json,cursor_after,error_msg,started_at,finished_at FROM tag_run WHERE id=?",
                 runId);
         if (rows.isEmpty()) throw new IllegalArgumentException("run 不存在 id=" + runId);
         Map<String, Object> m = new LinkedHashMap<>(rows.get(0));
@@ -974,16 +978,21 @@ public class TagEngineService {
         m.remove("summary_json");
         m.put("matrix", m.get("matrix_json") == null ? null : jnode((String) m.get("matrix_json")));
         m.remove("matrix_json");
+        // payload 优先读库(落库后容器重建不丢); 旧记录无库值 → 兜底文件
+        String pt = (String) m.get("payload_text");
         String path = (String) m.get("payload_path");
-        if (path != null) {
-            try {
-                String txt = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
-                if (txt.length() > 300000) txt = txt.substring(0, 300000) + "...(截断)";
-                m.put("payloadText", txt);
-            } catch (IOException ignore) {
-                m.put("payloadText", null);
+        if (pt == null || pt.isBlank()) {
+            if (path != null) {
+                try {
+                    pt = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
+                } catch (IOException ignore) {
+                    pt = null;
+                }
             }
         }
+        if (pt != null && pt.length() > 300000) pt = pt.substring(0, 300000) + "...(截断)";
+        m.remove("payload_text");
+        m.put("payloadText", pt);
         return m;
     }
 
