@@ -195,14 +195,6 @@ const q = ref('')
 /* 矩阵展示形态: 表格 / 树状 / 脑图 */
 const fmt = ref('table')
 const tp = { children: 'children', label: 'label' }
-const treeData = (() => {
-  const map = {}
-  matrix.forEach(r => {
-    if (!map[r.target]) map[r.target] = { kind: 'field', label: r.target, sec: r.secret, merge: r.mergeLabel || '', children: [] }
-    map[r.target].children.push({ kind: 'edge', tag: r.tag || '', tagType: r.tagType, src: r.src, task: r.task, t: r.t, rule: r.rule, strategy: r.strategy || '' })
-  })
-  return [{ kind: 'asset', label: 'customer_wide (逻辑表)', sec: 'L2', children: Object.values(map) }]
-})()
 /* 通知动作 */
 const n1 = ref(true); const n2 = ref(true); const n3 = ref(true); const n4 = ref(true)
 const note = ref('amount 由"消费金额"改为"净支付额(含退款)" — 口径变化, schema 不变')
@@ -285,6 +277,14 @@ const matrix = [
   { target: 'region', src: 't_user_base.region', task: '系统A · 同步 #12', t: '直映射', rule: 'VARCHAR', secret: 'L1' },
   { target: 'status', src: 't_user_base.status', task: '系统A · 同步 #12', t: '直映射', rule: '枚举', secret: 'L1' }
 ]
+const treeData = (() => {
+  const map = {}
+  matrix.forEach(r => {
+    if (!map[r.target]) map[r.target] = { kind: 'field', label: r.target, sec: r.secret, merge: r.mergeLabel || '', children: [] }
+    map[r.target].children.push({ kind: 'edge', tag: r.tag || '', tagType: r.tagType, src: r.src, task: r.task, t: r.t, rule: r.rule, strategy: r.strategy || '' })
+  })
+  return [{ kind: 'asset', label: 'customer_wide (逻辑表)', sec: 'L2', children: Object.values(map) }]
+})()
 const _mg = {}
 matrix.forEach((r, i) => { if (!(r.target in _mg)) _mg[r.target] = { start: i, len: 0 }; _mg[r.target].len++ })
 function mSpan({ row, rowIndex, columnIndex }) {
