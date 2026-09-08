@@ -175,7 +175,9 @@ async function reload(rebuild) {
   try {
     if (rebuild) await request.post('/lineage/rebuild', {})
     const d = await request.get('/lineage/graph')
-    L.nodes = d.nodes || []; L.edges = d.edges || []
+    L.nodes = d.nodes || []
+    // 后端 graph 边键为 from/to; 前端统一为 f/to
+    L.edges = (d.edges || []).map(e => ({ ...e, f: e.f || e.from, to: e.to }))
     loaded.value = true
     const tbs = L.nodes.filter(n => n.type === 'Table')
     if (tbs.length && !mTable.value) { mTable.value = tbs[0].id; iTable.value = tbs[0].id; tTable.value = tbs[0].id }
