@@ -97,7 +97,7 @@ public class LineageService {
         List<Map<String, Object>> mappings = meta.queryForList(
                 "SELECT job_id, source_field, target_field, transform_type FROM field_mapping");
         List<Map<String, Object>> contracts = meta.queryForList(
-                "SELECT id, name, subscriber, view_json FROM data_contract WHERE status IN ('active','pending')");
+                "SELECT id, name, subscriber, view_type, view_json FROM data_contract WHERE status IN ('active','pending')");
         Set<String> tableIds = new HashSet<>();
         tables.forEach(t -> tableIds.add("table:" + t.get("name")));
 
@@ -160,7 +160,118 @@ public class LineageService {
                     tx.run("MATCH (j:Job {id:$jid}), (f:Field {id:$fid}) MERGE (j)-[r:FIELD_MAPPING]->(f) SET r.sourceField=$sf, r.targetField=$tf, r.transform=$tr",
                             Map.of("jid", jid, "fid", fid, "sf", s(m.get("source_field")), "tf", tf, "tr", s(m.get("transform_type"))));
                 }
-                // 订阅消费(表级; 字段级引用列 P1)
+                // ---- P1: 模型/逻辑表同步任务(多源合流: 同 logical_table 多条 cdc_st_task) ----
+                Map<String, String> dsName = new HashMap<>();
+                meta.queryForList("SELECT id, name, host FROM datasource_config").forEach(d -> dsName.put(s(d.get("id")), s(d.get("name")) + "@" + s(d.get("host"))));
+                Set<String> syncJob = new HashSet<>();
+                for (Map<String, Object> st : meta.queryForList("SELECT sync_task_id, logical_table, datasource_id, source_db, source_table FROM cdc_st_task")) {
+                    String lt = s(st.get("logical_table"));
+                    if (lt.isBlank() || !tableIds.contains("table:" + lt)) continue;
+                    String jkey = "job:sync:" + (s(st.get("sync_task_id")).equals("0") ? "cdc" : s(st.get("sync_task_id"))) + ":" + lt + ":" + s(st.get("source_table"));
+                    tx.run("MERGE (j:Job {id:$id}) SET j.name=$n, j.type='sync', j.srcTable=$st2, j.dstTable=$lt",
+                            Map.of("id", jkey, "n", s(st.get("source_table")) + " → " + lt, "st2", s(st.get("source_table")), "lt", lt));
+                    if (st.get("datasource_id") != null) {
+                        String sid = "ds:" + st.get("datasource_id");
+                        tx.run("MERGE (d:Source {id:$id}) SET d.name=$n", Map.of("id", sid, "n", dsName.getOrDefault(s(st.get("datasource_id")), s(st.get("datasource_id")))));
+                        tx.run("MATCH (d:Source {id:$did}),(j:Job {id:$jid}) MERGE (d)-[:SOURCE]->(j)", Map.of("did", sid, "jid", jkey));
+                    }
+                    tx.run("MATCH (j:Job {id:$jid}),(t:Table {id:$tid}) MERGE (j)-[:SOURCE_OF]->(t)", Map.of("jid", jkey, "tid", "table:" + lt));
+                    syncJob.add(jkey);
+                }
+                // sync_task 的字段级映射 JSON(source.srcTable/srcField → modelField)
+                for (Map<String, Object> st : meta.queryForList("SELECT id, logical_table, datasource_id, field_mapping FROM sync_task")) {
+                    String lt = s(st.get("logical_table"));
+                    if (lt.isBlank() || !tableIds.contains("table:" + lt)) continue;
+                    String jkey = "job:sync:" + st.get("id") + ":" + lt;
+                    tx.run("MERGE (j:Job {id:$id}) SET j.name=$n, j.type='sync'", Map.of("id", jkey, "n", "sync#" + st.get("id") + " " + lt));
+                    if (st.get("datasource_id") != null) {
+                        String sid = "ds:" + st.get("datasource_id");
+                        tx.run("MERGE (d:Source {id:$id}) SET d.name=$n", Map.of("id", sid, "n", dsName.getOrDefault(s(st.get("datasource_id")), "")));
+                        tx.run("MATCH (d:Source {id:$did}),(j:Job {id:$jid}) MERGE (d)-[:SOURCE]->(j)", Map.of("did", sid, "jid", jkey));
+                    }
+                    tx.run("MATCH (j:Job {id:$jid}),(t:Table {id:$tid}) MERGE (j)-[:SOURCE_OF]->(t)", Map.of("jid", jkey, "tid", "table:" + lt));
+                    try {
+                        JsonNode maps = OM.readTree((String) st.get("field_mapping"));
+                        if (maps.isArray()) {
+                            for (JsonNode m : maps) {
+                                String mf = m.path("modelField").asText("");
+                                if (mf.isBlank()) continue;
+                                JsonNode src = m.path("source");
+                                String sf = src.path("srcField").asText("");
+                                String srcT = src.path("srcTable").asText("");
+                                String fid = "field:" + lt + "." + mf;
+                                tx.run("MATCH (j:Job {id:$jid}), (f:Field {id:$fid}) MERGE (j)-[r:FIELD_MAPPING]->(f) SET r.sourceField=$sf, r.sourceTable=$st2, r.targetField=$mf, r.transform='sync-map'",
+                                        Map.of("jid", jkey, "fid", fid, "sf", sf, "st2", srcT, "mf", mf));
+                            }
+                        }
+                    } catch (Exception ignore) { }
+                }
+                // ---- P1: 打标任务 → 派生列写回(DERIVED_FROM) + 规则 DEPENDS_ON + 规则产出标签(Tag) ----
+                List<Map<String, Object>> rules = meta.queryForList("SELECT id, name, kind, deps_json FROM tag_rule WHERE status=1 OR status='1'");
+                Map<Long, List<String>> ruleDeps = new HashMap<>();
+                Map<Long, String> ruleName = new HashMap<>();
+                for (Map<String, Object> r : rules) {
+                    Long rid = ((Number) r.get("id")).longValue();
+                    ruleName.put(rid, s(r.get("name")));
+                    List<String> deps = new ArrayList<>();
+                    try { OM.readTree((String) r.get("deps_json")).forEach(x -> deps.add(x.asText())); } catch (Exception ignore) { }
+                    ruleDeps.put(rid, deps);
+                }
+                List<String> factTags = new ArrayList<>();
+                meta.queryForList("SELECT DISTINCT tag FROM tag_fact_view").forEach(t -> factTags.add(s(t.get("tag"))));
+                // 规则资产独立节点(先于任务绑定创建, 未绑定任务也在图: 规则库资产)
+                for (Long rid : ruleName.keySet()) {
+                    tx.run("MERGE (r:Rule {id:$id}) SET r.name=$n", Map.of("id", "rule:" + rid, "n", ruleName.get(rid)));
+                }
+                for (Map<String, Object> tt : meta.queryForList("SELECT id, name, dataset, derived_json, bindings_json FROM tag_task")) {
+                    String ds = s(tt.get("dataset"));
+                    if (ds.isBlank() || !tableIds.contains("table:" + ds)) continue;
+                    String jkey = "job:tag:" + tt.get("id");
+                    tx.run("MERGE (j:Job {id:$id}) SET j.name=$n, j.type='tag', j.dstTable=$ds", Map.of("id", jkey, "n", s(tt.get("name")), "ds", ds));
+                    tx.run("MATCH (j:Job {id:$jid}),(t:Table {id:$tid}) MERGE (j)-[:DERIVED_FROM]->(t)", Map.of("jid", jkey, "tid", "table:" + ds));
+                    // 派生列写回
+                    try {
+                        JsonNode dv = OM.readTree((String) tt.get("derived_json"));
+                        if (dv.isArray()) {
+                            for (JsonNode d : dv) {
+                                String dn = d.path("name").asText("");
+                                if (dn.isBlank()) continue;
+                                tx.run("MATCH (j:Job {id:$jid}), (f:Field {id:$fid}) MERGE (j)-[r:FIELD_MAPPING]->(f) SET r.targetField=$dn, r.transform=$tr",
+                                        Map.of("jid", jkey, "fid", "field:" + ds + "." + dn, "dn", dn, "tr", "derived:" + d.path("func").asText("") + "(" + d.path("field").asText("") + ")"));
+                            }
+                        }
+                    } catch (Exception ignore) { }
+                    // 任务绑定规则 → 规则依赖字段(挂 dataset 表字段)
+                    List<Long> bound = new ArrayList<>();
+                    try {
+                        JsonNode bj = OM.readTree((String) tt.get("bindings_json"));
+                        if (bj.isArray()) bj.forEach(b -> { if (b.path("id").canConvertToLong()) bound.add(b.path("id").asLong()); });
+                    } catch (Exception ignore) { }
+                    for (Long rid : bound) {
+                        if (!ruleName.containsKey(rid)) continue;
+                        tx.run("MATCH (j:Job {id:$jid}),(r:Rule {id:$rid}) MERGE (j)-[:USES_RULE]->(r)", Map.of("jid", jkey, "rid", "rule:" + rid));
+                        for (String dep : ruleDeps.getOrDefault(rid, List.of())) {
+                            if (dep.isBlank()) continue;
+                            tx.run("MATCH (r:Rule {id:$rid}),(f:Field {id:$fid}) MERGE (r)-[:DEPENDS_ON]->(f)",
+                                    Map.of("rid", "rule:" + rid, "fid", "field:" + ds + "." + dep));
+                        }
+                    }
+                }
+                // 规则产出标签 Tag(启发式: 规则名与事实标签名匹配; Tag 节点 + PRODUCES)
+                for (Long rid : ruleName.keySet()) {
+                    String nm = ruleName.get(rid);
+                    if (nm.isBlank()) continue;
+                    for (String tg : factTags) {
+                        String seg = tg.contains("/") ? tg.substring(tg.lastIndexOf('/') + 1) : tg;
+                        boolean hit = nm.contains(seg) || seg.contains(nm) || commonPrefix(nm, seg).length() >= 3;
+                        if (hit) {
+                            tx.run("MERGE (t:Tag {id:$tid}) SET t.name=$tn", Map.of("tid", "tag:" + tg, "tn", tg));
+                            tx.run("MATCH (r:Rule {id:$rid}),(t:Tag {id:$tid}) MERGE (r)-[:PRODUCES]->(t)", Map.of("rid", "rule:" + rid, "tid", "tag:" + tg));
+                            break;
+                        }
+                    }
+                }
+                // 订阅: logical→Table; tag→Tag
                 for (Map<String, Object> c : contracts) {
                     String aid = "contract:" + c.get("id");
                     tx.run("MERGE (a:App {id:$id}) SET a.name=$n, a.kind='SUBSCRIBE', a.subscriber=$sub",
@@ -174,6 +285,15 @@ public class LineageService {
                                         Map.of("aid", aid, "tid", "table:" + tb));
                             }
                         });
+                        if ("tag".equals(s(c.get("view_type")))) {
+                            view.path("tags").forEach(tg -> {
+                                String path = tg.path("path").asText("");
+                                if (!path.isBlank()) {
+                                    tx.run("MERGE (t:Tag {id:$tid}) SET t.name=$tn", Map.of("tid", "tag:" + path, "tn", path));
+                                    tx.run("MATCH (a:App {id:$aid}),(t:Tag {id:$tid}) MERGE (a)-[:CONSUMES]->(t)", Map.of("aid", aid, "tid", "tag:" + path));
+                                }
+                            });
+                        }
                     } catch (Exception ignore) { }
                 }
                 tx.run("MATCH (f:Field) WHERE NOT (f)<-[:CONTAINS]-() WITH f LIMIT 200 DETACH DELETE f");
@@ -231,6 +351,12 @@ public class LineageService {
         return out;
     }
 
+    private static String commonPrefix(String a, String b) {
+        int i = 0;
+        while (i < a.length() && i < b.length() && a.charAt(i) == b.charAt(i)) i++;
+        return a.substring(0, i);
+    }
+
     /* ================= 查询(路径集, 不截断) ================= */
 
     /** 上游(溯源): b -[*]-> a ; 返回多条路径 */
@@ -253,9 +379,10 @@ public class LineageService {
     }
 
     private List<Map<String, Object>> paths(String id, int depth, boolean up) {
-        String cypher = up
-                ? "MATCH p=(b)-[r*1.." + depth + "]->(a) WHERE a.id=$id RETURN [x IN nodes(p)|{id:x.id,label:coalesce(x.name,x.subscriber,x.id),type:head(labels(x))}] AS ns, [x IN relationships(p)|{type:type(x),sourceField:x.sourceField,targetField:x.targetField,transform:x.transform}] AS rs LIMIT 200"
-                : "MATCH p=(a)-[r*1.." + depth + "]->(b) WHERE a.id=$id RETURN [x IN nodes(p)|{id:x.id,label:coalesce(x.name,x.subscriber,x.id),type:head(labels(x))}] AS ns, [x IN relationships(p)|{type:type(x),sourceField:x.sourceField,targetField:x.targetField,transform:x.transform}] AS rs LIMIT 200";
+        // 无向遍历(影响分析需双向可达消费方/源头), 每条关系保留原始方向供前端定向
+        String cypher = "MATCH p=(a {id:$id})-[r*1.." + depth + "]-(b) WHERE a<>b RETURN "
+                + "[x IN nodes(p)|{id:x.id,label:coalesce(x.name,x.subscriber,x.id),type:head(labels(x))}] AS ns, "
+                + "[x IN relationships(p)|{type:type(x),f:startNode(x).id,t:endNode(x).id,sourceField:x.sourceField,targetField:x.targetField,transform:x.transform}] AS rs LIMIT 500";
         List<Map<String, Object>> out = new ArrayList<>();
         try (Session se = session()) {
             se.executeRead(tx -> {
