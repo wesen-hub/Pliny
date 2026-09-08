@@ -1,76 +1,82 @@
 <template>
-  <div class="cat-page">
-    <div class="cat-card">
-      <div class="flex-between">
-        <div class="pg-title">数据资产目录<el-tag size="small" effect="plain" style="margin-left:8px" :type="loaded ? 'success' : 'warning'">{{ loaded ? '血缘图实时聚合(表资产 ' + rows.length + ')' : '加载中…' }}</el-tag></div>
-        <div class="flex" style="gap:8px">
-          <el-button size="small" :type="favOnly ? 'warning' : 'default'" @click="favOnly = !favOnly">★ 我的收藏 {{ favs.length }}</el-button>
-          <el-button size="small" type="primary" plain @click="reload()">刷新</el-button>
-        </div>
+  <div class="cat-wrap">
+    <div class="cat-head">
+      <div class="pg-title">数据资产目录
+        <el-tag size="small" effect="plain" style="margin-left:8px" :type="loaded ? 'success' : 'warning'">
+          {{ loaded ? '已连接 · 表资产 ' + tables.length : '加载中…' }}
+        </el-tag>
+      </div>
+      <div class="head-right">
+        <el-button size="small" :type="favOnly ? 'warning' : 'default'" @click="favOnly = !favOnly">★ 收藏({{ favs.length }})</el-button>
+        <el-button size="small" type="primary" plain :loading="loading" @click="load()">刷新</el-button>
       </div>
     </div>
+
     <div class="cat-body">
       <!-- 左: 标签目录 -->
-      <div class="cat-tree">
-        <div class="tree-head">🏷 标签目录</div>
-        <el-input v-model="tk2" size="small" placeholder="过滤资产…" clearable style="margin:6px 0" />
-        <el-tree :data="tagTree" node-key="id" default-expand-all highlight-current :props="tp" :expand-on-click-node="false" @node-click="onTag">
+      <aside class="side">
+        <div class="side-title">🏷 标签目录</div>
+        <el-tree :data="tree" node-key="id" default-expand-all highlight-current :expand-on-click-node="false" @node-click="onTag">
           <template #default="{ data }">
-            <span class="tnode">
-              <span>{{ data.name }}</span>
-              <el-tag v-if="data.count != null" size="small" effect="plain" style="margin-left:auto;border:none">{{ data.count }}</el-tag>
+            <span class="node-row">
+              <span class="node-name">{{ data.name }}</span>
+              <span v-if="data.count != null" class="node-count">{{ data.count }}</span>
             </span>
           </template>
         </el-tree>
-        <div class="dim2" style="margin-top:8px" v-if="curTag">当前筛选: <el-tag size="small" closable @close="curTag = ''; curPath = ''">{{ curPath }}</el-tag></div>
-        <div class="dim2" style="margin-top:4px">目录=标签(字典树)动态聚合 · 自动标签: 来源/层/类型; 业务域=人工打标(P0 绑定 API 后启用)</div>
-      </div>
-      <!-- 右: 资产列表 -->
-      <div class="cat-list">
-        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="goDetail" :header-cell-style="{ background: '#f7f9fc', color: '#4a5568', fontWeight: 600 }" :cell-style="{ padding: '6px 8px' }">
-          <el-table-column width="44" align="center">
+        <div class="side-note">点击标签筛选列表 · 自动标签: 分层/来源/类型; 业务域=人工打标(P0 API)</div>
+      </aside>
+
+      <!-- 右: 资产表格 -->
+      <section class="main">
+        <div class="bar">
+          <el-input v-model="kw" size="small" placeholder="搜索表名 / 层 / 域…" clearable style="width:240px">
+            <template #prefix>🔍</template>
+          </el-input>
+          <el-tag v-if="curTag" size="small" closable @close="curTag = ''">{{ curTag }}</el-tag>
+          <span class="bar-dim">双击行进详情 · 共 {{ list.length }} 张</span>
+        </div>
+        <el-table :data="list" size="small" border v-loading="loading" height="calc(100vh - 280px)" @row-dblclick="goDetail" style="width:100%">
+          <el-table-column label="收藏" width="46" align="center">
             <template #default="{ row }">
-              <el-button size="small" text :type="row.fav ? 'warning' : 'info'" title="收藏" @click="toggleFav(row)" style="font-size:15px;padding:0">{{ row.fav ? '★' : '☆' }}</el-button>
+              <el-button size="small" text :type="row.fav ? 'warning' : 'info'" @click.stop="toggleFav(row)" style="font-size:16px">{{ row.fav ? '★' : '☆' }}</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="资产" width="200" show-overflow-tooltip>
+          <el-table-column label="资产" width="190">
             <template #default="{ row }">
-              <span class="t-name" @click="goDetail(row)">{{ row.label }}</span>
-              <span class="kind-badge">{{ row.kind || 'physical' }}</span>
+              <div class="tname" @click.stop="goDetail(row)">{{ row.label }}</div>
+              <div class="tsub">{{ row.kind || 'physical' }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="层 · 域" width="108" show-overflow-tooltip>
-            <template #default="{ row }"><span class="dim2">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></span></template>
+          <el-table-column label="层 · 域" width="110" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></template>
           </el-table-column>
-          <el-table-column label="数据来源" width="150" show-overflow-tooltip>
+          <el-table-column label="数据来源" width="140" show-overflow-tooltip>
             <template #default="{ row }">
-              <template v-if="row.sources.length">
-                <span class="src-chip" v-for="s in row.sources.slice(0, 2)" :key="s">{{ s }}</span>
-                <span v-if="row.sources.length > 2" class="dim2">+{{ row.sources.length - 2 }}</span>
-              </template>
-              <span v-else class="dim2">—</span>
+              <span v-if="row.sources.length" class="chip">{{ row.sources.join('、') }}</span>
+              <span v-else class="dim">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="fields" label="字段" width="56" align="center"><template #default="{ row }"><span :title="row.label + ' 字段数'">{{ row.fields }}</span></template></el-table-column>
-          <el-table-column prop="jobs" label="任务" width="58" align="center" />
-          <el-table-column prop="rules" label="规则" width="58" align="center" />
-          <el-table-column label="订阅应用" width="72" align="center">
+          <el-table-column label="字段" prop="fields" width="60" align="center" />
+          <el-table-column label="任务" prop="jobs" width="60" align="center" />
+          <el-table-column label="规则" prop="rules" width="60" align="center" />
+          <el-table-column label="订阅" width="80" align="center">
             <template #default="{ row }">
-              <el-tooltip v-if="row.apps" :content="row.appsNames.join(', ')" placement="top">
-                <el-tag size="small" type="success" effect="plain" style="cursor:help">{{ row.apps }}</el-tag>
+              <el-tooltip v-if="row.apps" :content="row.appNames.join(', ')" placement="top">
+                <span class="app-num">{{ row.apps }}</span>
               </el-tooltip>
-              <span v-else class="dim2">—</span>
+              <span v-else class="dim">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="215" fixed="right" align="left">
+          <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" type="primary" plain @click="goLineage(row)">血缘</el-button>
-              <el-button size="small" type="warning" plain @click="goLineage(row, 'i')">影响</el-button>
-              <el-button size="small" plain @click="goDetail(row)">详情</el-button>
+              <el-button size="small" type="primary" plain @click.stop="goLineage(row)">血缘</el-button>
+              <el-button size="small" type="warning" plain @click.stop="goLineage(row, 'i')">影响</el-button>
+              <el-button size="small" plain @click.stop="goDetail(row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
-      </div>
+      </section>
     </div>
   </div>
 </template>
@@ -84,131 +90,138 @@ import request from '../../api/request'
 const router = useRouter()
 const loading = ref(false)
 const loaded = ref(false)
+const kw = ref('')
+const curTag = ref('')
+const favOnly = ref(false)
+const FAV_KEY = '***'
+const favs = ref([])
 const L = reactive({ nodes: [], edges: [] })
 const byId = computed(() => { const m = {}; L.nodes.forEach(n => { m[n.id] = n }); return m })
-const tk = ref('')
-const tk2 = ref('')
-const favOnly = ref(false)
-const curTag = ref('')
-const curPath = ref('')
-const FAV_KEY = 'dcp_catalog_favs'
-const favs = ref([])
 
-/* ============ 数据: 血缘图 Table 聚合 ============ */
-async function reload() {
+const tables = computed(() => L.nodes.filter(n => n.type === 'Table'))
+const labelOf = (id) => (byId.value[id] || {}).label || id
+
+/* 表 → 数据源名(SOURCE: Source→Job; SOURCE_OF/DERIVED_FROM: Job→Table) */
+function sourceMap() {
+  const j2s = {}
+  L.edges.forEach(e => { if (e.type === 'SOURCE') j2s[e.to] = labelOf(e.f) })
+  const m = {}
+  L.edges.forEach(e => {
+    if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to.startsWith('table:') && j2s[e.f]) {
+      ;(m[e.to] = m[e.to] || new Set()).add(j2s[e.f])
+    }
+  })
+  return m
+}
+const sMap = computed(() => sourceMap())
+
+/* 行模型 */
+const list = computed(() => {
+  const srcs = sMap.value
+  return tables.value.map(t => {
+    const tid = t.id
+    const prefix = 'field:' + t.label + '.'
+    const js = new Set(), rs = new Set(), app = new Set()
+    let fields = 0
+    L.edges.forEach(e => {
+      if (e.type === 'CONTAINS' && e.from === tid) fields++
+      else if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid) js.add(e.f)
+      else if (e.type === 'DEPENDS_ON' && e.to.startsWith(prefix)) rs.add(e.f)
+      else if (e.type === 'CONSUMES' && e.to === tid) app.add(e.f)
+    })
+    return {
+      id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind,
+      fields, jobs: js.size, rules: rs.size, apps: app.size,
+      appNames: [...app].map(labelOf),
+      sources: srcs[tid] ? [...srcs[tid]] : [],
+      fav: favs.value.includes(t.label)
+    }
+  }).filter(r => {
+    if (favOnly.value && !r.fav) return false
+    if (curTag.value) {
+      const [cat, val] = curTag.value.split(':')
+      if (cat === 'layer' && (r.layer || '(未分层)') !== val) return false
+      if (cat === 'kind' && (r.kind || 'physical') !== val) return false
+      if (cat === 'src' && !r.sources.includes(val)) return false
+      if (cat === 'fld' && !r.fields) return false
+    }
+    const q = kw.value.trim()
+    if (!q) return true
+    return (r.label + ' ' + (r.layer || '') + ' ' + (r.domain || '') + ' ' + r.sources.join(' ')).includes(q)
+  })
+})
+
+/* 标签树 */
+const tree = computed(() => {
+  const cnt = {}
+  tables.value.forEach(t => {
+    const l = t.layer || '(未分层)'
+    cnt['layer:' + l] = (cnt['layer:' + l] || 0) + 1
+    const k = t.kind || 'physical'
+    cnt['kind:' + k] = (cnt['kind:' + k] || 0) + 1
+    const sm = sMap.value
+    ;(sm[t.id] || []).forEach(x => { cnt['src:' + x] = (cnt['src:' + x] || 0) + 1 })
+  })
+  const branch = (title, prefix) => ({
+    id: prefix, name: title,
+    children: Object.entries(cnt).filter(([k]) => k.startsWith(prefix + ':'))
+      .map(([k, c]) => ({ id: k, name: k.split(':').slice(1).join(':'), count: c }))
+  })
+  return [
+    { id: 'all', name: '全部资产', count: tables.value.length },
+    branch('数据分层', 'layer'),
+    branch('数据来源', 'src'),
+    branch('资产类型', 'kind'),
+    { id: 'biz', name: '业务域(人工打标·P0)', children: [] }
+  ]
+})
+function onTag(d) {
+  if (d.children && d.children.length) return
+  curTag.value = d.id === 'all' ? '' : d.id
+}
+
+/* 动作 */
+function toggleFav(row) {
+  const i = favs.value.indexOf(row.label)
+  if (i >= 0) favs.value.splice(i, 1); else favs.value.push(row.label)
+  localStorage.setItem(FAV_KEY, JSON.stringify(favs.value))
+}
+function goDetail(row) { router.push({ path: '/asset/detail/' + encodeURIComponent(row.label) }) }
+function goLineage(row, p) { router.push({ path: '/asset/lineage', query: { t: row.label, p: p || 'g' } }) }
+
+async function load() {
   loading.value = true
   try {
     const d = await request.get('/lineage/graph')
     L.nodes = d.nodes || []
     L.edges = (d.edges || []).map(e => ({ ...e, f: e.f || e.from, to: e.to }))
     loaded.value = true
-    if (!rows.value.length) ElMessage.info('目录已加载 ' + L.nodes.filter(n => n.type === 'Table').length + ' 张表资产')
-  } catch (e) { ElMessage.error('目录加载失败(Neo4j 未就绪?): ' + (e.message || e)) } finally { loading.value = false }
+  } catch (e) { ElMessage.error('目录加载失败(Neo4j?): ' + (e.message || e)) } finally { loading.value = false }
 }
-function tlabel(id) { return (byId.value[id] || {}).label || id }
-
-const rows = computed(() => {
-  const kw = tk.value.trim() || tk2.value.trim()
-  const tables = L.nodes.filter(n => n.type === 'Table')
-  const out = tables.map(t => {
-    const tid = t.id, prefix = 'field:' + t.label + '.'
-    let fields = 0, jobs = 0, rules = 0, apps = 0
-    const js = new Set(), rs = new Set(), as = new Set()
-    L.edges.forEach(e => {
-      if (e.type === 'CONTAINS' && e.from === tid) fields++
-      else if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid) js.add(e.f)
-      else if (e.type === 'DEPENDS_ON' && e.to.startsWith(prefix)) rs.add(e.f)
-      else if (e.type === 'CONSUMES' && e.to === tid) as.add(e.f)
-    })
-    const appNames = [...as].map(a => tlabel(a))
-    return { id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind, fields, jobs: js.size, rules: rs.size, apps: as.size, appsNames: appNames, fav: favs.value.includes(t.label), _n: t, _sources: sourcesOf(t.label) }
-  })
-  return out.filter(r => {
-    if (favOnly.value && !r.fav) return false
-    if (curTag.value) {
-      const ok = tagMatch(r, curTag.value)
-      if (!ok) return false
-    }
-    if (!kw) return true
-    return (r.label + ' ' + (r.layer || '') + ' ' + (r.domain || '') + ' ' + r._sources.join(' ')).includes(kw)
-  })
+onMounted(() => {
+  try { favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]') } catch (e) { favs.value = [] }
+  load()
 })
-/* 表 → 数据源系统名(经 SOURCE→Job→SOURCE_OF/DERIVED_FROM) */
-function sourcesOf(tname) {
-  const tid = 'table:' + tname
-  const job2src = {}
-  L.edges.forEach(e => { if (e.type === 'SOURCE') job2src[e.to] = tlabel(e.f) })
-  const s = new Set()
-  L.edges.forEach(e => {
-    if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid && job2src[e.f]) s.add(job2src[e.f])
-  })
-  return [...s]
-}
-/* 标签树(自动标签真筛选 + 人工子树骨架) */
-const tp = { children: 'children', label: 'name' }
-const tagTree = computed(() => {
-  const tables = L.nodes.filter(n => n.type === 'Table')
-  const lay = {}, src = {}, kind = {}
-  tables.forEach(t => {
-    const l = t.layer || '(未分层)'; lay[l] = (lay[l] || 0) + 1
-    const k = t.kind || 'physical'; kind[k] = (kind[k] || 0) + 1
-    sourcesOf(t.label).forEach(s => { src[s] = (src[s] || 0) + 1 })
-  })
-  const leaf = (id, name, items) => ({ id, name, count: items.length, children: items.map(x => ({ id: id + ':' + x[0], name: x[0], count: x[1], raw: x[0] })) })
-  return [
-    { id: 'all', name: '全部资产', count: tables.length, raw: '*' },
-    leaf('layer', '数据分层', Object.entries(lay)),
-    leaf('src', '数据来源', Object.entries(src)),
-    leaf('kind', '资产类型', Object.entries(kind)),
-    { id: 'biz', name: '业务域(人工打标·P0)', count: null, children: [], raw: '' }
-  ]
-})
-function tagMatch(row, tag) {
-  const [cat, val] = tag.split(':')
-  if (cat === 'layer') return (row.layer || '(未分层)') === val
-  if (cat === 'kind') return (row.kind || 'physical') === val
-  if (cat === 'src') return row._sources.includes(val)
-  if (tag === '*') return true
-  return false
-}
-function onTag(data) {
-  if (!data.raw && !data.raw === false && data.id !== 'all') return
-  if (data.children && data.children.length) return
-  curTag.value = data.id === 'all' ? '' : data.id
-  curPath.value = data.name
-}
-/* ============ 收藏 ============ */
-function toggleFav(row) {
-  const i = favs.value.indexOf(row.label)
-  if (i >= 0) favs.value.splice(i, 1); else favs.value.push(row.label)
-  localStorage.setItem(FAV_KEY, JSON.stringify(favs.value))
-}
-/* ============ 跳转血缘 ============ */
-function goLineage(row, page) {
-  router.push({ path: '/asset/lineage', query: { t: row.label, p: page || 'g' } })
-}
-function subscribe(row) {
-  ElMessage.success('跳转订阅中心新建契约(视图预填 ' + row.label + ')—后端预填 P1')
-  setTimeout(() => router.push({ path: '/datasub', query: { t: row.label } }), 300)
-}
-function goDetail(row) { router.push({ path: '/asset/detail/' + encodeURIComponent(row.label), query: { t: row.label } }) }
-onMounted(() => { favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); reload() })
 </script>
 
 <style scoped>
-.cat-page { min-height: calc(100vh - 120px); }
-.cat-card { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.cat-wrap { min-height: calc(100vh - 120px); }
+.cat-head { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; }
+.head-right { display: flex; gap: 8px; }
 .pg-title { font-size: 16px; font-weight: 700; }
-.flex { display: flex; align-items: center; }
-.flex-between { display: flex; justify-content: space-between; align-items: center; }
-.cat-body { display: grid; grid-template-columns: 240px 1fr; gap: 10px; }
-.cat-tree { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 12px; max-height: calc(100vh - 190px); overflow: auto; }
-.tree-head { font-size: 13px; font-weight: 700; }
-.tnode { display: flex; align-items: center; gap: 4px; width: 100%; padding-right: 6px; font-size: 13px; }
-.cat-list { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 12px; }
-.t-name { color: #1677ff; font-weight: 600; cursor: pointer; }
-.kind-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 16px; color: #7b8794; background: #f0f2f5; border: 1px solid #e4e9f0; vertical-align: 1px; }
-.src-chip { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 17px; color: #0b5bd3; background: #e6f4ff; border: 1px solid #bcdcff; }
-.sec { font-size: 13px; font-weight: 600; }
-.dim2 { color: #999; font-size: 12px; }
+.cat-body { display: grid; grid-template-columns: 228px 1fr; gap: 10px; align-items: start; }
+.side { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; padding: 10px 12px; max-height: calc(100vh - 200px); overflow: auto; }
+.side-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.node-row { display: flex; justify-content: space-between; align-items: center; width: 100%; padding-right: 8px; }
+.node-name { font-size: 13px; }
+.node-count { color: #99a2ad; font-size: 11px; }
+.side-note { color: #b0b7c2; font-size: 11px; margin-top: 8px; line-height: 1.7; border-top: 1px dashed var(--el-border-color-lighter); padding-top: 6px; }
+.main { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.bar-dim { margin-left: auto; color: #b0b7c2; font-size: 12px; }
+.tname { color: #1677ff; font-weight: 600; cursor: pointer; line-height: 1.4; }
+.tsub { color: #a5aeb9; font-size: 11px; }
+.chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0b5bd3; background: #e6f4ff; border: 1px solid #bcdcff; border-radius: 4px; padding: 0 6px; font-size: 11px; line-height: 17px; vertical-align: middle; }
+.app-num { display: inline-block; min-width: 20px; color: #237804; background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 4px; padding: 0 5px; font-size: 12px; line-height: 18px; cursor: help; }
+.dim { color: #b0b7c2; }
 </style>
