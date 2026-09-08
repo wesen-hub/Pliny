@@ -418,6 +418,8 @@ CREATE TABLE IF NOT EXISTS data_contract (
   token VARCHAR(64) NULL COMMENT '生效签发: pull 拉取鉴权(X-Dcp-Token)',
   webhook_secret VARCHAR(64) NULL COMMENT '生效签发: push webhook 验签密钥',
   approved_by VARCHAR(64), approved_at DATETIME, reject_reason VARCHAR(512),
+  push_interval_min INT NULL COMMENT 'push 定时档: 自动投递间隔分钟',
+  last_deliver_at DATETIME NULL COMMENT '最近一次投递时间(调度节拍)',
   last_cursor VARCHAR(128) NULL COMMENT 'push/交付推进游标',
   create_by VARCHAR(64), create_time DATETIME DEFAULT CURRENT_TIMESTAMP, update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_status (status)

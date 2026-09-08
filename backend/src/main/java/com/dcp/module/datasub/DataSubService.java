@@ -90,7 +90,7 @@ public class DataSubService {
     public Map<String, Object> getContract(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
                 "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,"
-                        + "ttl,status,token,webhook_secret,approved_by,approved_at,reject_reason,create_by,create_time,update_time"
+                        + "push_interval_min,last_deliver_at,ttl,status,token,webhook_secret,approved_by,approved_at,reject_reason,create_by,create_time,update_time"
                         + " FROM data_contract WHERE id=?", id);
         if (rows.isEmpty()) throw new BizException(ErrorCode.NOT_FOUND, "契约不存在 id=" + id);
         Map<String, Object> m = new LinkedHashMap<>(rows.get(0));
@@ -121,6 +121,8 @@ public class DataSubService {
         String freq = s(body.getOrDefault("freq", "manual"));
         String tt = s(body.get("targetType"));
         String url = s(body.get("targetUrl"));
+        Integer pushIntervalMin = "push".equals(push) && "定时".equals(freq) && body.get("pushIntervalMin") instanceof Number n2 && n2.intValue() > 0
+                ? Math.min(n2.intValue(), 24 * 60) : null;
         int maxSecret = body.get("maxSecret") instanceof Number n ? n.intValue() : 2;
         java.sql.Date ttl = null;
         if (body.get("ttl") != null && !s(body.get("ttl")).isBlank()) {
@@ -129,12 +131,12 @@ public class DataSubService {
             } catch (Exception ignore) {
             }
         }
-        metaJdbc.update("INSERT INTO data_contract(name,subscriber,view_type,view_json,push,freq,target_type,target_url,max_secret,ttl,status,create_by)"
-                        + " VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?)",
+        metaJdbc.update("INSERT INTO data_contract(name,subscriber,view_type,view_json,push,freq,target_type,target_url,push_interval_min,max_secret,ttl,status,create_by)"
+                        + " VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?)",
                 name, subscriber, vt, view.toString(), push, freq,
                 "push".equals(push) ? tt : null,
                 "push".equals(push) && "webhook".equals(tt) ? url : null,
-                maxSecret, ttl, who);
+                pushIntervalMin, maxSecret, ttl, who);
         Number id = metaJdbc.queryForObject("SELECT LAST_INSERT_ID()", Number.class);
         audit("APPLY", id.longValue(), "订阅申请: " + name + " 订阅方=" + subscriber);
         return Map.of("id", id.longValue(), "status", "pending");
@@ -197,7 +199,7 @@ public class DataSubService {
 
     public List<Map<String, Object>> list() {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,ttl,status,"
+                "SELECT id,name,subscriber,view_type,view_json,push,freq,target_type,target_url,topic,max_secret,push_interval_min,last_deliver_at,ttl,status,"
                         + "approved_by,approved_at,reject_reason,create_by,create_time,update_time FROM data_contract ORDER BY id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) {
@@ -568,6 +570,8 @@ public class DataSubService {
         }
         metaJdbc.update("INSERT INTO data_sub_delivery(contract_id,mode,channel,range_text,rows_count,status,retries,error_msg)"
                         + " VALUES(?,?,?,?,?,?,?,?)", id, "push", channel, "deliver", rows.size(), status, retries, err);
+        // 节拍语义: 无论成败都推进 last_deliver_at, 调度按间隔重试(失败可见于交付记录)
+        metaJdbc.update("UPDATE data_contract SET last_deliver_at=NOW() WHERE id=?", id);
         audit("DELIVER", id, (status.equals("ok") ? "投递成功 " : "投递失败 ") + channel + " " + rows.size() + " 行" + (err == null ? "" : ": " + err));
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);

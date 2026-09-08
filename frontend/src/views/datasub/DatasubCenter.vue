@@ -37,7 +37,7 @@
             <el-table-column label="交付" width="160">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.push === 'push' ? 'danger' : 'primary'" effect="plain">{{ row.push.toUpperCase() }}</el-tag>
-                <div class="dim2">{{ row.push === 'push' ? (row.target_type || '') : 'API 拉取' }} · {{ row.freq }}</div>
+                <div class="dim2">{{ row.push === 'push' ? (row.target_type || '') : 'API 拉取' }} · {{ row.freq }}{{ row.push === 'push' && row.freq === '定时' && row.push_interval_min ? ' · 自动 ' + row.push_interval_min + 'min' : '' }}</div>
               </template>
             </el-table-column>
             <el-table-column label="密级/有效期" width="110">
@@ -185,7 +185,10 @@
                   <el-radio-button label="流式">流式增量</el-radio-button>
                 </el-radio-group>
               </el-form-item>
-              <div class="hint">逻辑表增量 = 平台 _seq 游标(changes?after); PULL 快照/增量走 API, PUSH 定时/流式推事件。本期投递为手动触发, 定时调度后续接入。</div>
+              <el-form-item v-if="w.push === 'push' && w.freq === '定时'" label="推送间隔">
+                <el-input-number v-model="w.pushIntervalMin" :min="1" :max="1440" size="small" /> <span class="dim2" style="margin-left:8px">分钟/次(生效后平台自动按节拍投递; 失败在下一节拍重试, 交付记录可见)</span>
+              </el-form-item>
+              <div class="hint">逻辑表增量 = 平台 _seq 游标(changes?after); PULL 快照/增量走 API; PUSH: 定时档自动投递(按间隔), 实时/批量/流式为语义标注, 现支持手动「投递」触发。</div>
             </el-form>
             <div style="text-align:center;display:flex;gap:8px;justify-content:center">
               <el-button @click="step = 0">上一步</el-button><el-button type="primary" @click="step = 2">下一步: 目标与协议</el-button>
@@ -237,7 +240,7 @@
             <el-descriptions :column="1" size="small" border>
               <el-descriptions-item label="契约">{{ w.name }} · 订阅方 {{ w.subscriber }}</el-descriptions-item>
               <el-descriptions-item label="数据视图">{{ viewSummary }}</el-descriptions-item>
-              <el-descriptions-item label="交付">{{ w.push.toUpperCase() }} · {{ w.freq }}<template v-if="w.push === 'push'"> → {{ w.targetType === 'kafka' ? 'Kafka' : w.webhook }}</template></el-descriptions-item>
+              <el-descriptions-item label="交付">{{ w.push.toUpperCase() }} · {{ w.freq }}<template v-if="w.push === 'push'"> → {{ w.targetType === 'kafka' ? 'Kafka' : w.webhook }}</template><template v-if="w.push === 'push' && w.freq === '定时'"> · 每 {{ w.pushIntervalMin }} 分钟自动投递</template></el-descriptions-item>
               <el-descriptions-item label="密级/有效期">≤ {{ secName(w.maxSecret) }} · {{ w.ttl || '永久' }}</el-descriptions-item>
               <el-descriptions-item label="说明">提交后进入审批; 生效后凭据在「详情/审批」中展示; 拉取/投递均审计留痕。</el-descriptions-item>
             </el-descriptions>
@@ -302,7 +305,7 @@
         <el-descriptions :column="1" size="small" border>
           <el-descriptions-item label="订阅方">{{ cur.subscriber }}</el-descriptions-item>
           <el-descriptions-item label="数据视图">{{ viewDesc(cur) }}</el-descriptions-item>
-          <el-descriptions-item label="交付">{{ cur.push.toUpperCase() }} · {{ cur.freq }}<template v-if="cur.push === 'push'"> · {{ cur.target_type }}<div v-if="cur.target_url" class="dim2">{{ cur.target_url }}</div></template></el-descriptions-item>
+          <el-descriptions-item label="交付">{{ cur.push.toUpperCase() }} · {{ cur.freq }}<template v-if="cur.push === 'push'"> · {{ cur.target_type }}<div v-if="cur.target_url" class="dim2">{{ cur.target_url }}</div></template><template v-if="cur.push === 'push' && cur.freq === '定时' && cur.push_interval_min"> · 每 {{ cur.push_interval_min }} 分钟自动投递</template><div v-if="cur.last_deliver_at" class="dim2">上次投递 {{ (cur.last_deliver_at || '').replace('T', ' ').slice(0, 19) }}</div></el-descriptions-item>
           <el-descriptions-item label="状态">{{ stName(cur.status) }}<template v-if="cur.reject_reason"> · 原因: {{ cur.reject_reason }}</template><div class="dim2">审批 {{ cur.approved_by || '—' }} {{ (cur.approved_at || '').slice(0, 16) }}</div></el-descriptions-item>
           <el-descriptions-item v-if="cur.token" label="X-Dcp-Token(pull)"><code class="tok">{{ cur.token }}</code><el-button size="small" text type="primary" @click="copyTok(cur.token)">复制</el-button></el-descriptions-item>
           <el-descriptions-item v-if="cur.webhook_secret" label="Webhook Secret"><code class="tok">{{ cur.webhook_secret }}</code><el-button size="small" text type="primary" @click="copyTok(cur.webhook_secret)">复制</el-button></el-descriptions-item>
@@ -412,7 +415,7 @@ const w = ref({
   viewType: 'logical',
   tables: [], mergeMode: 'merge', cols: [], condGroups: [{ conds: [{ field: '', op: '>=', val: '5000' }] }],
   tags: [], tagOp: 'OR', exclude: [], exportShape: 'entity', joinTable: '', joinKey: 'id', joinCols: [],
-  push: 'pull', freq: '定时', targetType: 'webhook', webhook: '',
+  push: 'pull', freq: '定时', targetType: 'webhook', webhook: '', pushIntervalMin: 1,
   maxSecret: 2, ttl: null
 })
 const candCols = computed(() => {
@@ -482,6 +485,7 @@ async function submit() {
       push: w.value.push, freq: w.value.freq,
       targetType: w.value.push === 'push' ? w.value.targetType : null,
       targetUrl: w.value.push === 'push' && w.value.targetType === 'webhook' ? w.value.webhook : null,
+      pushIntervalMin: w.value.push === 'push' && w.value.freq === '定时' ? w.value.pushIntervalMin : null,
       maxSecret: w.value.maxSecret, ttl: w.value.ttl || null
     }
     const r = await request.post('/data-sub', body)
