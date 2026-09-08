@@ -33,7 +33,9 @@
         </div>
       </div>
 
-      <!-- ═══ 统计格 ═══ -->
+            <el-tabs v-model="tab" style="margin-top:4px">
+        <el-tab-pane label="任务详情" name="detail">
+<!-- ═══ 统计格 ═══ -->
       <div v-if="ov" class="stat-grid">
         <div class="stat"><div class="n">{{ totalEntities }}</div><div class="l">产出标签实体数(投影)</div></div>
         <div class="stat"><div class="n">{{ ov.tagStats.length }}</div><div class="l">产出标签种类(tag×值)</div></div>
@@ -43,7 +45,8 @@
         <div class="stat"><div class="n small">{{ fmtTime(task?.update_time) }}</div><div class="l">任务更新时间</div></div>
       </div>
 
-      <el-row :gutter="16" style="margin-top:16px">
+
+<el-row :gutter="16" style="margin-top:16px">
         <!-- ═══ 基础信息 ═══ -->
         <el-col :span="10">
           <el-card shadow="never" class="sub">
@@ -91,7 +94,8 @@
         </el-col>
       </el-row>
 
-      <!-- ═══ 产出标签明细 ═══ -->
+      
+<!-- ═══ 产出标签明细 ═══ -->
       <el-card shadow="never" class="sub" style="margin-top:16px">
         <template #header><b>产出标签明细</b>(投影 tag_fact_view · 当前值; 湖 tag_fact 为权威+time travel)</template>
         <el-table :data="ov?.tagStats || []" size="small" stripe>
@@ -103,7 +107,20 @@
         <el-text v-if="!(ov?.tagStats || []).length" size="small" type="info">尚无产出(批任务需跑一轮; 流/在线任务命中后写入投影)</el-text>
       </el-card>
 
-      <!-- ═══ 执行历史 ═══ -->
+      
+<!-- ═══ 最近变更流 ═══ -->
+      <el-card v-if="(ov?.recentNotify || []).length" shadow="never" class="sub" style="margin-top:16px">
+        <template #header><b>最近标签变更(本任务审计 · 10 条)</b></template>
+        <el-table :data="ov.recentNotify" size="small">
+          <el-table-column label="时间" width="180"><template #default="{ row }"><el-text size="small" type="info">{{ fmtTime(row.occur_ts) }}</el-text></template></el-table-column>
+          <el-table-column prop="entity" label="实体" width="150" />
+          <el-table-column label="标签" min-width="220"><template #default="{ row }"><el-tag size="small" type="primary" effect="plain">{{ row.tag_path }}</el-tag></template></el-table-column>
+          <el-table-column label="值" width="120"><template #default="{ row }">{{ row.tag_value ?? '∅' }}</template></el-table-column>
+        </el-table>
+      </el-card>
+        </el-tab-pane>
+        <el-tab-pane label="执行历史" name="runs">
+<!-- ═══ 执行历史 ═══ -->
       <el-card shadow="never" class="sub" style="margin-top:16px">
         <template #header><b>执行历史</b>({{ runs.length }} 条)</template>
         <el-table :data="runs" size="small" stripe>
@@ -128,16 +145,10 @@
         </el-table>
       </el-card>
 
-      <!-- ═══ 最近变更流 ═══ -->
-      <el-card v-if="(ov?.recentNotify || []).length" shadow="never" class="sub" style="margin-top:16px">
-        <template #header><b>最近标签变更(本任务审计 · 10 条)</b></template>
-        <el-table :data="ov.recentNotify" size="small">
-          <el-table-column label="时间" width="180"><template #default="{ row }"><el-text size="small" type="info">{{ fmtTime(row.occur_ts) }}</el-text></template></el-table-column>
-          <el-table-column prop="entity" label="实体" width="150" />
-          <el-table-column label="标签" min-width="220"><template #default="{ row }"><el-tag size="small" type="primary" effect="plain">{{ row.tag_path }}</el-tag></template></el-table-column>
-          <el-table-column label="值" width="120"><template #default="{ row }">{{ row.tag_value ?? '∅' }}</template></el-table-column>
-        </el-table>
-      </el-card>
+      
+        </el-tab-pane>
+      </el-tabs>
+
     </el-card>
 
     <!-- ═══ run 详情抽屉 ═══ -->
@@ -192,6 +203,7 @@ const curRun = ref({})
 const eventDlg = ref(false)
 const eventJson = ref('')
 const eventSending = ref(false)
+const tab = ref('detail')
 
 const taskId = computed(() => Number(route.query.id || 0))
 const modeLabel = computed(() => ({ batch: '批 Batch', stream: '流 Stream', online: '在线 Online' }[task.value?.mode] || '—'))
