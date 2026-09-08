@@ -66,6 +66,55 @@ public final class TagFactWriter {
         return false;
     }
 
+    /**
+     * 增量写(§14.2): 只删除本任务中"变更实体"的旧行(含墓碑实体=注销清标签) + append 新结果。
+     * 其他实体不动 → 避免整 task_id 分区重写。幂等: 变更集内实体重算覆盖, 重跑无害。
+     */
+    public static void writeIncremental(Dataset<Row> tagRows, SparkSession spark, TaskConfig cfg,
+                                        long taskId, IncrementalSnapshot incr) {
+        if (cfg.tagFact.table == null || cfg.tagFact.table.isBlank()) {
+            throw new IllegalArgumentException("未配置 tag_fact 写目标(tagFact.table)");
+        }
+        String tbl = cfg.tagFact.qualified();
+        boolean exists = DatasetAssembly.tableExists(spark, tbl);
+        if (exists && incr.hasChanged()) {
+            deleteEntities(spark, tbl, taskId, incr.changedEntities);
+        } else if (!exists) {
+            Log.warn("[tag_fact] 表不存在, 按首轮建表(增量首跑或表被删)");
+            createTable(tagRows, spark, tbl, cfg.tagFact.partitionByTask);
+        }
+        if (DatasetAssembly.tableExists(spark, tbl)) {
+            append(tagRows, spark, tbl);
+        }
+        Log.info("[tag_fact] 增量写入完成: " + tbl + " 变更实体=" + incr.changedEntities.size()
+                + "(墓碑=" + incr.tombstoneEntities.size() + ")");
+    }
+
+    /** 删除本任务指定实体的旧行(拼 IN 列表; entity 为字符串化业务键, 单引号转义) */
+    private static void deleteEntities(SparkSession spark, String tbl, long taskId, java.util.List<String> entities) {
+        StringBuilder in = new StringBuilder();
+        for (String ent : entities) {
+            if (in.length() > 0) in.append(',');
+            in.append('\'').append(ent.replace("'", "\\'")).append('\'');
+        }
+        String sql = "DELETE FROM " + qid(tbl) + " WHERE task_id = " + taskId + " AND entity IN (" + in + ")";
+        try {
+            spark.sql(sql);
+            Log.info("[tag_fact] 增量删旧行(实体 " + entities.size() + " 个): " + tbl);
+        } catch (Exception e) {
+            Log.warn("[tag_fact] DELETE 失败(" + e.getMessage() + "), 回退过滤重写(保留其他任务+本任务非变更实体)");
+            // 兜底: 保留 其他任务 ∪ 本任务中不在变更集的实体 的行; 变更集实体旧行即被剔除(append 新值)
+            StringBuilder keepIn = new StringBuilder();
+            for (String ent : entities) {
+                if (keepIn.length() > 0) keepIn.append(',');
+                keepIn.append('\'').append(ent.replace("'", "\\'")).append('\'');
+            }
+            Dataset<Row> rest = spark.table(tbl).filter("task_id != " + taskId
+                    + " OR (task_id = " + taskId + " AND entity NOT IN (" + keepIn + "))");
+            rest.write().mode("overwrite").insertInto(tbl);
+        }
+    }
+
     /** 删本任务旧分区(iceberg DELETE; 不支持 → 全量过滤重写兜底) */
     private static void deleteOldPartition(SparkSession spark, String tbl, long taskId) {
         try {

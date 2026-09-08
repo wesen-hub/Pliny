@@ -22,6 +22,8 @@ public class CliOptions {
     public boolean matrix = false;
     /** 命中矩阵 JSON 输出文件(可空: 仅日志) */
     public String matrixOut;
+    /** 增量游标输出文件(增量轮 exit0 后平台读回写 tag_task.cursor_json; 同 lakesync cursor-out) */
+    public String cursorOut;
 
     public static CliOptions parse(String[] args) {
         CliOptions o = new CliOptions();
@@ -38,6 +40,7 @@ public class CliOptions {
                 case "--limit" -> o.limit = Long.parseLong(req(args, ++i, "--limit"));
                 case "--matrix" -> o.matrix = true;
                 case "--matrix-out" -> o.matrixOut = req(args, ++i, "--matrix-out");
+                case "--cursor-out" -> o.cursorOut = req(args, ++i, "--cursor-out");
                 default -> throw new IllegalArgumentException("未知参数: " + args[i]);
             }
         }
@@ -84,6 +87,7 @@ public class CliOptions {
                     --limit N                 采样前 N 行(试跑)
                     --matrix                  试跑模式: 只求值出命中矩阵, 不写 tag_fact
                     --matrix-out <file>       命中矩阵 JSON 输出文件(可选, 默认仅日志)
+                    --cursor-out <file>       增量轮游标输出文件(exit0 后平台回写用)
                 """;
     }
 

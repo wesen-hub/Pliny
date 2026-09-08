@@ -88,10 +88,69 @@ public final class DatasetAssembly {
     }
 
     /**
-     * 读数据集: 湖表(与 Iceberg 对接用 spark.table/catalog 读取, §11④/§12)或联调 DataSource 抽象。
-     * 不直接 import iceberg 类 —— 运行时 provider(iceberg-spark-runtime)由 spark-submit --packages/--jars 提供;
-     * 接湖切换只发生在运行时 catalog 装配, 本模块无 iceberg API 依赖点(编译期已具备, 见 pom provided)。
+     * 增量过滤(§14): 湖表读入后、装配前调用。只保留 _seq>cursor 的变更行(含墓碑);
+     * 墓碑行(_is_deleted=1)实体 = 注销(只清 tag_fact 旧行, 不参与求值, 见调用方)。
+     *
+     * @return 参与求值的变更行(墓碑行已剔除); 无变更行返回空 DataFrame(调用方按空集短路)
      */
+    public static Dataset<Row> applyIncremental(Dataset<Row> df, TaskConfig cfg, IncrementalSnapshot snap) {
+        if (!cfg.incremental.enabled()) {
+            return df;
+        }
+        List<String> cols = Arrays.asList(df.columns());
+        // 增量列: 显式配置 > 湖表 _seq% 列(单列; 多列取最大序号值语义由调用方 max 合并)
+        String seqCol = cfg.incremental.seqColumn;
+        if (seqCol == null || seqCol.isBlank()) {
+            seqCol = cols.stream().filter(c -> c.startsWith("_seq")).findFirst().orElse(null);
+        }
+        if (seqCol == null || !cols.contains(seqCol)) {
+            throw new IllegalArgumentException("增量模式需湖表含增量列 _seq%(或显式配置 incremental.seqColumn); 湖表无此列, 请用全量模式");
+        }
+        snap.seqColumn = seqCol;
+        snap.hasTombstone = cols.contains(cfg.incremental.tombstoneColumn);
+        snap.active = true;
+
+        // 变更行 = _seq > cursor(增量列非空; 湖表当前态宽表每实体一行 → 行维度=实体维度)
+        Dataset<Row> changed = df.filter(functions.col(seqCol).gt(functions.lit(cfg.incremental.cursor)));
+        Dataset<Row> eval;
+        if (snap.hasTombstone) {
+            // 墓碑行(注销)剔除出求值链: 其实体仅需清 tag_fact 旧行
+            eval = changed.filter(functions.col(cfg.incremental.tombstoneColumn).isNull()
+                    .or(functions.col(cfg.incremental.tombstoneColumn).notEqual(functions.lit(1))));
+        } else {
+            eval = changed;
+        }
+        // 实体集 + max seq(单 action collect; 增量行数小)
+        java.util.List<Row> rows = changed.select(cfg.entityKey, seqCol).collectAsList();
+        long maxSeq = -1;
+        java.util.Set<String> entities = new java.util.LinkedHashSet<>();
+        for (Row r : rows) {
+            Object e = r.get(0);
+            Object s = r.get(1);
+            if (e != null) entities.add(String.valueOf(e));
+            if (s instanceof Number n && n.longValue() > maxSeq) maxSeq = n.longValue();
+        }
+        snap.changedEntities = new java.util.ArrayList<>(entities);
+        snap.maxSeq = maxSeq;
+        if (snap.hasTombstone) {
+            java.util.List<Row> tombs = changed.filter(functions.col(cfg.incremental.tombstoneColumn).equalTo(functions.lit(1)))
+                    .select(cfg.entityKey).collectAsList();
+            java.util.Set<String> te = new java.util.LinkedHashSet<>();
+            for (Row r : tombs) {
+                if (r.get(0) != null) te.add(String.valueOf(r.get(0)));
+            }
+            snap.tombstoneEntities = new java.util.ArrayList<>(te);
+        }
+        Log.info("[增量] 变更实体=" + snap.changedEntities.size()
+                + " 墓碑实体=" + snap.tombstoneEntities.size()
+                + " 游标 " + cfg.incremental.cursor + " → " + maxSeq
+                + " (seq列=" + seqCol + (snap.hasTombstone ? " 墓碑列=" + cfg.incremental.tombstoneColumn : " 无墓碑列") + ")");
+        if (!snap.hasChanged()) {
+            Log.info("[增量] 无变更行(_seq>" + cfg.incremental.cursor + " 为空), 本轮无事可做");
+        }
+        return eval;
+    }
+
     public static Dataset<Row> readDataset(SparkSession spark, TaskConfig cfg) {
         String q = cfg.iceberg.isBlank() ? "" : cfg.iceberg.qualified();
         Log.info("[装配] 读数据集: iceberg=" + q + " dataset=" + cfg.dataset);

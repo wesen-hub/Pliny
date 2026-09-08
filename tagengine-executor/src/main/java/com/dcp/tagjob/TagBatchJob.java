@@ -7,9 +7,11 @@ import com.dcp.tagjob.plan.BuildPlan;
 import com.dcp.tagjob.run.MatrixAccumulator;
 import com.dcp.tagjob.run.PartitionEvaluator;
 import com.dcp.tagjob.spark.DatasetAssembly;
+import com.dcp.tagjob.spark.IncrementalSnapshot;
 import com.dcp.tagjob.spark.TagFactWriter;
 import com.dcp.tagjob.util.Log;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Dataset;
@@ -85,6 +87,13 @@ public final class TagBatchJob {
             List<String> warnings = new ArrayList<>();
             Dataset<Row> base = DatasetAssembly.assemble(spark, cfg, warnings);
             warnings.forEach(w -> Log.warn("[装配] " + w));
+            // 增量模式: 只保留变更行并收集实体集/游标(墓碑行不参与求值; 空变更 → 无事可做直接成功退出)
+            IncrementalSnapshot incr = new IncrementalSnapshot();
+            base = DatasetAssembly.applyIncremental(base, cfg, incr);
+            if (incr.active && !incr.hasChanged()) {
+                Log.info("════════ 打标批任务完成 task=" + cfg.taskId + "(增量: 无变更, 游标已最新) 退出码 0 ════════");
+                return 0;
+            }
             if (opts.limit > 0) {
                 base = base.limit((int) opts.limit);
                 Log.info("[装配] 采样行数: " + opts.limit);
@@ -116,14 +125,22 @@ public final class TagBatchJob {
             } else {
                 Dataset<Row> dedup = outRows.dropDuplicates("entity", "tag");   // (entity,tag) 当前值去重(冲突后写覆盖口径见 README)
                 written = dedup.count();
-                TagFactWriter.write(dedup, spark, cfg, cfg.taskId);
-                Log.info("[tag_fact] 写行数=" + written);
+                if (incr.active) {
+                    // 增量写: 只覆盖本任务中变更实体(含墓碑清旧行), 不动其他实体(§14.2)
+                    TagFactWriter.writeIncremental(dedup, spark, cfg, cfg.taskId, incr);
+                } else {
+                    TagFactWriter.write(dedup, spark, cfg, cfg.taskId);
+                }
+                Log.info("[tag_fact] 写行数=" + written + (incr.active ? "(增量轮)" : ""));
             }
 
-            // ④ run 摘要 + 命中矩阵
+            // ④ run 摘要 + 命中矩阵 + 游标输出(增量)
             Map<String, Long> m = new TreeMap<>(matrix.value());
             String summary = summaryText(cfg, plan, m, written, opts.matrix);
             Log.info("[摘要] " + summary);
+            if (incr.active && !opts.matrix) {
+                writeCursorOut(incr, opts);
+            }
             if (opts.matrixOut != null) {
                 writeMatrixFile(cfg, plan, m, opts.matrixOut);
             }
@@ -219,6 +236,24 @@ public final class TagBatchJob {
             first = false;
         }
         return sb.append(']').toString();
+    }
+
+    /** 游标输出(增量轮; 平台 exit0 后读文件回写 tag_task.cursor_json, 同 lakesync cursor-out 模式) */
+    private static void writeCursorOut(IncrementalSnapshot incr, CliOptions opts) {
+        if (opts.cursorOut == null || incr.seqColumn == null) {
+            Log.info("[游标] 未配置 --cursor-out 或无量列, 游标推进=" + incr.maxSeq + "(seq=" + incr.seqColumn + ")");
+            return;
+        }
+        try {
+            ObjectNode o = OM.createObjectNode();
+            o.put("seqColumn", incr.seqColumn);
+            o.put("maxSeq", incr.maxSeq);
+            Files.writeString(Paths.get(opts.cursorOut), OM.writerWithDefaultPrettyPrinter().writeValueAsString(o),
+                    StandardCharsets.UTF_8);
+            Log.info("[游标] 结果已写: " + opts.cursorOut + " = " + o);
+        } catch (Exception e) {
+            Log.error("[游标] 写文件失败: " + e.getMessage());
+        }
     }
 
     private static void writeMatrixFile(TaskConfig cfg, BuildPlan plan, Map<String, Long> m, String path) {

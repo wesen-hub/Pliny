@@ -130,6 +130,23 @@ public class TaskConfig {
         }
     }
 
+    /** 增量配置(§14): 缺省 = 全量模式。增量 = 只读 _seq>cursor 的变更行(墓碑行=清标签不重算), 只对变更实体覆盖写。 */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Incremental {
+        /** 增量游标: 上轮已处理的湖表行级 seq 最大值; <0 或缺省 = 全量首轮 */
+        public long cursor = -1;
+        /** 增量列(行级变更序): 缺省自动探测湖表 _seq% 列; 多列取 max(需同源推进语义) */
+        public String seqColumn;
+        /** 墓碑列: 缺省 _is_deleted; 该列为 true 的行 = 实体注销, 只删 tag_fact 旧行不重算 */
+        public String tombstoneColumn = "_is_deleted";
+
+        public boolean enabled() {
+            return cursor >= 0;
+        }
+    }
+
+    public Incremental incremental = new Incremental();
+
     private static boolean notBlank(String s) {
         return s != null && !s.isBlank();
     }
