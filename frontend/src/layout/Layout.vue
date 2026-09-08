@@ -39,6 +39,7 @@
           <el-menu-item v-if="userStore.hasPerm('tag:rule:page')" index="/tagengine2/rule">规则库 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:task:page')" index="/tagengine2/task">打标任务 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:sub:page')" index="/tagengine2/subs">标签订阅 V2</el-menu-item>
+          <el-menu-item index="/datasub">数据订阅中心</el-menu-item>
           <el-menu-item index="/tagengine/rule">规则打标(快捷)</el-menu-item>
           <el-menu-item v-if="userStore.isAdmin" index="/system/role-perm">角色权限</el-menu-item>
           <el-menu-item v-if="userStore.isAdmin" index="/system/permission">数据权限</el-menu-item>

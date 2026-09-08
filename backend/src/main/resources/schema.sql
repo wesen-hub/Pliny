@@ -399,3 +399,39 @@ CREATE TABLE IF NOT EXISTS row_rule (
   note VARCHAR(512), enabled TINYINT NOT NULL DEFAULT 1,
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB COMMENT='行规则(手工配置)';
+
+-- ============ 数据订阅(2026-09-09): 对外数据契约 ============
+CREATE TABLE IF NOT EXISTS data_contract (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  subscriber VARCHAR(64) NOT NULL COMMENT '订阅方(接入应用名)',
+  view_type VARCHAR(16) NOT NULL COMMENT 'logical|tag',
+  view_json MEDIUMTEXT NOT NULL COMMENT '视图定义(逻辑表: tables[]+cols[]+conds[]+merge; 标签: tags[]+op+exclude+shape+joinTable/cols)',
+  push VARCHAR(8) NOT NULL DEFAULT 'pull' COMMENT 'pull|push',
+  freq VARCHAR(24) NOT NULL DEFAULT 'manual' COMMENT 'manual|实时|定时|批量|流式(语义标注)',
+  target_type VARCHAR(16) NULL COMMENT 'pull: api; push: webhook|kafka',
+  target_url VARCHAR(512) NULL,
+  topic VARCHAR(128) NULL COMMENT 'push kafka topic',
+  max_secret TINYINT NOT NULL DEFAULT 2,
+  ttl DATE NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'pending|active|stopped|expired|rejected',
+  token VARCHAR(64) NULL COMMENT '生效签发: pull 拉取鉴权(X-Dcp-Token)',
+  webhook_secret VARCHAR(64) NULL COMMENT '生效签发: push webhook 验签密钥',
+  approved_by VARCHAR(64), approved_at DATETIME, reject_reason VARCHAR(512),
+  last_cursor VARCHAR(128) NULL COMMENT 'push/交付推进游标',
+  create_by VARCHAR(64), create_time DATETIME DEFAULT CURRENT_TIMESTAMP, update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_status (status)
+) ENGINE=InnoDB COMMENT='数据订阅契约';
+
+CREATE TABLE IF NOT EXISTS data_sub_delivery (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_id BIGINT NOT NULL,
+  mode VARCHAR(8) NOT NULL COMMENT 'pull|push',
+  channel VARCHAR(16) NOT NULL COMMENT 'api|webhook|kafka|export',
+  range_text VARCHAR(255) NULL COMMENT '数据范围/游标',
+  rows_count INT NULL,
+  status VARCHAR(16) NOT NULL COMMENT 'ok|fail|retrying',
+  retries INT NOT NULL DEFAULT 0,
+  error_msg VARCHAR(1024), ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_contract (contract_id, id)
+) ENGINE=InnoDB COMMENT='数据订阅交付记录';
