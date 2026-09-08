@@ -301,6 +301,28 @@ services:
         taskmanager.numberOfTaskSlots: 4
       - TZ=Asia/Shanghai
 
+  # 血缘图存储 Neo4j(2026-09-09): 逻辑表核心/多源合流/下游多应用; 前端知识图谱与影响/溯源查询
+  neo4j:
+    image: neo4j:5-community
+    container_name: dcp-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/neo4j123
+      NEO4J_server_memory_heap_max__size: 512M
+      NEO4J_server_memory_pagecache_size: 256M
+      TZ: Asia/Shanghai
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   # 数据面 TiDB(单节点, MySQL 协议); 切换: SYNC_TARGET_URL=jdbc:mysql://tidb:4000/target_db...
   # 水平扩容实测: 第二个消费者实例(同镜像/同 group, Kafka rebalance 自动分摊分区)
   backend2:
@@ -343,6 +365,7 @@ volumes:
   agent-data:
   sqlserver-data:
   oracle-data:
+  neo4j-data:
   mysql-data:
   demo-db-data:
   mongo-data:

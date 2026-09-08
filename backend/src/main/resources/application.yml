@@ -67,6 +67,8 @@ management:
   health:
     mail:
       enabled: false
+    neo4j:
+      enabled: false   # 血缘图库 Neo4j 单独开关(未就绪/故障不影响平台 health)
 
 logging:
   level:
