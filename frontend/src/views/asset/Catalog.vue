@@ -1,294 +1,231 @@
 <template>
-  <div class="page-card">
-    <el-card shadow="never">
-      <div class="catalog-layout">
-        <!-- 左侧: 标签树目录(可编辑层级, 多选构建子集) -->
-        <div class="tree-panel">
-          <div class="tree-toolbar">
-            <el-button size="small" style="width: 100%; margin-bottom: 8px" @click="openTagDlg(null)">＋ 新建根标签</el-button>
-          </div>
-          <el-tree
-            ref="tagTree"
-            :data="tagTree"
-            node-key="id"
-            default-expand-all
-            show-checkbox
-            :props="{ label: 'path', children: 'children' }"
-            :check-strictly="true"
-            @check="onCheck"
-          >
-            <template #default="{ data }">
-              <span class="tree-label">
-                <el-icon v-if="data.children"><Folder /></el-icon>
-                <el-icon v-else><Document /></el-icon>
-                <span>{{ data.tag }}</span>
-                <span class="tree-count">{{ data.assets }}</span>
-                <span class="tree-ops" @click.stop>
-                  <el-icon title="新建子标签" @click="openTagDlg(data)"><Plus /></el-icon>
-                  <el-icon title="重命名" @click="openTagDlg(data, true)"><Edit /></el-icon>
-                  <el-icon title="移动到" @click="openMoveDlg(data)"><Rank /></el-icon>
-                  <el-icon title="删除" @click="removeTag(data)"><Delete /></el-icon>
-                </span>
-              </span>
-            </template>
-          </el-tree>
-          <div class="tree-tip">目录 = 标签树(自定义层级) · 勾选标签组合 = 动态查询子集 · 打子标签自动继承父链</div>
-        </div>
-
-        <!-- 右侧: 子集结果(标签组合筛选) -->
-        <div class="list-panel">
-          <div class="toolbar">
-            <el-select v-model="op" size="small" style="width: 90px" @change="load">
-              <el-option label="AND" value="AND" /><el-option label="OR" value="OR" />
-            </el-select>
-            <el-input v-model="keyword" placeholder="搜索资产…" clearable style="width: 200px">
-              <template #prefix><el-icon><Search /></el-icon></template>
-            </el-input>
-            <el-tag v-for="t in selectedTags" :key="t" closable type="primary" size="small" @close="uncheckTag(t)">{{ t }}</el-tag>
-            <el-button size="small" :loading="loading" @click="load">刷新</el-button>
-            <span class="sub">共 {{ assets.length }} 个资产</span>
-          </div>
-          <el-table :data="filteredAssets" stripe v-loading="loading">
-            <el-table-column label="资产名称" min-width="160">
-              <template #default="{ row }">
-                <el-link type="primary" @click="$router.push(`/asset/${row.table}`)">{{ row.displayName || row.name }}</el-link>
-                <div class="sub">{{ row.table }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="标签" min-width="220">
-              <template #default="{ row }">
-                <el-tag v-for="t in (row.tags || [])" :key="t" size="small" style="margin-right:4px">{{ t }}</el-tag>
-                <el-tag v-if="row.layer" size="small" type="info" style="margin-right:4px">分层/{{ row.layer }}</el-tag>
-                <el-tag v-if="row.domain" size="small" type="info" style="margin-right:4px">业务域/{{ row.domain }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="来源" min-width="140">
-              <template #default="{ row }">
-                <el-tag v-for="s in row.sources" :key="s.table" size="small">{{ s.dsName }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="密级" width="70">
-              <template #default="{ row }"><span :class="`secret sec-${row.secretLevel}`">{{ secretName(row.secretLevel) }}</span></template>
-            </el-table-column>
-            <el-table-column label="表数" width="80">
-              <template #default="{ row }"><span>{{ row.shardCount ?? '—' }}</span></template>
-            </el-table-column>
-            <el-table-column label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag size="small" :type="row.status==='就绪'?'success':'info'" effect="plain">{{ row.status }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="150">
-              <template #default="{ row }">
-                <el-link type="primary" underline="never" @click="$router.push(`/asset/${row.table}`)">详情</el-link>
-                <el-link type="primary" underline="never" style="margin-left:8px" @click="openMeta(row)">打标</el-link>
-              </template>
-            </el-table-column>
-          </el-table>
+  <div class="cat-page">
+    <div class="cat-card">
+      <div class="flex-between">
+        <div class="pg-title">数据资产目录<el-tag size="small" effect="plain" style="margin-left:8px" :type="loaded ? 'success' : 'warning'">{{ loaded ? '血缘图实时聚合(表资产 ' + rows.length + ')' : '加载中…' }}</el-tag></div>
+        <div class="flex" style="gap:8px">
+          <el-button size="small" :type="favOnly ? 'warning' : 'default'" @click="favOnly = !favOnly">★ 我的收藏 {{ favs.length }}</el-button>
+          <el-button size="small" type="primary" plain @click="reload()">刷新</el-button>
         </div>
       </div>
-    </el-card>
+    </div>
+    <div class="cat-body">
+      <!-- 左: 标签目录 -->
+      <div class="cat-tree">
+        <div class="tree-head">🏷 标签目录</div>
+        <el-input v-model="tk2" size="small" placeholder="过滤资产…" clearable style="margin:6px 0" />
+        <el-tree :data="tagTree" node-key="id" default-expand-all highlight-current :props="tp" :expand-on-click-node="false" @node-click="onTag">
+          <template #default="{ data }">
+            <span class="tnode">
+              <span>{{ data.name }}</span>
+              <el-tag v-if="data.count != null" size="small" effect="plain" style="margin-left:auto;border:none">{{ data.count }}</el-tag>
+            </span>
+          </template>
+        </el-tree>
+        <div class="dim2" style="margin-top:8px" v-if="curTag">当前筛选: <el-tag size="small" closable @close="curTag = ''; curPath = ''">{{ curPath }}</el-tag></div>
+        <div class="dim2" style="margin-top:4px">目录=标签(字典树)动态聚合 · 自动标签: 来源/层/类型; 业务域=人工打标(P0 绑定 API 后启用)</div>
+      </div>
+      <!-- 右: 资产列表 -->
+      <div class="cat-list">
+        <el-table :data="rows" size="small" border v-loading="loading" max-height="calc(100vh - 220px)" @row-dblclick="openDetail">
+          <el-table-column label="资产" min-width="190">
+            <template #default="{ row }">
+              <span class="t-name" @click="openDetail(row)">{{ row.label }}</span>
+              <el-tag size="small" effect="plain" style="margin-left:6px">{{ row.kind || 'physical' }}</el-tag>
+              <el-tag v-if="row.fav" size="small" type="warning" effect="dark" style="margin-left:4px">★</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="层 / 域" min-width="120">
+            <template #default="{ row }"><span class="dim2">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></span></template>
+          </el-table-column>
+          <el-table-column label="数据来源" min-width="120">
+            <template #default="{ row }">
+              <el-tag v-for="s in row.sources" :key="s" size="small" effect="plain" style="margin:1px">{{ s }}</el-tag>
+              <span v-if="!row.sources.length" class="dim2">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="fields" label="字段" width="60" align="center" />
+          <el-table-column label="上游任务" width="80" align="center"><template #default="{ row }">{{ row.jobs || '—' }}</template></el-table-column>
+          <el-table-column label="依赖规则" width="80" align="center"><template #default="{ row }">{{ row.rules || '—' }}</template></el-table-column>
+          <el-table-column label="订阅应用" width="80" align="center">
+            <template #default="{ row }"><el-tag v-if="row.apps" size="small" type="success" effect="plain">{{ row.apps }}</el-tag><span v-else class="dim2">—</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="230" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="goLineage(row)">血缘</el-button>
+              <el-button size="small" text type="warning" @click="goLineage(row, 'i')">影响</el-button>
+              <el-button size="small" text @click="openDetail(row)">详情</el-button>
+              <el-button size="small" text :type="row.fav ? 'warning' : 'info'" @click="toggleFav(row)">★</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
 
-    <!-- 标签编辑对话框 -->
-    <el-dialog v-model="tagDlg.visible" :title="tagDlg.title" width="420px">
-      <el-form label-width="70px">
-        <el-form-item label="标签名"><el-input v-model="tagDlg.name" placeholder="如: 订单 / 大促核心" /></el-form-item>
-        <el-form-item label="类型">
-          <el-select v-model="tagDlg.category" style="width: 100%">
-            <el-option label="业务标签" value="业务标签" /><el-option label="系统标签" value="系统标签" />
-            <el-option label="敏感标签" value="敏感标签" /><el-option label="自定义标签" value="自定义标签" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="粒度">
-          <el-select v-model="tagDlg.granularity" style="width: 100%">
-            <el-option label="表级" value="表级" /><el-option label="字段级" value="字段级" /><el-option label="记录级" value="记录级" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="来源"><el-input v-model="tagDlg.source" placeholder="如: 模型定义 / 手动 / 规则引擎" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="tagDlg.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitTag">保存</el-button>
+    <!-- 详情抽屉 -->
+    <el-drawer v-model="dlg" :title="cur ? '📄 ' + cur.label : ''" size="520px">
+      <template v-if="cur">
+        <div class="dim2" style="margin-bottom:8px">{{ cur.layer || '' }} {{ cur.kind || '' }}<template v-if="cur.domain"> · {{ cur.domain }}</template> · 数据来源: {{ cur.sources.join(', ') || '—' }}</div>
+        <el-descriptions :column="2" size="small" border>
+          <el-descriptions-item label="字段">{{ cur.fields }}</el-descriptions-item>
+          <el-descriptions-item label="上游任务">{{ cur.jobs || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="依赖规则">{{ cur.rules || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="订阅应用">{{ cur.apps || '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="sec" style="margin-top:12px">字段列表</div>
+        <el-table :data="fieldsOf(cur)" size="small" border max-height="240">
+          <el-table-column prop="name" label="字段" width="130" />
+          <el-table-column prop="k" label="类型/说明" />
+        </el-table>
+        <div class="sec" style="margin-top:12px">操作</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <el-button size="small" type="primary" plain @click="goLineage(cur)">进入血缘图谱(锚定本表)</el-button>
+          <el-button size="small" type="warning" plain @click="goLineage(cur, 'i')">影响分析</el-button>
+          <el-button size="small" @click="subscribe(cur)">订阅此表 →</el-button>
+        </div>
+        <div class="dim2" style="margin-top:8px">字段密级🔒/敏感 mask/样例预览 = P1(接 data_policy); Owner/业务描述 = P1(data_asset 主档); 人工打标 = P0 绑定 API</div>
       </template>
-    </el-dialog>
-
-    <!-- 移动标签对话框 -->
-    <el-dialog v-model="moveDlg.visible" title="移动标签(调整目录层级)" width="420px">
-      <el-form label-width="70px">
-        <el-form-item label="目标父级">
-          <el-tree-select v-model="moveDlg.parentId" :data="moveTargets" :props="{ label: 'path', value: 'id', children: 'children' }"
-            check-strictly style="width: 100%" placeholder="选择新父节点(留空=根)" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="moveDlg.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitMove">移动</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 资产打标对话框 -->
-    <el-dialog v-model="metaDlg.visible" :title="`资产打标: ${metaDlg.table || ''}`" width="480px">
-      <el-form label-width="90px">
-        <el-form-item label="标签">
-          <el-tree-select v-model="metaDlg.form.tags" :data="tagTree" multiple filterable
-            :render-after-expand="false" :props="{ label: 'path', value: 'path', children: 'children' }"
-            check-strictly style="width: 100%" placeholder="选择标签(多选) / 输入新标签" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="metaDlg.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitMeta">保存</el-button>
-      </template>
-    </el-dialog>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  getTagTree, createTag, updateTag, deleteTag, moveTag, getTagSubset,
-  getCatalogAssets, saveAssetMeta
-} from '../../api'
+import { ElMessage } from 'element-plus'
+import request from '../../api/request'
 
 const router = useRouter()
-const tagTree = ref([])
-const tagTreeRef = ref(null)
-const assets = ref([])
-const selectedTags = ref([])
-const op = ref('AND')
-const keyword = ref('')
 const loading = ref(false)
+const loaded = ref(false)
+const L = reactive({ nodes: [], edges: [] })
+const byId = computed(() => { const m = {}; L.nodes.forEach(n => { m[n.id] = n }); return m })
+const tk = ref('')
+const tk2 = ref('')
+const favOnly = ref(false)
+const curTag = ref('')
+const curPath = ref('')
+const dlg = ref(false)
+const cur = ref(null)
+const FAV_KEY = 'dcp_catalog_favs'
+const favs = ref([])
 
-const tagDlg = ref({ visible: false, title: '', id: null, parentId: 0, name: '', category: '自定义标签', granularity: '表级', source: '' })
-const moveDlg = ref({ visible: false, id: null, parentId: null, nodePath: '' })
-const metaDlg = ref({ visible: false, table: '', form: { tags: [] } })
-
-const filteredAssets = computed(() => assets.value.filter(a =>
-  !keyword.value || a.table.includes(keyword.value) || (a.displayName || '').includes(keyword.value)))
-
-function secretName(level) { return ['', '公开', '内部', '机密', '绝密'][level] }
-
-async function load() {
+/* ============ 数据: 血缘图 Table 聚合 ============ */
+async function reload() {
   loading.value = true
   try {
-    const [t, r] = await Promise.all([
-      getTagTree(),
-      getTagSubset(selectedTags.value, op.value)
-    ])
-    tagTree.value = t || []
-    assets.value = r || []
-  } finally {
-    loading.value = false
-  }
+    const d = await request.get('/lineage/graph')
+    L.nodes = d.nodes || []
+    L.edges = (d.edges || []).map(e => ({ ...e, f: e.f || e.from, to: e.to }))
+    loaded.value = true
+    if (!rows.value.length) ElMessage.info('目录已加载 ' + L.nodes.filter(n => n.type === 'Table').length + ' 张表资产')
+  } catch (e) { ElMessage.error('目录加载失败(Neo4j 未就绪?): ' + (e.message || e)) } finally { loading.value = false }
 }
+function tlabel(id) { return (byId.value[id] || {}).label || id }
 
-// ---- 树勾选 → 子集 ----
-function onCheck(data, status) {
-  const checked = status.checkedKeys || []
-  const paths = []
-  const walk = (nodes) => nodes.forEach(n => {
-    if (checked.includes(n.id)) paths.push(n.path)
-    walk(n.children || [])
+const rows = computed(() => {
+  const kw = tk.value.trim() || tk2.value.trim()
+  const tables = L.nodes.filter(n => n.type === 'Table')
+  const out = tables.map(t => {
+    const tid = t.id, prefix = 'field:' + t.label + '.'
+    let fields = 0, jobs = 0, rules = 0, apps = 0
+    const js = new Set(), rs = new Set(), as = new Set()
+    L.edges.forEach(e => {
+      if (e.type === 'CONTAINS' && e.from === tid) fields++
+      else if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid) js.add(e.f)
+      else if (e.type === 'DEPENDS_ON' && e.to.startsWith(prefix)) rs.add(e.f)
+      else if (e.type === 'CONSUMES' && e.to === tid) as.add(e.f)
+    })
+    return { id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind, fields, jobs: js.size, rules: rs.size, apps: as.size, fav: favs.value.includes(t.label), _n: t, _sources: sourcesOf(t.label) }
   })
-  walk(tagTree.value)
-  selectedTags.value = paths
-  load()
-}
-function uncheckTag(path) {
-  // 找到对应节点取消勾选
-  const find = (nodes) => {
-    for (const n of nodes) {
-      if (n.path === path) return n
-      const r = find(n.children || [])
-      if (r) return r
+  return out.filter(r => {
+    if (favOnly.value && !r.fav) return false
+    if (curTag.value) {
+      const ok = tagMatch(r, curTag.value)
+      if (!ok) return false
     }
-    return null
-  }
-  const node = find(tagTree.value)
-  if (node && tagTreeRef.value) tagTreeRef.value.setChecked(node.id, false)
-  selectedTags.value = selectedTags.value.filter(t => t !== path)
-  load()
-}
-
-// ---- 标签维护 ----
-function openTagDlg(parent, isRename = false) {
-  tagDlg.value = {
-    visible: true,
-    title: isRename ? `重命名: ${parent.path}` : (parent ? `新建子标签(挂到: ${parent.path})` : '新建根标签'),
-    id: isRename ? parent.id : null,
-    parentId: parent ? parent.id : 0,
-    name: isRename ? parent.tag : '',
-    category: parent ? parent.category : '自定义标签',
-    granularity: parent ? parent.granularity : '表级',
-    source: ''
-  }
-}
-async function removeTag(node) {
-  await ElMessageBox.confirm(`删除标签「${node.path}」及其子标签? (资产上的该标签将被移除)`, '确认', { type: 'warning' })
-  await deleteTag(node.id)
-  ElMessage.success('已删除')
-  load()
-}
-async function submitTag() {
-  if (!tagDlg.value.name) return
-  if (tagDlg.value.id) {
-    await updateTag(tagDlg.value.id, { name: tagDlg.value.name, category: tagDlg.value.category, granularity: tagDlg.value.granularity, source: tagDlg.value.source })
-  } else {
-    await createTag({ name: tagDlg.value.name, parentId: tagDlg.value.parentId, category: tagDlg.value.category, granularity: tagDlg.value.granularity, source: tagDlg.value.source })
-  }
-  tagDlg.value.visible = false
-  ElMessage.success('已保存')
-  load()
-}
-
-// ---- 移动(调层级) ----
-const moveTargets = computed(() => {
-  // 可移动目标 = 整棵树(后端防环)
-  return tagTree.value
+    if (!kw) return true
+    return (r.label + ' ' + (r.layer || '') + ' ' + (r.domain || '') + ' ' + r._sources.join(' ')).includes(kw)
+  })
 })
-function openMoveDlg(node) {
-  moveDlg.value = { visible: true, id: node.id, parentId: null, nodePath: node.path }
+/* 表 → 数据源系统名(经 SOURCE→Job→SOURCE_OF/DERIVED_FROM) */
+function sourcesOf(tname) {
+  const tid = 'table:' + tname
+  const job2src = {}
+  L.edges.forEach(e => { if (e.type === 'SOURCE') job2src[e.to] = tlabel(e.f) })
+  const s = new Set()
+  L.edges.forEach(e => {
+    if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid && job2src[e.f]) s.add(job2src[e.f])
+  })
+  return [...s]
 }
-async function submitMove() {
-  await moveTag(moveDlg.value.id, moveDlg.value.parentId || 0)
-  moveDlg.value.visible = false
-  ElMessage.success('已移动')
-  load()
+/* 标签树(自动标签真筛选 + 人工子树骨架) */
+const tp = { children: 'children', label: 'name' }
+const tagTree = computed(() => {
+  const tables = L.nodes.filter(n => n.type === 'Table')
+  const lay = {}, src = {}, kind = {}
+  tables.forEach(t => {
+    const l = t.layer || '(未分层)'; lay[l] = (lay[l] || 0) + 1
+    const k = t.kind || 'physical'; kind[k] = (kind[k] || 0) + 1
+    sourcesOf(t.label).forEach(s => { src[s] = (src[s] || 0) + 1 })
+  })
+  const leaf = (id, name, items) => ({ id, name, count: items.length, children: items.map(x => ({ id: id + ':' + x[0], name: x[0], count: x[1], raw: x[0] })) })
+  return [
+    { id: 'all', name: '全部资产', count: tables.length, raw: '*' },
+    leaf('layer', '数据分层', Object.entries(lay)),
+    leaf('src', '数据来源', Object.entries(src)),
+    leaf('kind', '资产类型', Object.entries(kind)),
+    { id: 'biz', name: '业务域(人工打标·P0)', count: null, children: [], raw: '' }
+  ]
+})
+function tagMatch(row, tag) {
+  const [cat, val] = tag.split(':')
+  if (cat === 'layer') return (row.layer || '(未分层)') === val
+  if (cat === 'kind') return (row.kind || 'physical') === val
+  if (cat === 'src') return row._sources.includes(val)
+  if (tag === '*') return true
+  return false
 }
-
-// ---- 资产打标 ----
-async function openMeta(row) {
-  metaDlg.value = {
-    visible: true, table: row.table,
-    form: { tags: row.tags || [] }
-  }
+function onTag(data) {
+  if (!data.raw && !data.raw === false && data.id !== 'all') return
+  if (data.children && data.children.length) return
+  curTag.value = data.id === 'all' ? '' : data.id
+  curPath.value = data.name
 }
-async function submitMeta() {
-  // 保留原有元数据(打标只更新 tags)
-  await saveAssetMeta(metaDlg.value.table, { tags: metaDlg.value.form.tags })
-  metaDlg.value.visible = false
-  ElMessage.success('已保存')
-  load()
+function fieldsOf(row) {
+  return L.edges.filter(e => e.type === 'CONTAINS' && e.from === row.id)
+    .map(e => { const f = byId.value[e.to]; return { name: (f || {}).label || '', k: '' } }).filter(x => x.name && !x.name.startsWith('_'))
 }
-
-onMounted(load)
+/* ============ 收藏 ============ */
+function toggleFav(row) {
+  const i = favs.value.indexOf(row.label)
+  if (i >= 0) favs.value.splice(i, 1); else favs.value.push(row.label)
+  localStorage.setItem(FAV_KEY, JSON.stringify(favs.value))
+}
+/* ============ 跳转血缘 ============ */
+function goLineage(row, page) {
+  router.push({ path: '/asset/lineage', query: { t: row.label, p: page || 'g' } })
+}
+function subscribe(row) {
+  ElMessage.success('跳转订阅中心新建契约(视图预填 ' + row.label + ')—后端预填 P1')
+  setTimeout(() => router.push({ path: '/datasub', query: { t: row.label } }), 300)
+}
+function openDetail(row) { cur.value = row; dlg.value = true }
+onMounted(() => { favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); reload() })
 </script>
 
 <style scoped>
-.catalog-layout { display: flex; gap: 16px; min-height: 560px; }
-.tree-panel { width: 320px; border-right: 1px solid #f0f0f0; padding-right: 16px; flex-shrink: 0; }
-.list-panel { flex: 1; min-width: 0; }
-.tree-label { display: flex; align-items: center; gap: 6px; font-size: 13px; flex: 1; }
-.tree-count { margin-left: auto; color: #8f959e; font-size: 11px; }
-.tree-ops { display: none; gap: 2px; margin-left: 6px; color: #8f959e; }
-.tree-label:hover .tree-ops { display: inline-flex; }
-.tree-ops .el-icon { cursor: pointer; }
-.tree-ops .el-icon:hover { color: #1677ff; }
-.tree-tip { margin-top: 12px; font-size: 12px; color: #8f959e; line-height: 1.6; }
-.sub { color: #8f959e; font-size: 11px; }
-.secret { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 4px; font-size: 12px; line-height: 18px; font-weight: 600; }
-.sec-1 { background: #f6ffed; color: #389e0d; } .sec-2 { background: #e6f4ff; color: #0958d9; }
-.sec-3 { background: #fff7e6; color: #d46b08; } .sec-4 { background: #fff1f0; color: #cf1322; }
+.cat-page { min-height: calc(100vh - 120px); }
+.cat-card { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.pg-title { font-size: 16px; font-weight: 700; }
+.flex { display: flex; align-items: center; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.cat-body { display: grid; grid-template-columns: 240px 1fr; gap: 10px; }
+.cat-tree { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 12px; max-height: calc(100vh - 190px); overflow: auto; }
+.tree-head { font-size: 13px; font-weight: 700; }
+.tnode { display: flex; align-items: center; gap: 4px; width: 100%; padding-right: 6px; font-size: 13px; }
+.cat-list { background: #fff; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 10px 12px; }
+.t-name { color: #1677ff; font-weight: 600; cursor: pointer; }
+.sec { font-size: 13px; font-weight: 600; }
+.dim2 { color: #999; font-size: 12px; }
 </style>

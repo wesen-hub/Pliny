@@ -10,36 +10,6 @@
       <div style="margin-left:auto;font-size:12px;color:#999" v-if="loaded">表 {{ statN('Table') }} · 字段 {{ statN('Field') }} · 任务 {{ statN('Job') }} · 规则 {{ statN('Rule') }} · 标签 {{ statN('Tag') }} · 应用 {{ statN('App') }} · 边 {{ L.edges.length }}</div>
     </div>
 
-    <!-- ============ ① 逻辑表列表(统一入口) ============ -->
-    <div v-show="tab === 'tables'" class="lg-view page-card">
-      <div class="pg-title">逻辑表<el-tag size="small" effect="plain" style="margin-left:8px">血缘统一入口 · 选中表下钻图谱/影响/溯源</el-tag></div>
-      <div class="flex" style="gap:8px;margin:10px 0">
-        <el-input v-model="tk" size="small" placeholder="搜索表名/层/域…" style="width:260px" clearable>
-          <template #prefix>🔍</template>
-        </el-input>
-        <span class="dim2">共 {{ tableRows.length }} 张 · 字段/任务/规则/订阅为血缘图实时聚合</span>
-      </div>
-      <el-table :data="tableRows" size="small" border v-loading="loading" max-height="600" @row-dblclick="goTable">
-        <el-table-column label="逻辑表" min-width="190"><template #default="{ row }">
-          <b style="color:#1677ff">{{ row.label }}</b>
-          <el-tag size="small" effect="plain" style="margin-left:6px">{{ row.kind || 'physical' }}</el-tag>
-        </template></el-table-column>
-        <el-table-column label="层 / 域" min-width="150"><template #default="{ row }"><span class="dim2">{{ row.layer || '—' }}<template v-if="row.domain"> · {{ row.domain }}</template></span></template></el-table-column>
-        <el-table-column label="字段" width="80" align="center"><template #default="{ row }">{{ row.fields }}</template></el-table-column>
-        <el-table-column label="上游任务" width="90" align="center"><template #default="{ row }">{{ row.jobs || '—' }}</template></el-table-column>
-        <el-table-column label="依赖规则" width="90" align="center"><template #default="{ row }">{{ row.rules || '—' }}</template></el-table-column>
-        <el-table-column label="订阅应用" width="90" align="center"><template #default="{ row }"><el-tag v-if="row.apps" size="small" type="success" effect="plain">{{ row.apps }}</el-tag><span v-else class="dim2">—</span></template></el-table-column>
-        <el-table-column label="操作" width="220">
-          <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="goTable(row)">血缘图谱</el-button>
-            <el-button size="small" text type="warning" @click="goImpact(row)">影响分析</el-button>
-            <el-button size="small" text type="danger" @click="goTrace(row)">溯源</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="dim2" style="margin-top:8px">双击行直接进入血缘图谱 · 列表数据 = 血缘图 Table 节点聚合(CONTAINS 字段 / SOURCE_OF·DERIVED_FROM 上游 / DEPENDS_ON 规则 / CONSUMES 订阅)</div>
-    </div>
-
     <!-- ============ ② 血缘图谱(真实数据) ============ -->
     <div v-show="tab === 'graph'" class="lg-view">
       <div class="graph-shell" v-loading="loading">
@@ -172,16 +142,17 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '../../api/request'
+const route = useRoute()
 
 const tabs = [
-  { k: 'tables', t: '🗂 逻辑表' }, { k: 'graph', t: '⛓ 血缘图谱' }, { k: 'matrix', t: '字段映射矩阵' },
+  { k: 'graph', t: '⛓ 血缘图谱' }, { k: 'matrix', t: '字段映射矩阵' },
   { k: 'impact', t: '影响分析' }, { k: 'trace', t: '溯源分析' }, { k: 'notices', t: '变更影响通知' }
 ]
-const tab = ref('tables')
+const tab = ref('graph')
 const q = ref('')
-const tk = ref('')
 const loading = ref(false)
 const loaded = ref(false)
 const L = reactive({ nodes: [], edges: [] })
@@ -189,24 +160,6 @@ const byId = computed(() => { const m = {}; L.nodes.forEach(n => { m[n.id] = n }
 const parentT = computed(() => { const m = {}; L.edges.forEach(e => { if (e.type === 'CONTAINS') m[e.to] = e.from }); return m })
 const tables = computed(() => L.nodes.filter(n => n.type === 'Table'))
 const statN = (t) => L.nodes.filter(n => n.type === t).length
-/* 表聚合指标(血缘图实时统计) */
-const tableRows = computed(() => {
-  const kw = tk.value.trim()
-  return tables.value.map(t => {
-    const tid = t.id
-    const prefix = 'field:' + t.label + '.'
-    let fields = 0, jobs = 0, rules = 0, apps = 0
-    const jset = new Set(), rset = new Set(), aset = new Set()
-    L.edges.forEach(e => {
-      if (e.type === 'CONTAINS' && e.from === tid) fields++
-      else if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid) jset.add(e.f)
-      else if (e.type === 'DEPENDS_ON' && e.to.startsWith(prefix)) rset.add(e.f)
-      else if (e.type === 'CONSUMES' && e.to === tid) aset.add(e.f)
-    })
-    jobs = jset.size; rules = rset.size; apps = aset.size
-    return { id: tid, label: t.label, layer: t.layer, domain: t.domain, kind: t.kind, fields, jobs, rules, apps, _n: t }
-  }).filter(r => !kw || (r.label + ' ' + (r.layer || '') + ' ' + (r.domain || '')).includes(kw))
-})
 /* 统一锚定: 选中表驱动图谱/矩阵/影响/溯源 */
 function anchor(t) { mTable.value = t.id; iTable.value = t.id; tTable.value = t.id; refreshMatrix(); refreshTrace() }
 function goTable(row) {
@@ -222,6 +175,25 @@ function goTable(row) {
 }
 function goImpact(row) { anchor(row); tab.value = 'impact'; loadImpact() }
 function goTrace(row) { anchor(row); tab.value = 'trace'; if (tField.value) loadTrace() }
+/* 目录锚定跳转: /asset/lineage?t=表&p=g|i */
+let qTable = null
+function focusNode(n) {
+  if (!n || !world) return
+  const c = canvasRef.value.getBoundingClientRect()
+  scale = 1; panX = c.width / 2 - (n.x + (n.ox || 0)); panY = c.height / 2 - (n.y + (n.oy || 0)); applyView()
+  const g = n._g
+  if (g) { g.classList.add('blink'); setTimeout(() => g.classList.remove('blink'), 1600) }
+  selNode(n)
+}
+function applyQTable() {
+  if (!qTable) return
+  const nm = qTable; qTable = null
+  const n = L.nodes.find(x => x.type === 'Table' && x.label === nm)
+  if (!n) { ElMessage.warning('未找到资产: ' + nm); return }
+  anchor({ id: n.id })
+  const pp = route.query.p || 'g'
+  if (pp === 'i') { tab.value = 'impact'; loadImpact() } else { tab.value = 'graph'; setTimeout(() => focusNode(n), 180) }
+}
 function ntype(t) { return ({ Source: 'info', Job: 'warning', Table: 'primary', Rule: 'danger', Tag: 'warning', App: 'success' })[t] || 'info' }
 const tlabel = (id) => (byId.value[id] && byId.value[id].label) || id
 
@@ -246,6 +218,7 @@ async function reload(rebuild) {
     loaded.value = true
     const tbs = L.nodes.filter(n => n.type === 'Table')
     if (tbs.length && !mTable.value) { mTable.value = tbs[0].id; iTable.value = tbs[0].id; tTable.value = tbs[0].id }
+    applyQTable()
     await nextTickSafe()
     buildGraph()
     ElMessage.success('血缘图已加载: ' + L.nodes.length + ' 节点 / ' + L.edges.length + ' 边')
@@ -548,7 +521,7 @@ async function loadTrace() {
 watch(mTable, refreshMatrix)
 watch(tTable, refreshTrace)
 watch(tab, v => { if (v === 'graph') setTimeout(() => { fitAll() }, 120) })
-onMounted(() => { reload(false); if (tables.value.length) { mTable.value = tables.value[0].id; iTable.value = tables.value[0].id; tTable.value = tables.value[0].id } })
+onMounted(() => { qTable = route.query.t || null; reload(false); if (tables.value.length) { mTable.value = tables.value[0].id; iTable.value = tables.value[0].id; tTable.value = tables.value[0].id } })
 </script>
 
 <style scoped>
