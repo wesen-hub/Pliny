@@ -73,10 +73,21 @@ public final class StreamTagJob {
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
+        // keyBy(entity) → process: 事件求值 + 窗口派生(滚动窗口累计/重置), 批端执行计划同构(平铺+规则流控制流)
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
         DataStream<StreamEvaluator.Hit> hits = env
                 .fromSource(source, WatermarkStrategy.noWatermarks(), "kafka-" + cfg.kafka.topic)
-                .flatMap(new StreamEvaluator(cfg))
-                .name("drools-eval-task" + cfg.taskId);
+                .keyBy(json -> {
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode ev = om.readTree(json);
+                        com.fasterxml.jackson.databind.JsonNode f = ev.has("fields") ? ev.path("fields") : ev;
+                        return f.path(cfg.entityKey).asText("");
+                    } catch (Exception e) {
+                        return "";
+                    }
+                })
+                .process(new StreamEvaluator(cfg))
+                .name("eval-task" + cfg.taskId);
 
         if (cfg.online.enabled) {
             hits.addSink(new StreamSinks.RedisSink(cfg.online)).name("redis-online");

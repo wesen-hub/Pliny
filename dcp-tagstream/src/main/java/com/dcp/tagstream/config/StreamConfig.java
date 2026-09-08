@@ -26,11 +26,38 @@ public class StreamConfig implements java.io.Serializable {
     public long taskId;
     public int taskVer = 1;
     public String entityKey = "id";
-    public List<String> datasetFields = new ArrayList<>();
+    public List<FieldDef> datasetFields = new ArrayList<>();
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class FieldDef implements java.io.Serializable { private static final long serialVersionUID = 1L;
+        public String name;
+        public String kind = "S";   // L|D|B|S
+    }
     public KafkaRef kafka = new KafkaRef();
+    /** 执行序(batch task-json 同构): 有序绑定, kind=rule(平铺组) / kind=flow(规则流组) */
+    public List<BindingRef> bindings = new ArrayList<>();
+    /** 资产全集(rule+flow, 含 def; 发布快照闭包) —— 命名沿用 rules 以兼容旧 job-json(空 bindings 时全按 rule 平铺) */
     public List<RuleRef> rules = new ArrayList<>();
+    /** 窗口派生(滚动窗口聚合; 事件到达用当前窗口累计值参与求值, 窗口边界重置) */
+    public List<DerivedRef> derived = new ArrayList<>();
     public OnlineRef online = new OnlineRef();
     public FactViewRef factView = new FactViewRef();
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class BindingRef implements java.io.Serializable { private static final long serialVersionUID = 1L;
+        public String kind;      // rule | flow
+        public long id;
+        public String name;
+        public int ver;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class DerivedRef implements java.io.Serializable { private static final long serialVersionUID = 1L;
+        public String name;              // 派生字段名(规则可引用)
+        public String func;              // sum|count|avg|max|min
+        public String field;             // 聚合字段(数值)
+        public long windowSeconds = 60;  // 滚动窗口长度(秒)
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class KafkaRef implements java.io.Serializable { private static final long serialVersionUID = 1L;

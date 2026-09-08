@@ -62,6 +62,16 @@ public final class TagActions {
             halted = true;
         }
 
+        /** halt 标志是否置位(fire 后由执行循环消费) */
+        public boolean halted() {
+            return halted;
+        }
+
+        /** 消费 halt 标志(fire 后调用, 供平铺跳过/流内步骤控制) */
+        public void resetHalt() {
+            halted = false;
+        }
+
         public List<String[]> tags() {
             return tags;
         }

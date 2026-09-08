@@ -63,6 +63,13 @@ public final class StreamSinks {
                         + "task_id BIGINT NOT NULL, entity VARCHAR(191) NOT NULL, tag VARCHAR(191) NOT NULL,"
                         + "value VARCHAR(255) NULL, run_ts DATETIME NULL,"
                         + "PRIMARY KEY (task_id, entity, tag))");
+                // P1.2④: 标签变更审计(订阅消费端); 与 backend/executor 同一 tag_notify 契约
+                st.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
+                        + "entity VARCHAR(128) NOT NULL, tag_path VARCHAR(512) NOT NULL,"
+                        + "tag_value VARCHAR(128) NULL, task_id BIGINT NOT NULL,"
+                        + "task_mode VARCHAR(16) NOT NULL,"
+                        + "occur_ts DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),"
+                        + "PRIMARY KEY (entity, tag_path, task_id))");
             }
         }
 
@@ -82,6 +89,22 @@ public final class StreamSinks {
                 ps.executeBatch();
             } catch (Exception e) {
                 System.err.println("[tagstream] 投影写失败: " + e.getMessage());
+            }
+            // P1.2④: 变更审计(与投影同批, 失败不阻断投影)
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO tag_notify(entity, tag_path, tag_value, task_id, task_mode)"
+                            + " VALUES(?,?,?,?,'stream')"
+                            + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), task_mode='stream', occur_ts=CURRENT_TIMESTAMP(3)")) {
+                for (Map.Entry<String, String> e : hit.tags.entrySet()) {
+                    ps.setString(1, hit.entity);
+                    ps.setString(2, e.getKey());
+                    ps.setString(3, e.getValue() == null || e.getValue().isEmpty() ? null : e.getValue());
+                    ps.setLong(4, cfg.taskId);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            } catch (Exception e) {
+                System.err.println("[tagstream] 变更审计写失败: " + e.getMessage());
             }
         }
 

@@ -41,6 +41,9 @@ public class StreamJobService {
     private final JdbcTemplate metaJdbc;
     private final RestClient rest;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dcp.module.tagengine.TagDatasetService datasetService;   // 字段类型探测(流 Fact 数值字段可算)
+
     @Value("${dcp.tagstream.flink-url:http://flink-jobmanager:8081}")
     private String flinkUrl;
     @Value("${dcp.tagstream.jar:/opt/dcp-tagstream.jar}")
@@ -152,7 +155,7 @@ public class StreamJobService {
 
     private Map<String, Object> requireStreamPublished(long taskId) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT id,name,mode,dataset,entity_key,ver,status,snapshot_json,dataset_fields_json,stream_job_id,stream_status"
+                "SELECT id,name,mode,dataset,entity_key,ver,status,snapshot_json,dataset_fields_json,derived_json,stream_job_id,stream_status"
                         + " FROM tag_task WHERE id=?", taskId);
         if (rows.isEmpty()) throw new IllegalArgumentException("任务不存在 id=" + taskId);
         Map<String, Object> t = rows.get(0);
@@ -169,11 +172,28 @@ public class StreamJobService {
         cfg.put("taskVer", ((Number) task.get("ver")).intValue());
         cfg.put("entityKey", str(task.get("entity_key")));
         String dataset = str(task.get("dataset"));
-        // datasetFields(任务行数组)
+        // datasetFields(任务行数组 → {name,kind}; kind 来自字段探测(未注册逻辑表回退物理表探测), 失败全 S)
         ArrayNode ds = cfg.putArray("datasetFields");
         JsonNode rawDs = OM.readTree((String) task.get("dataset_fields_json"));
+        java.util.Map<String, String> kinds = new java.util.HashMap<>();
+        try {
+            com.fasterxml.jackson.databind.JsonNode probe = datasetService.fieldsOf(dataset).get("fields") instanceof JsonNode n
+                    ? n : OM.valueToTree(datasetService.fieldsOf(dataset).get("fields"));
+            if (probe != null && probe.isArray()) {
+                for (JsonNode c : probe) {
+                    String n2 = c.path("name").asText("");
+                    if (!n2.isEmpty()) kinds.put(n2, c.path("kind").asText("S"));
+                }
+            }
+        } catch (Exception ignore) {
+            /* 探测失败 → 全 String(数值规则不可用, 规则引用编译期兜底) */
+        }
         if (rawDs != null && rawDs.isArray()) {
-            for (JsonNode f : rawDs) ds.add(f.isTextual() ? f.asText() : f.path("name").asText());
+            for (JsonNode f : rawDs) {
+                String n2 = f.isTextual() ? f.asText() : f.path("name").asText();
+                if (n2.isEmpty()) continue;
+                ds.addObject().put("name", n2).put("kind", kinds.getOrDefault(n2, "S"));
+            }
         }
         ObjectNode kafka = cfg.putObject("kafka");
         kafka.put("bootstrapServers", "kafka:9092");
@@ -190,30 +210,41 @@ public class StreamJobService {
         fv.put("user", jdbcUser);
         fv.put("password", jdbcPassword);
         fv.put("table", "tag_fact_view");
-        // rules: 快照 assets 闭包展开为纯 rule 列表(流作业 v1 平铺; flow 引用的规则递归收录)
-        ArrayNode rulesArr = cfg.putArray("rules");
-        java.util.Set<Long> seen = new java.util.LinkedHashSet<>();
-        java.util.List<Long> order = new java.util.ArrayList<>();
-        java.util.Map<Long, JsonNode> byId = new java.util.HashMap<>();
-        for (JsonNode a : snap.path("assets")) byId.put(a.path("id").asLong(), a);
-        for (JsonNode b : snap.path("bindings")) expandRule(b.path("id").asLong(), byId, order, seen);
-        for (Long id : order) {
-            JsonNode a = byId.get(id);
-            if (a != null && "rule".equals(a.path("kind").asText())) rulesArr.add(a);
+        // 执行计划(batch task-json 同构): bindings 有序引用 + assets 全集(含 flow 定义); 流作业端解析控制流
+        ArrayNode bindArr = cfg.putArray("bindings");
+        for (JsonNode b : snap.path("bindings")) {
+            bindArr.addObject().put("kind", b.path("kind").asText()).put("id", b.path("id").asLong())
+                    .put("name", b.path("name").asText()).put("ver", b.path("ver").asInt());
         }
-        return cfg;
-    }
-
-    private void expandRule(long id, java.util.Map<Long, JsonNode> byId, java.util.List<Long> order,
-                            java.util.Set<Long> seen) {
-        if (!seen.add(id)) return;
-        order.add(id);
-        JsonNode a = byId.get(id);
-        if (a != null && "flow".equals(a.path("kind").asText())) {
-            for (JsonNode st : a.path("def").path("steps")) {
-                expandRule(st.path("refId").asLong(), byId, order, seen);
+        ArrayNode assetArr = cfg.putArray("rules");
+        for (JsonNode a : snap.path("assets")) assetArr.add(a);
+        // 窗口派生(P1.2①): 任务 derived 中 func=sum/count/avg/max/min 且带 field 的项 → 流窗口滚动聚合
+        ArrayNode derArr = cfg.putArray("derived");
+        if (task.get("derived_json") != null) {
+            JsonNode der = OM.readTree((String) task.get("derived_json"));
+            if (der != null && der.isArray()) {
+                java.util.Set<String> dsNames = new java.util.LinkedHashSet<>();
+                for (JsonNode f : rawDs != null && rawDs.isArray() ? rawDs : java.util.List.<JsonNode>of()) {
+                    dsNames.add(f.isTextual() ? f.asText() : f.path("name").asText());
+                }
+                for (JsonNode d : der) {
+                    String fn = d.path("func").asText("");
+                    String field = d.path("field").asText("");
+                    if (!java.util.Set.of("sum", "count", "avg", "max", "min").contains(fn)) continue;
+                    if (!"count".equals(fn) && !dsNames.contains(field)) continue;
+                    ObjectNode w = derArr.addObject();
+                    w.put("name", d.path("name").asText());
+                    w.put("func", fn);
+                    w.put("field", field);
+                    if (d.has("windowSeconds")) w.put("windowSeconds", d.path("windowSeconds").asLong(60));
+                    else if (d.has("windowDays")) w.put("windowSeconds", d.path("windowDays").asLong() * 86_400L);
+                    else w.put("windowSeconds", 60L);
+                }
             }
         }
+        log.info("[stream] task#{} job-json: datasetFields={} bindings={} derived={}",
+                task.get("id"), cfg.get("datasetFields"), cfg.get("bindings"), cfg.get("derived"));
+        return cfg;
     }
 
     /** 上传 jar(Flink web-upload 目录重启会清空, 同名复用不可靠 → 每次 start 重新上传, 返回 jarId) */

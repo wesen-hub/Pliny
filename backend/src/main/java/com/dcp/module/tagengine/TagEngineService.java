@@ -717,7 +717,7 @@ public class TagEngineService {
                         + " —— 请补数据集字段清单(datasetFields)或在派生字段中定义(DRL 规则的引用字段无法自动收集, 请人工核对)");
             }
         }
-        /* P1.2⑥ §4 发布前兼容校验: 在线无聚合派生; 流窗口派生未落地前同样拦截(落地后放开 stream) */
+        /* P1.2⑥ §4 发布前兼容校验: 在线=单事件无聚合派生; 流=仅窗口滚动聚合派生(func 白名单 + field 在数据集字段域) */
         {
             String mode = str(exist.get("mode"));
             JsonNode der2 = (JsonNode) exist.get("derived");
@@ -725,9 +725,31 @@ public class TagEngineService {
             if (der2 != null && der2.isArray()) {
                 for (JsonNode d : der2) if (!d.path("name").asText("").isEmpty()) { hasDer = true; break; }
             }
-            if (hasDer && ("online".equals(mode) || "stream".equals(mode))) {
-                throw new IllegalArgumentException("发布校验未通过(§4 模式兼容): " + mode
-                        + " 模式不支持派生字段 —— 在线=单事件无聚合; 流窗口派生落地(P1.2)后放开 stream, 当前请改用批任务或移除派生");
+            if (hasDer && "online".equals(mode)) {
+                throw new IllegalArgumentException("发布校验未通过(§4 模式兼容): online 模式不支持派生字段"
+                        + " —— 在线=单事件无聚合, 请用批/流任务承载派生或移除派生");
+            }
+            if (hasDer && "stream".equals(mode)) {
+                java.util.Set<String> funcs = java.util.Set.of("sum", "count", "avg", "max", "min");
+                java.util.Set<String> dsNames = new java.util.LinkedHashSet<>();
+                JsonNode ds2 = (JsonNode) exist.get("datasetFields");
+                if (ds2 != null && ds2.isArray()) {
+                    for (JsonNode x : ds2) if (!x.asText("").isEmpty()) dsNames.add(x.asText());
+                }
+                java.util.List<String> derr = new java.util.ArrayList<>();
+                for (JsonNode d : der2) {
+                    if (d.path("name").asText("").isEmpty()) continue;
+                    String fn = d.path("func").asText("");
+                    String field = d.path("field").asText("");
+                    if (!funcs.contains(fn)) derr.add("派生「" + d.path("name").asText() + "」func 须为 sum|count|avg|max|min(窗口聚合), 当前=" + (fn.isEmpty() ? "空" : fn));
+                    else if (!"count".equals(fn) && !dsNames.contains(field)) {
+                        derr.add("派生「" + d.path("name").asText() + "」聚合字段不在数据集字段域: " + field);
+                    }
+                }
+                if (!derr.isEmpty()) {
+                    throw new IllegalArgumentException("发布校验未通过(§4 模式兼容): stream 派生须为窗口滚动聚合\n- "
+                            + String.join("\n- ", derr));
+                }
             }
         }
         int newVer = ((Number) exist.get("ver")).intValue() + 1;
