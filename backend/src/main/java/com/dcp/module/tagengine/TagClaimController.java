@@ -24,20 +24,29 @@ import java.util.Map;
 public class TagClaimController {
 
     private final TagEngineService engine;
+    private final com.dcp.module.tagengine.perm.DataSecurityService security;
 
-    public TagClaimController(TagEngineService engine) {
+    public TagClaimController(TagEngineService engine, com.dcp.module.tagengine.perm.DataSecurityService security) {
         this.engine = engine;
+        this.security = security;
     }
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list() {
-        return ApiResponse.ok(engine.listClaims());
+        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (Map<String, Object> c : engine.listClaims()) {
+            if (security.tagLevel(String.valueOf(c.get("tagPath"))) > 0) out.add(c);
+        }
+        return ApiResponse.ok(out);
     }
 
     @GetMapping("/{tagPath}")
     public ApiResponse<Map<String, Object>> getByPath(@PathVariable String tagPath,
                                                       @RequestParam(required = false) String path) {
         String real = (path != null && !path.isBlank()) ? path : tagPath;
+        if (security.tagLevel(real) <= 0) {
+            return ApiResponse.error(403, "标签不可见(当前可见等级 L0): " + real);
+        }
         try {
             return ApiResponse.ok(engine.getClaim(real));
         } catch (IllegalArgumentException e) {

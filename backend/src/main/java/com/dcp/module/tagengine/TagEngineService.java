@@ -170,6 +170,11 @@ public class TagEngineService {
                 + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 + "update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 + "UNIQUE KEY uk_sub (tag_path, tag_value))");
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN owner VARCHAR(64) NULL COMMENT '订阅属主'"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT '站内'"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN webhook_url VARCHAR(512) NULL"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN freq VARCHAR(16) NOT NULL DEFAULT 'real-time'"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN ttl_days INT NULL"); } catch (DataAccessException ignored) { }
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
                 + "entity VARCHAR(128) NOT NULL COMMENT '实体键值',"
                 + "tag_path VARCHAR(512) NOT NULL,"

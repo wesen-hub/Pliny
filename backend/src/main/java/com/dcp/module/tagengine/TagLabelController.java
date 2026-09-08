@@ -1,52 +1,86 @@
 package com.dcp.module.tagengine;
 
 import com.dcp.common.ApiResponse;
+import com.dcp.module.tagengine.perm.DataSecurityService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 标签服务 API(P1; 查询面 = 投影表 tag_fact_view, 由执行器每轮同步 —— 湖 tag_fact 为权威+历史):
- *
- * <pre>
- *   GET /api/tagengine/labels/summary                视图总览(每 tag 实体数/最新 run 时间)
- *   GET /api/tagengine/labels/circle                 圈选: ?tagPath=业务域/交易/订单/金额档[&value=大额][&limit=100] → 实体集
- *   GET /api/tagengine/labels/entity/{entityKey}     实体全标签(当前值)
- * </pre>
- *
- * 订阅/圈选消费端可基于此 API 或直接查 tag_fact_view; 实体×标签当前值由认领任务产出(见 claims)。
+ * 标签服务 API(P1; 查询面 = 投影表 tag_fact_view) + 数据权限(P3): 标签级 L0-L3
+ * L0=不可见(剔除) L1=结构可见(无数据) L2=可圈选(仅计数, 不附实体明细) L3=全量明细。
  */
 @RestController
 @RequestMapping("/api/tagengine/labels")
 public class TagLabelController {
 
     private final TagEngineService engine;
+    private final DataSecurityService security;
 
-    public TagLabelController(TagEngineService engine) {
+    public TagLabelController(TagEngineService engine, DataSecurityService security) {
         this.engine = engine;
+        this.security = security;
     }
 
     @GetMapping("/summary")
     public ApiResponse<List<Map<String, Object>>> summary() {
-        return ApiResponse.ok(engine.labelSummary());
+        List<Map<String, Object>> rows = engine.labelSummary();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            int lv = security.tagLevel(String.valueOf(r.get("tag")));
+            if (lv <= DataSecurityService.HIDDEN) continue;         // L0 剔除
+            if (lv == DataSecurityService.META) r.put("entities", null);  // L1 见结构不见数据
+            out.add(r);
+        }
+        return ApiResponse.ok(out);
     }
 
     @GetMapping("/circle")
     public ApiResponse<Map<String, Object>> circle(@RequestParam String tagPath,
                                                    @RequestParam(required = false) String value,
                                                    @RequestParam(defaultValue = "100") int limit) {
+        int lv = security.tagLevel(tagPath);
+        if (lv < DataSecurityService.MASKED) {
+            return ApiResponse.error(403, "标签不可圈选(当前可见等级 L" + lv + ", 圈选需 L2+): " + tagPath);
+        }
+        Map<String, Object> m;
         try {
-            return ApiResponse.ok(engine.labelCircle(tagPath, value, Math.min(Math.max(limit, 1), 1000)));
+            m = engine.labelCircle(tagPath, value, Math.min(Math.max(limit, 1), 1000));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
         }
+        if (lv == DataSecurityService.MASKED) {
+            // L2: 可圈选计数与标签值, 不下钻实体明细
+            Object total = m.get("count");
+            Map<String, Object> slim = new LinkedHashMap<>();
+            slim.put("tagPath", tagPath);
+            slim.put("value", m.get("value"));
+            slim.put("total", total);
+            slim.put("entities", new ArrayList<>());
+            return ApiResponse.ok(slim);
+        }
+        return ApiResponse.ok(m);
     }
 
     @GetMapping("/entity/{entityKey}")
     public ApiResponse<Map<String, Object>> entity(@PathVariable String entityKey) {
         try {
-            return ApiResponse.ok(engine.labelEntity(entityKey));
+            Map<String, Object> m = engine.labelEntity(entityKey);
+            List<Map<String, Object>> labels = (List<Map<String, Object>>) m.get("labels");
+            List<Map<String, Object>> visible = new ArrayList<>();
+            if (labels != null) {
+                for (Map<String, Object> row : labels) {
+                    if (security.tagLevel(String.valueOf(row.get("tag"))) >= DataSecurityService.MASKED) {
+                        visible.add(row);
+                    }
+                }
+            }
+            m.put("labels", visible);
+            m.put("count", visible.size());
+            return ApiResponse.ok(m);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
         }

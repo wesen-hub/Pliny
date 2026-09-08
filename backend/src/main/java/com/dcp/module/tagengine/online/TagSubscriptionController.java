@@ -32,9 +32,13 @@ import java.util.*;
 public class TagSubscriptionController {
 
     private final JdbcTemplate metaJdbc;
+    private final com.dcp.module.tagengine.perm.DataSecurityService security;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dcp.module.system.service.AuditService auditService;
 
-    public TagSubscriptionController(JdbcTemplate metaJdbc) {
+    public TagSubscriptionController(JdbcTemplate metaJdbc, com.dcp.module.tagengine.perm.DataSecurityService security) {
         this.metaJdbc = metaJdbc;
+        this.security = security;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -54,6 +58,11 @@ public class TagSubscriptionController {
                     + "name VARCHAR(128) NOT NULL,"
                     + "tag_path VARCHAR(512) NOT NULL,"
                     + "tag_value VARCHAR(128) NULL,"
+                    + "owner VARCHAR(64) NULL COMMENT '订阅属主(创建用户); 投递=属主实时权限快照',"
+                    + "channel VARCHAR(16) NOT NULL DEFAULT '站内' COMMENT '站内|站内+webhook',"
+                    + "webhook_url VARCHAR(512) NULL,"
+                    + "freq VARCHAR(16) NOT NULL DEFAULT 'real-time' COMMENT 'real-time|daily',"
+                    + "ttl_days INT NULL COMMENT '到期回收(预留)',"
                     + "status TINYINT NOT NULL DEFAULT 1,"
                     + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
                     + "update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
@@ -90,7 +99,7 @@ public class TagSubscriptionController {
     public ApiResponse<List<Map<String, Object>>> listSubs() {
         ensureSchema();
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT s.id,s.name,s.tag_path,s.tag_value,s.status,s.create_time,s.update_time,"
+                "SELECT s.id,s.name,s.tag_path,s.tag_value,s.owner,s.status,s.create_time,s.update_time,"
                         + " (SELECT COUNT(DISTINCT n.entity) FROM tag_notify n"
                         + "   WHERE n.tag_path=s.tag_path AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS hit_entities,"
                         + " (SELECT MAX(n.occur_ts) FROM tag_notify n"
@@ -98,7 +107,10 @@ public class TagSubscriptionController {
                         + " FROM tag_subscription s ORDER BY s.id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) {
+            if (security.tagLevel(String.valueOf(r.get("tag_path"))) <= 0) continue;   // L0 订阅不可见
             Map<String, Object> m = new LinkedHashMap<>(r);
+            m.put("ownerLevel", security.tagLevel(String.valueOf(r.get("tag_path"))));  // 当前登录视角可见等级
+            m.put("ownerReadable", security.tagLevel(String.valueOf(r.get("tag_path"))) >= 2);
             out.add(m);
         }
         return ApiResponse.ok(out);
@@ -115,14 +127,27 @@ public class TagSubscriptionController {
             throw new IllegalArgumentException("订阅标签未注册: " + path + " —— 标签须先在注册表注册并被任务认领");
         }
         String val = s(body.get("tagValue")).trim();
+        if (security.tagLevel(path) < 2) {
+            throw new IllegalArgumentException("订阅标签当前不可圈选(可见等级 L" + security.tagLevel(path)
+                    + ", 需 L2+) —— 订阅=属主实时权限快照, 标签须对属主可圈选: " + path);
+        }
+        String owner = com.dcp.security.SecurityUtils.currentUsername();
+        String channel = s(body.getOrDefault("channel", "站内"));
+        String webhook = s(body.get("webhookUrl"));
+        String freq = s(body.getOrDefault("freq", "real-time"));
         KeyHolder kh = new GeneratedKeyHolder();
         metaJdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO tag_subscription(name,tag_path,tag_value) VALUES(?,?,?)",
+                    "INSERT INTO tag_subscription(name,tag_path,tag_value,owner,channel,webhook_url,freq)"
+                            + " VALUES(?,?,?,?,?,?,?)",
                     Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, name);
             ps.setString(2, path);
             ps.setString(3, val.isEmpty() ? null : val);
+            ps.setString(4, owner);
+            ps.setString(5, channel);
+            ps.setString(6, webhook.isEmpty() ? null : webhook);
+            ps.setString(7, freq);
             return ps;
         }, kh);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -186,6 +211,32 @@ public class TagSubscriptionController {
         }
         sql.append(" ORDER BY occur_ts DESC LIMIT ").append(Math.min(Math.max(limit, 1), 200));
         List<Map<String, Object>> rows = metaJdbc.queryForList(sql.toString(), args.toArray());
-        return ApiResponse.ok(Map.of("list", rows, "total", rows.size()));
+        List<Map<String, Object>> visible = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            if (security.tagLevel(String.valueOf(r.get("tag_path"))) >= 2) visible.add(r);
+        }
+        return ApiResponse.ok(Map.of("list", visible, "total", visible.size()));
+    }
+
+    /** 订阅实体明细导出: 数据出口 —— 需属主对标签 L3(完全可读), 动作写审计 */
+    @PostMapping("/subs/{id}/export")
+    @PreAuthorize("@perm.has('label:export')")
+    public ApiResponse<Map<String, Object>> export(@PathVariable long id) {
+        List<Map<String, Object>> rows = metaJdbc.queryForList(
+                "SELECT id,name,tag_path FROM tag_subscription WHERE id=?", id);
+        if (rows.isEmpty()) throw new IllegalArgumentException("订阅不存在 id=" + id);
+        String tag = String.valueOf(rows.get(0).get("tag_path"));
+        int lv = security.tagLevel(tag);
+        if (lv < 3) {
+            throw new IllegalArgumentException("导出实体明细需标签 L3(完全可读), 当前可见等级 L" + lv + ": " + tag);
+        }
+        Number total = metaJdbc.queryForObject(
+                "SELECT COUNT(DISTINCT entity) FROM tag_fact_view WHERE tag=?", Number.class, tag);
+        long n = total == null ? 0 : total.longValue();
+        if (auditService != null) {
+            auditService.record("tagengine", "SUB_EXPORT", "sub", id,
+                    "导出订阅实体明细: " + rows.get(0).get("name") + " tag=" + tag + " 行数=" + n);
+        }
+        return ApiResponse.ok(Map.of("subId", id, "tag", tag, "exported", n));
     }
 }

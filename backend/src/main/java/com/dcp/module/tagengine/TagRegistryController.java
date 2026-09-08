@@ -22,14 +22,20 @@ import java.util.Map;
 public class TagRegistryController {
 
     private final TagRegistryService service;
+    private final com.dcp.module.tagengine.perm.DataSecurityService security;
 
-    public TagRegistryController(TagRegistryService service) {
+    public TagRegistryController(TagRegistryService service, com.dcp.module.tagengine.perm.DataSecurityService security) {
         this.service = service;
+        this.security = security;
     }
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list() {
-        return ApiResponse.ok(service.list());
+        java.util.List<Map<String, Object>> filtered = new java.util.ArrayList<>();
+        for (Map<String, Object> r : service.list()) {
+            if (security.tagLevel(String.valueOf(r.get("tagPath"))) > 0) filtered.add(r);
+        }
+        return ApiResponse.ok(filtered);
     }
 
     @PostMapping
