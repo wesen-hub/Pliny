@@ -38,6 +38,7 @@
             <el-button size="small" text type="primary" @click="publish(row)">发布</el-button>
             <el-button size="small" text type="success" :disabled="row.status !== 'published'" @click="runTask(row)">触发运行</el-button>
             <el-button size="small" text type="warning" :disabled="row.status !== 'published'" @click="fullRun(row)">全量重算</el-button>
+            <el-button size="small" text :disabled="row.status !== 'published'" @click="matrixRun(row)">试跑</el-button>
             <el-button size="small" text @click="openRuns(row)">Runs</el-button>
             <el-button size="small" text type="danger" @click="del(row)">删</el-button>
           </template>
@@ -62,9 +63,23 @@
           <template #default="{ row }"><el-button size="small" text type="primary" @click="openRun(row)">看 json</el-button></template>
         </el-table-column>
       </el-table>
-      <el-dialog v-model="runJsonDlg" title="task-json / run 摘要" width="720" append-to-body>
+      <el-dialog v-model="runJsonDlg" title="task-json / run 摘要" width="760" append-to-body>
         <el-text size="small" type="info" style="display:block;margin-bottom:6px">submit: {{ curRun.submit_cmd }}</el-text>
-        <pre style="max-height:420px;overflow:auto;background:#0d1b2a;color:#9fdcb0;padding:10px;font-size:12px">{{ curRun.payloadText }}</pre>
+        <template v-if="curRun.matrix">
+          <div class="sec-title">试跑命中矩阵(采样求值, 未写 tag_fact)</div>
+          <el-table :data="curRun.matrix.assets || []" size="small" border>
+            <el-table-column label="资产" min-width="200"><template #default="{ row }">{{ row.kind }}:{{ row.name }} (id{{ row.id }} v{{ row.ver }})</template></el-table-column>
+            <el-table-column label="命中行" width="90" align="center"><template #default="{ row }">{{ row.hitRows }}</template></el-table-column>
+            <el-table-column label="标签行" width="90" align="center"><template #default="{ row }">{{ row.tagRows }}</template></el-table-column>
+          </el-table>
+          <el-text size="small" type="info" style="display:block;margin:6px 0">总行数 {{ curRun.matrix.totalRows }} · 空实体 {{ curRun.matrix.nullEntityRows }}</el-text>
+        </template>
+        <template v-else-if="curRun.summary">
+          <div class="sec-title">run 摘要</div>
+          <pre style="max-height:160px;overflow:auto;background:#0d1b2a;color:#9fdcb0;padding:10px;font-size:12px">{{ JSON.stringify(curRun.summary, null, 2) }}</pre>
+        </template>
+        <div class="sec-title" style="margin-top:10px">task-json payload</div>
+        <pre style="max-height:300px;overflow:auto;background:#0d1b2a;color:#9fdcb0;padding:10px;font-size:12px">{{ curRun.payloadText }}</pre>
       </el-dialog>
     </el-drawer>
   </div>
@@ -101,6 +116,11 @@ function publish(row) {
 function runTask(row) {
   tasksApi.run(row.id).then((r) => {
     toast(`run #${r.runId} 已触发: ${r.status} —— ${r.submitCmd ? '命令已生成(见 Runs→看 json)' : ''}`)
+  }).catch(() => {})
+}
+function matrixRun(row) {
+  tasksApi.run(row.id, false, true).then((r) => {
+    toast(`试跑 run #${r.runId} 已触发(采样命中矩阵, 不写 tag_fact): ${r.status}`)
   }).catch(() => {})
 }
 function fullRun(row) {

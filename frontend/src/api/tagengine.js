@@ -16,6 +16,10 @@ export const registryApi = {
   update: (id, body) => request.put(`/tagengine/registry/${id}`, body),
   remove: (id) => request.delete(`/tagengine/registry/${id}`)
 }
+export const claimsApi = {
+  list: () => request.get('/tagengine/claims'),
+  get: (path) => request.get('/tagengine/claims/x', { params: { path } })
+}
 
 export const tasksApi = {
   list: () => request.get('/tagengine/tasks'),
@@ -24,7 +28,7 @@ export const tasksApi = {
   update: (id, body) => request.put(`/tagengine/tasks/${id}`, body),
   remove: (id) => request.delete(`/tagengine/tasks/${id}`),
   publish: (id) => request.post(`/tagengine/tasks/${id}/publish`),
-  run: (id, full) => request.post(`/tagengine/tasks/${id}/run?trigger=manual${full ? '&full=true' : ''}`)
+  run: (id, full, matrix) => request.post(`/tagengine/tasks/${id}/run?trigger=manual${full ? '&full=true' : ''}${matrix ? '&matrix=true' : ''}`)
 }
 
 export const runsApi = {

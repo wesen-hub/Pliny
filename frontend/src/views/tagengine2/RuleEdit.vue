@@ -50,7 +50,7 @@
             </el-select>
             <template v-if="a.type === 'tag'">
               <el-select v-model="a.tag" size="small" filterable style="width:200px" placeholder="标签(注册表)">
-                <el-option v-for="t in tagOptions" :key="t" :value="t" :label="t" />
+                <el-option v-for="t in tagPaths" :key="t" :value="t" :label="t" />
               </el-select>
               <template v-if="!metaBool(a.tag)">
                 <el-text size="small" type="info">值</el-text>
@@ -73,7 +73,7 @@
             <el-text size="small" type="info">分档字段(可引用派生字段)</el-text>
             <el-select v-model="f.def.table.field" size="small" style="width:160px"><el-option v-for="x in fieldPool" :key="x" :value="x" :label="x" /></el-select>
             <el-text size="small" type="info">标签</el-text>
-            <el-select v-model="f.def.table.tag" size="small" style="width:190px"><el-option v-for="t in tagOptions" :key="t" :value="t" :label="t" /></el-select>
+            <el-select v-model="f.def.table.tag" size="small" style="width:190px"><el-option v-for="t in tagPaths" :key="t" :value="t" :label="t" /></el-select>
             <el-text size="small" type="info">(档值须在标签取值域内)</el-text>
           </div>
           <el-table :data="f.def.table.rows" size="small" border>
@@ -139,20 +139,25 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { rulesApi } from '../../api/tagengine.js'
-import { tagOptions, metaBool, domainOf, sumRule, depNamesOf } from './mockLib.js'
+import { rulesApi, registryApi } from '../../api/tagengine.js'
+import { metaBool, domainOf, sumRule, depNamesOf } from './mockLib.js'
 
 const route = useRoute()
 const router = useRouter()
 const toast = (m) => ElMessage.info(m)
 const isEdit = computed(() => !!route.query.id)
 const defDefault = (mode) => ({
-  mode, table: { field: 'amount', tag: '订单/金额档', rows: [{ op: '>=', th: '', val: '' }], elseVal: '' },
+  mode, table: { field: 'amount', tag: '', rows: [{ op: '>=', th: '', val: '' }], elseVal: '' },
   visual: { when: [{ logic: 'AND', conds: [{ field: '', op: '==', val: '' }] }], actions: [{ type: 'tag', tag: '', val: '' }] },
   drl: ''
 })
 const f = ref({ id: undefined, name: '', descr: '', kind: 'rule', status: 1, def: defDefault(route.query.mode || 'visual') })
+const tagPaths = ref([])
 onMounted(async () => {
+  try {
+    const regs = await registryApi.list()
+    tagPaths.value = (regs || []).map((r) => r.tagPath).filter(Boolean)
+  } catch (e) { /* 已提示 */ }
   if (!isEdit.value) return
   try {
     const row = await rulesApi.get(route.query.id)
