@@ -451,3 +451,13 @@ CREATE TABLE IF NOT EXISTS data_sub_export (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   KEY idx_contract (contract_id, id)
 ) ENGINE=InnoDB COMMENT='数据订阅异步导出任务';
+
+-- ============ 数据资产目录(2026-09-09): 资产 × 业务标签绑定 ============
+CREATE TABLE IF NOT EXISTS asset_tag_binding (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  asset_table VARCHAR(128) NOT NULL COMMENT '资产(逻辑表名)',
+  tag_path VARCHAR(255) NOT NULL COMMENT '业务标签路径(如 业务域/电商)',
+  create_by VARCHAR(64), create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_asset_tag (asset_table, tag_path),
+  KEY idx_tag (tag_path)
+) ENGINE=InnoDB COMMENT='资产目录人工打标绑定';

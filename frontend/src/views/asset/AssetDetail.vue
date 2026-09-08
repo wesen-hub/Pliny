@@ -70,8 +70,19 @@
           <div class="dim2" style="line-height:2">健康分: —(运行信号合成, P2)<br>质量档: —<br>生命周期: —</div>
         </div>
         <div class="panel">
-          <div class="p-t">标签 <span class="dim2">(人工打标 P0 绑定 API)</span></div>
-          <div class="dim2" style="line-height:2">自动: {{ node.layer || '未分层' }} / {{ sources.join('、') || '无来源' }}<br>业务标签: 待打标</div>
+          <div class="p-t">标签 <span class="dim2">(自动=层/来源; 业务标签已接后端)</span></div>
+          <div style="line-height:2">
+            <div class="dim2">自动: {{ node.layer || '未分层' }} / {{ sources.join('、') || '无来源' }}</div>
+            <div class="tag-row">
+              <el-tag v-for="t in myTags" :key="t" size="small" closable @close="unTag(t)" style="margin:2px">{{ t }}</el-tag>
+              <span v-if="!myTags.length" class="dim2">暂无业务标签</span>
+            </div>
+            <div class="flex" style="gap:6px;margin-top:6px">
+              <el-input v-model="tagInput" size="small" placeholder="如: 业务域/客户/核心" style="width:190px" @keyup.enter="doTag" />
+              <el-button size="small" type="primary" @click="doTag">打标</el-button>
+            </div>
+            <div class="dim2" style="margin-top:4px">预设: <span v-for="p in presets" :key="p" class="preset" @click="tagInput = p">{{ p }}</span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -116,6 +127,28 @@ function sourcesOf(tn) {
   L.edges.forEach(e => { if ((e.type === 'SOURCE_OF' || e.type === 'DERIVED_FROM') && e.to === tid && j2s[e.f]) s.add(j2s[e.f]) })
   return [...s]
 }
+const myTags = ref([])
+const tagInput = ref('')
+const presets = ['业务域/客户', '业务域/交易', '项目/营销', '治理/核心资产']
+async function loadMyTags() {
+  try { myTags.value = (await request.get('/asset-catalog/tags', { params: { table: name.value } })) || [] } catch (e) { /* noop */ }
+}
+async function doTag() {
+  const p = tagInput.value.trim()
+  if (!p) return
+  try {
+    await request.post('/asset-catalog/tag', { table: name.value, path: p })
+    tagInput.value = ''
+    await loadMyTags()
+    ElMessage.success('已打标: ' + p)
+  } catch (e) { ElMessage.error('打标失败: ' + (e.message || e)) }
+}
+async function unTag(path) {
+  try {
+    await request.post('/asset-catalog/untag', { table: name.value, path })
+    await loadMyTags()
+  } catch (e) { ElMessage.error('去标失败: ' + (e.message || e)) }
+}
 function toggleFav() {
   const i = favs.value.indexOf(name.value)
   if (i >= 0) favs.value.splice(i, 1); else favs.value.push(name.value)
@@ -143,6 +176,7 @@ onMounted(() => {
   favs.value = JSON.parse(localStorage.getItem(FAV_KEY) || '[]')
   fav.value = favs.value.includes(name.value)
   load()
+  loadMyTags()
 })
 </script>
 
@@ -159,4 +193,7 @@ onMounted(() => {
 .rel { margin-bottom: 12px; }
 .r-t { font-size: 12px; color: #666; margin-bottom: 6px; }
 .dim2 { color: #999; font-size: 12px; }
+.tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-top: 4px; }
+.preset { color: #1677ff; cursor: pointer; margin-right: 8px; }
+.flex { display: flex; align-items: center; }
 </style>

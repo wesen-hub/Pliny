@@ -93,6 +93,8 @@ const loaded = ref(false)
 const kw = ref('')
 const curTag = ref('')
 const favOnly = ref(false)
+const bizTree = ref([])
+const bizFilter = ref([])
 const FAV_KEY = '***'
 const favs = ref([])
 const L = reactive({ nodes: [], edges: [] })
@@ -139,11 +141,12 @@ const list = computed(() => {
   }).filter(r => {
     if (favOnly.value && !r.fav) return false
     if (curTag.value) {
-      const [cat, val] = curTag.value.split(':')
+      const [cat, ...rest] = curTag.value.split(':')
+      const val = rest.join(':')
       if (cat === 'layer' && (r.layer || '(未分层)') !== val) return false
       if (cat === 'kind' && (r.kind || 'physical') !== val) return false
       if (cat === 'src' && !r.sources.includes(val)) return false
-      if (cat === 'fld' && !r.fields) return false
+      if (cat === 'biz' && bizFilter.value.length && !bizFilter.value.includes(r.label)) return false
     }
     const q = kw.value.trim()
     if (!q) return true
@@ -167,17 +170,25 @@ const tree = computed(() => {
     children: Object.entries(cnt).filter(([k]) => k.startsWith(prefix + ':'))
       .map(([k, c]) => ({ id: k, name: k.split(':').slice(1).join(':'), count: c }))
   })
+  const bizChildren = bizTree.value.map(t => ({ ...t, name: t.name }))
   return [
     { id: 'all', name: '全部资产', count: tables.value.length },
     branch('数据分层', 'layer'),
     branch('数据来源', 'src'),
     branch('资产类型', 'kind'),
-    { id: 'biz', name: '业务域(人工打标·P0)', children: [] }
+    { id: 'biz', name: '业务域', count: null, children: bizChildren }
   ]
 })
 function onTag(d) {
   if (d.children && d.children.length) return
   curTag.value = d.id === 'all' ? '' : d.id
+  if (d.id === 'all') { bizFilter.value = [] }
+  if (d.id.startsWith('biz:')) {
+    const full = d.full || d.id.slice(4)
+    request.get('/asset-catalog/assets', { params: { tag: full } })
+      .then(list => { bizFilter.value = list || [] })
+      .catch(() => { ElMessage.error('业务标签查询失败') })
+  }
 }
 
 /* 动作 */
@@ -196,6 +207,7 @@ async function load() {
     L.nodes = d.nodes || []
     L.edges = (d.edges || []).map(e => ({ ...e, f: e.f || e.from, to: e.to }))
     loaded.value = true
+    try { bizTree.value = (await request.get('/asset-catalog/tag-tree')) || [] } catch (e) { /* 业务标签树不可用 */ }
   } catch (e) { ElMessage.error('目录加载失败(Neo4j?): ' + (e.message || e)) } finally { loading.value = false }
 }
 onMounted(() => {

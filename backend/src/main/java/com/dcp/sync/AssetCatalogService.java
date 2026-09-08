@@ -18,6 +18,7 @@ import java.util.*;
  * - 维度: biz(业务域)/src(来源系统)/sec(密级)/custom(自定义)
  * - src 维度按来源系统自动分组(不落库); biz/sec/custom 由用户维护节点与挂载
  * - 资产 = 逻辑表; 资产元数据(asset_meta)可编辑(展示名/域/分层/密级/负责人/标签)
+ * 注: 手动目录节点接口已停用(2026-09-09 标签驱动目录替代), 本 service 保留供 TagService 依赖。
  */
 @Service
 public class AssetCatalogService {

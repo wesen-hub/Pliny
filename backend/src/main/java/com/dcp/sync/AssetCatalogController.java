@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * 数据资产编目 API(可维护): 多层级目录树 + 节点/挂载/资产元数据维护。
  */
-@RestController
+// @RestController (停用 2026-09-09: 手动目录节点体系废弃, 由 module/assetcat 标签驱动目录替代)
 @RequestMapping("/api/asset-catalog")
 public class AssetCatalogController {
 
