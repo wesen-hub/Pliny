@@ -117,6 +117,31 @@ public class DataSubService {
         if ("tag".equals(vt) && (!view.path("tags").isArray() || view.path("tags").isEmpty())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "tag 视图需 tags[]");
         }
+        // 引用完整性: logical 视图引用的表必须真实存在(建模即发布的数据面物理表), 杜绝幽灵契约
+        if ("logical".equals(vt)) {
+            java.util.List<String> refTables = new java.util.ArrayList<>();
+            for (JsonNode tn : view.path("tables")) {
+                String t = ident(tn.asText());
+                if (t == null) throw new BizException(ErrorCode.PARAM_ERROR, "非法表名: " + tn.asText());
+                if (!targetTableExists(t)) {
+                    throw new BizException(ErrorCode.PARAM_ERROR,
+                            "逻辑表不存在(请先在模型管理发布, 或确认数据面已就绪): " + t);
+                }
+                refTables.add(t);
+            }
+            // 显式交付列须属于目标表(与 queryLogical 白名单同源, 取首表校验)
+            JsonNode colsNode = view.path("cols");
+            if (colsNode.isArray() && !colsNode.isEmpty()) {
+                String t0 = refTables.get(0);
+                for (JsonNode cn : colsNode) {
+                    String col = ident(cn.asText());
+                    if (col == null) throw new BizException(ErrorCode.PARAM_ERROR, "非法列名: " + cn.asText());
+                    if (!targetColExists(t0, col)) {
+                        throw new BizException(ErrorCode.PARAM_ERROR, "交付列不存在于表 " + t0 + ": " + col);
+                    }
+                }
+            }
+        }
         String push = "push".equals(s(body.get("push"))) ? "push" : "pull";
         String freq = s(body.getOrDefault("freq", "manual"));
         String tt = s(body.get("targetType"));
@@ -340,10 +365,34 @@ public class DataSubService {
             try {
                 out.addAll(target().queryForList(sql.toString()));
             } catch (Exception e) {
-                throw new BizException(ErrorCode.PARAM_ERROR, "表查询失败 " + t + ": " + e.getMessage());
+                // 内部 SQL 不外泄: 表缺失/结构变化统一业务化文案(幽灵表创建已在契约申请期拦截)
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "视图查询失败: 表 " + t + " 不存在或不可用(请与平台确认数据集就绪状态)");
             }
         }
         return out;
+    }
+
+    private boolean targetTableExists(String table) {
+        try {
+            Number n = target().queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?",
+                    Number.class, table);
+            return n != null && n.longValue() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean targetColExists(String table, String col) {
+        try {
+            Number n = target().queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?",
+                    Number.class, table, col);
+            return n != null && n.longValue() > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String probeSeqCol(String table) {

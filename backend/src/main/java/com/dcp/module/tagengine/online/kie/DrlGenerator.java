@@ -51,10 +51,12 @@ public final class DrlGenerator {
             errors.add(locate(rule) + " 未知定义方式 mode=" + mode + "(须 visual|table|drl)");
             return null;
         }
+        // 生成期错误(如非法条件操作符)不得静默: 返回 null 让上层显式报编译失败
+        if (!errors.isEmpty()) {
+            return null;
+        }
         return header(pkg, factFqcn) + rules;
     }
-
-    /* ---------- 包头部: import + dialect + 动作函数声明 ---------- */
 
     private static String header(String pkg, String factFqcn) {
         return "package " + pkg + ";\n"

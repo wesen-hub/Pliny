@@ -397,6 +397,43 @@ public class TagEngineService {
 
     /* ═══════════════════ 规则/规则流 CRUD ═══════════════════ */
 
+    private static final java.util.Set<String> RULE_OPS = java.util.Set.of(
+            "==", "!=", ">", ">=", "<", "<=", "in", "like", "null", "notnull");
+
+    /** 可视化条件操作符归一化 + 词表校验(平台/在线/批统一; "=" 归一为 "==" 避免在线编译静默丢弃) */
+    private static void normalizeVisualOps(JsonNode def) {
+        if (def == null || !def.isObject() || !"visual".equals(def.path("mode").asText(""))) {
+            return;
+        }
+        JsonNode when = def.path("visual").path("when");
+        if (!when.isArray()) {
+            return;
+        }
+        for (JsonNode g : when) {
+            JsonNode conds = g.path("conds");
+            for (JsonNode c : conds) {
+                if (!c.isObject()) {
+                    continue;
+                }
+                String op = c.path("op").asText("");
+                if (op.isBlank()) {
+                    if (!c.path("field").asText("").isBlank()) {
+                        throw new IllegalArgumentException("条件缺操作符(field=" + c.path("field").asText("") + ")");
+                    }
+                    continue;
+                }
+                if ("=".equals(op)) {
+                    ((ObjectNode) c).put("op", "==");
+                    op = "==";
+                }
+                if (!RULE_OPS.contains(op)) {
+                    throw new IllegalArgumentException("不支持的条件操作符: " + op
+                            + "(支持: =/==, !=, >, >=, <, <=, in, like, null, notnull)");
+                }
+            }
+        }
+    }
+
     public List<Map<String, Object>> listRules(String kind) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : allRules()) {
@@ -421,6 +458,7 @@ public class TagEngineService {
         String kind = str(body.get("kind"));
         if (name.isEmpty()) throw new IllegalArgumentException("规则名称必填");
         JsonNode def = toNode(body.get("def"));
+        normalizeVisualOps(def);
         Set<String> deps = validateDef(kind, def);
         Integer cnt = metaJdbc.queryForObject("SELECT COUNT(*) FROM tag_rule WHERE name=? AND kind=?",
                 Integer.class, name, kind);
@@ -455,6 +493,7 @@ public class TagEngineService {
         String name = str(body.getOrDefault("name", exist.get("name"))).trim();
         String kind = (String) exist.get("kind"); /* kind 不可改 */
         JsonNode def = toNode(body.get("def"));
+        normalizeVisualOps(def);
         Set<String> deps = validateDef(kind, def);
         /* 编辑既有 flow 时的环检测(validateDef 传 selfId=0 只做结构; 这里对存在 id 重新做含自引用判定) */
         if ("flow".equals(kind)) assertStepsOk(id, def);
