@@ -31,7 +31,10 @@ public class TagDatasetController {
         // 数据权限 F1: 表 L0 不出现在数据集目录(向导/下拉)
         java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
         for (Map<String, Object> d : service.listDatasets()) {
-            if (security.tableLevel(String.valueOf(d.get("table_name") == null ? d.get("name") : d.get("table_name"))) > 0) out.add(d);
+            Object tn = d.get("table_name");
+            if (tn == null) tn = d.get("tableName");      // listDatasets 实际返回键 tableName
+            if (tn == null) tn = d.get("name");
+            if (security.tableLevel(String.valueOf(tn)) > 0) out.add(d);
         }
         return ApiResponse.ok(out);
     }
