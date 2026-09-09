@@ -124,30 +124,43 @@ public class SyncTopicRegistry {
                     log.warn("Kafka topic 创建竞态(待校验扩分区): {} - {}", topic, e.getMessage());
                 }
             }
-            // 统一校验: 无论新建/已存在/竞态 auto-create, 分区不足就扩(最多 5 次, leader 就绪有延迟)
-            for (int i = 0; i < 5; i++) {
-                int cur = admin.describeTopics(java.util.List.of(topic)).allTopicNames().get(5, java.util.concurrent.TimeUnit.SECONDS)
-                        .get(topic).partitions().size();
-                if (cur >= partitionCount) {
+            // 统一校验: 无论新建/已存在/竞态 auto-create, 分区不足就扩(循环内防 topic 尚未就绪 NPE,
+            // 创建/扩容失败都 sleep 重试, 最后仍不足才抛给外层告警 —— 修复 auto-create 1 分区竞态)
+            int lastCur = -1;
+            for (int i = 0; i < 8; i++) {
+                var tt = admin.describeTopics(java.util.List.of(topic)).allTopicNames()
+                        .get(5, java.util.concurrent.TimeUnit.SECONDS).get(topic);
+                if (tt == null) {          // topic 尚未被任何角色建出(metadata 未同步) → 补一次创建再等
+                    try {
+                        admin.createTopics(java.util.List.of(new org.apache.kafka.clients.admin.NewTopic(topic, partitionCount, (short) 1)))
+                                .all().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                        log.info("Kafka topic 补建: {} partitions={}", topic, partitionCount);
+                    } catch (Exception ignore) {
+                    }
+                    lastCur = 0;
+                } else {
+                    lastCur = tt.partitions().size();
+                }
+                if (lastCur >= partitionCount) {
                     break;
                 }
                 try {
                     admin.createPartitions(java.util.Map.of(topic,
                                     org.apache.kafka.clients.admin.NewPartitions.increaseTo(partitionCount)))
                             .all().get(15, java.util.concurrent.TimeUnit.SECONDS);
-                    log.info("Kafka topic 扩分区: {} → {}(当前 {})", topic, partitionCount, cur);
+                    log.info("Kafka topic 扩分区: {} → {}(当前 {})", topic, partitionCount, lastCur);
                 } catch (Exception retryEx) {
-                    if (i < 4) {
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    } else {
-                        throw retryEx;
-                    }
+                    // auto-create/metadata 未就绪期间扩容失败属正常, 下轮重试
                 }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (lastCur < partitionCount) {
+                log.warn("Kafka topic 分区仍不足: {}={}(期望 {})", topic, lastCur, partitionCount);
             }
         } catch (Exception e) {
             log.warn("确保 topic 分区失败(可能已存在, 继续): {} - {}", topic, e.getMessage());

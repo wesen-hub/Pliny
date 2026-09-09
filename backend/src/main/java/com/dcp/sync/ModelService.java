@@ -64,9 +64,10 @@ public class ModelService {
         // 去分片(2026-09-07): 物理单表 = 逻辑表(TiDB 自动 split), 参数 tableCount 不再生效
         final int physicalTables = 1;
         String topic = "dcp." + tableName;
-        // ① 模型定义
+        // ① 模型定义(重复建模 → 友好业务错误, 勿漏为 500)
         KeyHolder kh = new GeneratedKeyHolder();
-        metaJdbc.update(con -> {
+        try {
+            metaJdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO model_definition (name, layer, domain, table_name, topic, bucket_count, "
                             + "partition_count, table_count, key_columns, fields, description) VALUES (?, ?, ?, ?, ?, 4096, ?, ?, ?, ?, ?)",
@@ -82,7 +83,10 @@ public class ModelService {
             ps.setString(9, fieldsJson);
             ps.setString(10, description);
             return ps;
-        }, kh);
+            }, kh);
+        } catch (org.springframework.dao.DuplicateKeyException dke) {
+            throw new IllegalArgumentException("模型已存在(逻辑表建模即发布, 请勿重复): table_name=" + tableName);
+        }
         long id = kh.getKey().longValue();
 
         // ② 逻辑表运行时配置(幂等 upsert; 内部自动建 topic + 分区 + 注册消费监听)
