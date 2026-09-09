@@ -71,9 +71,11 @@ public class DataPolicyController {
     @PreAuthorize("@perm.has('system:data-policy:manage')")
     public ApiResponse<Map<String, Object>> resources() {
         // 数据集(资产目录 ∪ 打标任务用到的数据面表, 附资产密级)
+        // 注: 两表列 collation 不一致(asset_meta utf8mb4_0900_ai_ci vs tag_task utf8mb4_unicode_ci),
+        // UNION 会报 MySQL 1271 Illegal mix of collations → 显式 COLLATE 统一
         List<Map<String, Object>> datasets = metaJdbc.queryForList(
-                "SELECT table_name AS name, secret_level AS secret FROM asset_meta WHERE table_name IS NOT NULL"
-                        + " UNION SELECT DISTINCT dataset AS name, NULL AS secret FROM tag_task WHERE dataset IS NOT NULL"
+                "SELECT table_name COLLATE utf8mb4_unicode_ci AS name, secret_level AS secret FROM asset_meta WHERE table_name IS NOT NULL"
+                        + " UNION SELECT DISTINCT dataset COLLATE utf8mb4_unicode_ci AS name, NULL AS secret FROM tag_task WHERE dataset IS NOT NULL"
                         + " ORDER BY name");
         // 标签树(已注册标签路径 + 中间分类节点)
         Map<Long, String> name = new HashMap<>();
