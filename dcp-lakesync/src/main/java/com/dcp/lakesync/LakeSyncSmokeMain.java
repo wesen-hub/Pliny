@@ -13,7 +13,7 @@ public final class LakeSyncSmokeMain {
         check("全量(无游标)谓词为 null", newJob(0, -1, -1).pullPredicate() == null);
         check("增量谓词 OR 下推", "`_seq_a` > 41 OR `_seq_b` > 27".equals(newJob(0, 41, 27).pullPredicate()));
         LakeJobConfig c = newJob(1, -1, 5);
-        check("混载: 仅推进有游标源", "`_seq_b` > 5".equals(c.pullPredicate()));
+        check("混载: 任一列未同步(游标-1) → 整轮全量(防漏未同步列历史)", c.pullPredicate() == null);
         LakeJobConfig bad = new LakeJobConfig();
         boolean threw = false;
         try {

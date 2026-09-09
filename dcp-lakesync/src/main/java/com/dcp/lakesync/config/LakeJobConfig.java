@@ -77,11 +77,18 @@ public class LakeJobConfig {
         public Map<String, String> s3;           // endpoint/pathStyleAccess/accessKey/secretKey/region
     }
 
-    /** 源侧增量拉取谓词: 任一源 seq 列 > 对应游标; 全为 -1(首载)返回 null(全表) */
+    /** 源侧增量拉取谓词: 任一源 seq 列 > 对应游标(OR);
+     * 若任一列 cursor<0(该列从未同步/新写者列加入)→ 整轮退化全量(NULL),
+     * 否则只按已同步列增量会漏掉未同步列的历史数据 */
     public String pullPredicate() {
+        if (seqColumns.isEmpty()) {
+            return null;
+        }
         StringBuilder sb = new StringBuilder();
         for (SeqColumn sc : seqColumns) {
-            if (sc.cursor < 0) continue;
+            if (sc.cursor < 0) {
+                return null;   // 任一列未同步 → 全量首载/重载(MERGE 幂等)
+            }
             if (sb.length() > 0) sb.append(" OR ");
             sb.append('`').append(sc.name).append("` > ").append(sc.cursor);
         }

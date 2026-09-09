@@ -66,7 +66,7 @@ public class LakeSyncService {
     private String s3Endpoint;
     @Value("${dcp.lakesync.catalog.s3.access-key:minioadmin}")
     private String s3AccessKey;
-    @Value("${dcp.lakesync.catalog.s3.secret-key:***}")
+    @Value("${dcp.lakesync.catalog.s3.secret-key:minioadmin123}")   // 与 compose dcp-minio/Polaris 一致; 生产用 env 覆盖
     private String s3SecretKey;
     @Value("${dcp.sync.target.url}")
     private String targetUrl;               // 数据面 JDBC(与 AuthorityMerger/TargetDbRegistry 同源)

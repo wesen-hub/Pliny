@@ -218,6 +218,12 @@ services:
       DCP_TAGSTREAM_JAR: ${DCP_TAGSTREAM_JAR:-/opt/dcp-tagstream.jar}
       DCP_TAGSTREAM_REDIS_HOST: ${DCP_TAGSTREAM_REDIS_HOST:-dcp-redis}
       DCP_TAGSTREAM_REDIS_PORT: ${DCP_TAGSTREAM_REDIS_PORT:-6379}
+      # 湖同步(LakeSync, Spark 批同步到 Iceberg REST catalog demo/dcp; job-json 由平台组装)
+      DCP_LAKESYNC_CATALOG_URI: ${DCP_LAKESYNC_CATALOG_URI:-http://dcp-polaris:8181/api/catalog}
+      DCP_LAKESYNC_CATALOG_TOKEN_URL: ${DCP_LAKESYNC_CATALOG_TOKEN_URL:-http://dcp-polaris:8181/api/catalog/v1/oauth/tokens}
+      DCP_LAKESYNC_CATALOG_S3_ENDPOINT: ${DCP_LAKESYNC_CATALOG_S3_ENDPOINT:-http://dcp-minio:9000}
+      DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY: ${DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY:-minioadmin}
+      DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: ${DCP_LAKESYNC_CATALOG_S3_SECRET_KEY:-minioadmin123}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
       SYNC_TOPICS: ""
@@ -233,6 +239,9 @@ services:
       timeout: 5s
       retries: 20
       start_period: 60s
+    networks:
+      - default
+      - dcp-lake
 
   frontend:
     build: ./frontend
@@ -370,3 +379,8 @@ volumes:
   demo-db-data:
   mongo-data:
   postgres-data:
+
+networks:
+  default:
+  dcp-lake:
+    external: true
