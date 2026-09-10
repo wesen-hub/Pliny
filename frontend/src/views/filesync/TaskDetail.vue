@@ -130,6 +130,70 @@
       </el-table>
       <el-text v-if="!browseLoading && !browseItems.length" size="small" type="info">目标下暂无文件(或目录为空)</el-text>
     </el-card>
+
+    <el-card shadow="never" style="margin-top:12px">
+      <template #header>
+        <div class="sec-head">
+          <b>一致性对账</b>
+          <el-text size="small" type="info">只报告不修改: 源/目标清单递归比对</el-text>
+        </div>
+      </template>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <el-button size="small" type="primary" :loading="reconcileLoading" @click="doReconcile">开始对账</el-button>
+        <template v-if="reconcile">
+          <el-tag size="small" effect="plain">源 {{ reconcile.sourceCount }}</el-tag>
+          <el-tag size="small" effect="plain">目标 {{ reconcile.targetCount }}</el-tag>
+          <el-tag size="small" :type="reconcile.missingCount ? 'warning' : 'success'" effect="plain">目标缺失 {{ reconcile.missingCount }}</el-tag>
+          <el-tag size="small" :type="reconcile.extraCount ? 'warning' : 'success'" effect="plain">目标多余 {{ reconcile.extraCount }}</el-tag>
+          <el-tag size="small" :type="reconcile.sizeDiffCount ? 'warning' : 'success'" effect="plain">大小不一致 {{ reconcile.sizeDiffCount }}</el-tag>
+          <el-text size="small" type="info">{{ reconcile.elapsedMs }}ms</el-text>
+          <el-tag v-if="reconcile.truncated" size="small" type="danger" effect="plain">清单已截断</el-tag>
+        </template>
+      </div>
+      <el-alert v-if="reconcile && reconcile.note" :title="reconcile.note" type="warning" :closable="false" show-icon style="margin-bottom:8px" />
+      <template v-if="reconcile">
+        <el-text v-if="!reconcile.missingCount && !reconcile.extraCount && !reconcile.sizeDiffCount" size="small" type="success">源与目标一致 ✓(本任务无差异)</el-text>
+        <el-tabs v-else v-model="reconcileTab">
+          <el-tab-pane :label="`目标缺失 (${reconcile.missingCount})`" name="missing">
+            <el-table :data="reconcile.missing" size="small" border stripe max-height="260">
+              <el-table-column prop="relPath" label="相对路径" min-width="280" show-overflow-tooltip />
+              <el-table-column label="源大小" width="110"><template #default="{ row }">{{ fmtBytes(row.sourceSize) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`目标多余 (${reconcile.extraCount})`" name="extra">
+            <el-table :data="reconcile.extra" size="small" border stripe max-height="260">
+              <el-table-column prop="relPath" label="相对路径" min-width="280" show-overflow-tooltip />
+              <el-table-column label="目标大小" width="110"><template #default="{ row }">{{ fmtBytes(row.targetSize) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`大小不一致 (${reconcile.sizeDiffCount})`" name="size">
+            <el-table :data="reconcile.sizeMismatch" size="small" border stripe max-height="260">
+              <el-table-column prop="relPath" label="相对路径" min-width="260" show-overflow-tooltip />
+              <el-table-column label="源大小" width="110"><template #default="{ row }">{{ fmtBytes(row.sourceSize) }}</template></el-table-column>
+              <el-table-column label="目标大小" width="110"><template #default="{ row }">{{ fmtBytes(row.targetSize) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </template>
+      <template v-if="reconcileHistory.length">
+        <el-divider style="margin:10px 0" />
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">对账历史</div>
+        <el-table :data="reconcileHistory" size="small" border stripe max-height="220">
+          <el-table-column prop="id" label="#" width="60" />
+          <el-table-column prop="trigger_type" label="触发" width="90" />
+          <el-table-column prop="source_count" label="源" width="70" />
+          <el-table-column prop="target_count" label="目标" width="70" />
+          <el-table-column prop="missing_count" label="缺" width="60" />
+          <el-table-column prop="extra_count" label="多" width="60" />
+          <el-table-column prop="size_diff_count" label="大小差" width="80" />
+          <el-table-column prop="elapsed_ms" label="耗时" width="80" />
+          <el-table-column prop="create_time" label="时间" min-width="160" />
+          <el-table-column label="操作" width="80">
+            <template #default="{ row }"><el-link type="primary" @click="showReconcileHistory(row)">查看</el-link></template>
+          </el-table-column>
+        </el-table>
+      </template>
+    </el-card>
   </div>
 </template>
 
@@ -278,6 +342,38 @@ async function remove() {
   }
 }
 
+const reconcile = ref(null)
+const reconcileLoading = ref(false)
+const reconcileTab = ref('missing')
+const reconcileHistory = ref([])
+async function doReconcile() {
+  reconcileLoading.value = true
+  try {
+    reconcile.value = await request.post(`/filesync/tasks/${id}/reconcile`)
+    ElMessage.success('对账完成')
+    loadReconcileHistory()
+  } catch (e) {
+    ElMessage.error('对账失败: ' + (e?.message || e))
+  } finally {
+    reconcileLoading.value = false
+  }
+}
+async function loadReconcileHistory() {
+  try {
+    reconcileHistory.value = (await request.get(`/filesync/tasks/${id}/reconciles`, { params: { limit: 10 } })) || []
+  } catch (e) { /* 历史为空不打扰 */ }
+}
+function showReconcileHistory(row) {
+  let d = {}
+  try { d = JSON.parse(row.detail_json || '{}') } catch (e) { d = {} }
+  reconcile.value = {
+    sourceCount: row.source_count, targetCount: row.target_count,
+    missingCount: row.missing_count, extraCount: row.extra_count, sizeDiffCount: row.size_diff_count,
+    elapsedMs: row.elapsed_ms, truncated: !!row.truncated,
+    missing: d.missing || [], extra: d.extra || [], sizeMismatch: d.sizeMismatch || []
+  }
+}
+
 const statusName = s => ({ IDLE: '未执行', RUNNING: '执行中', COMPLETED: '已完成', FAILED: '失败', WATCHING: '实时同步中' }[s] || s || '—')
 const statusType = s => ({ RUNNING: 'warning', COMPLETED: 'success', FAILED: 'danger', WATCHING: 'danger' }[s] || 'info')
 const schedName = t => t.schedule_mode === 'interval' ? `每 ${t.interval_min || 5}min 自动` : t.schedule_mode === 'cron' ? `${t.cron_expr} 自动` : '仅手动'
@@ -288,7 +384,7 @@ function fmtBytes(b) {
   return n + 'B'
 }
 
-onMounted(() => { load(); loadRuns(1); loadBrowse() })
+onMounted(() => { load(); loadRuns(1); loadBrowse(); loadReconcileHistory() })
 </script>
 
 <style scoped>
