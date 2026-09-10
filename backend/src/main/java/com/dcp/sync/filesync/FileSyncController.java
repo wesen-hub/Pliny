@@ -134,4 +134,23 @@ public class FileSyncController {
             return ApiResponse.error(400, e.getMessage());
         }
     }
+
+    /** 一致性对账(只报告不修改): 列源/目标清单 → 目标缺失/目标多余/大小不一致 */
+    @PostMapping("/{id}/reconcile")
+    @PreAuthorize("@perm.has('sync:task:run')")
+    public ApiResponse<Map<String, Object>> reconcile(@PathVariable long id,
+                                                      @RequestParam(required = false) String trigger) {
+        try {
+            return ApiResponse.ok(service.reconcile(id, trigger == null ? "manual" : trigger));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ApiResponse.error(400, e.getMessage());
+        }
+    }
+
+    /** 对账历史 */
+    @GetMapping("/{id}/reconciles")
+    public ApiResponse<List<Map<String, Object>>> reconciles(@PathVariable long id,
+                                                             @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(service.reconciles(id, limit));
+    }
 }

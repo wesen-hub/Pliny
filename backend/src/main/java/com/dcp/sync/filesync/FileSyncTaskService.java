@@ -140,6 +140,16 @@ public class FileSyncTaskService {
                 + "size BIGINT DEFAULT 0, error_msg VARCHAR(2000),"
                 + "event_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 + "KEY idx_run (run_id))");
+        metaJdbc.execute("CREATE TABLE IF NOT EXISTS file_sync_reconcile ("
+                + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                + "task_id BIGINT NOT NULL,"
+                + "trigger_type VARCHAR(16) DEFAULT 'manual',"
+                + "source_count BIGINT DEFAULT 0, target_count BIGINT DEFAULT 0,"
+                + "missing_count BIGINT DEFAULT 0, extra_count BIGINT DEFAULT 0, size_diff_count BIGINT DEFAULT 0,"
+                + "detail_json MEDIUMTEXT, truncated TINYINT DEFAULT 0,"
+                + "elapsed_ms BIGINT DEFAULT 0,"
+                + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                + "KEY idx_task (task_id, id))");
         log.info("FileSync V3 schema ensured");
     }
 
@@ -1076,6 +1086,164 @@ public class FileSyncTaskService {
         } catch (Exception e) {
             return OM.createObjectNode();
         }
+    }
+
+    // ────────────────────────── 一致性对账(只报告, 不修改) ──────────────────────────
+
+    private static final int RECONCILE_MAX_ENTRIES = 200000;
+    private static final int RECONCILE_SAMPLE = 200;
+
+    /**
+     * 源/目标清单对账: 列源(递归)与目标(递归) → 三类差异(目标缺失/目标多余/大小不一致)。
+     * 只报告不修改(与 remove=false 默认一致); 结果落 file_sync_reconcile 供历史/告警联动。
+     */
+    public Map<String, Object> reconcile(long taskId, String trigger) {
+        long t0 = System.currentTimeMillis();
+        Map<String, Object> task = detail(taskId);
+        if (task == null) throw new IllegalArgumentException("任务不存在: " + taskId);
+        Map<String, String> src = sourceConf(((Number) task.get("source_datasource_id")).longValue());
+        Map<String, String> dst = targetConf(task);
+        src.put("path", task.get("source_path") == null ? "" : String.valueOf(task.get("source_path")));
+        prepareMirrorPaths(src, dst);
+        try {
+            Map<String, Long> srcMap = listSide(src, true);
+            Map<String, Long> dstMap = listSide(dst, false);
+            List<Map<String, Object>> missing = new ArrayList<>();
+            List<Map<String, Object>> sizeDiff = new ArrayList<>();
+            for (Map.Entry<String, Long> e : srcMap.entrySet()) {
+                Long d = dstMap.get(e.getKey());
+                if (d == null) {
+                    if (missing.size() < RECONCILE_SAMPLE) missing.add(item(e.getKey(), e.getValue(), 0L, "missing_in_target"));
+                } else if (!d.equals(e.getValue())) {
+                    if (sizeDiff.size() < RECONCILE_SAMPLE) sizeDiff.add(item(e.getKey(), e.getValue(), d, "size_mismatch"));
+                }
+            }
+            List<Map<String, Object>> extra = new ArrayList<>();
+            for (Map.Entry<String, Long> e : dstMap.entrySet()) {
+                if (!srcMap.containsKey(e.getKey()) && extra.size() < RECONCILE_SAMPLE) {
+                    extra.add(item(e.getKey(), 0L, e.getValue(), "extra_in_target"));
+                }
+            }
+            long missingAll = srcMap.keySet().stream().filter(k -> !dstMap.containsKey(k)).count();
+            long sizeDiffAll = srcMap.entrySet().stream()
+                    .filter(e -> dstMap.containsKey(e.getKey()) && !dstMap.get(e.getKey()).equals(e.getValue())).count();
+            long extraAll = dstMap.keySet().stream().filter(k -> !srcMap.containsKey(k)).count();
+            boolean truncated = srcMap.size() >= RECONCILE_MAX_ENTRIES || dstMap.size() >= RECONCILE_MAX_ENTRIES;
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("missing", missing);
+            detail.put("extra", extra);
+            detail.put("sizeMismatch", sizeDiff);
+            String detailJson = OM.writeValueAsString(detail);
+            metaJdbc.update("INSERT INTO file_sync_reconcile(task_id, trigger_type, source_count, target_count, "
+                            + "missing_count, extra_count, size_diff_count, detail_json, truncated, elapsed_ms) "
+                            + "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    taskId, trigger == null ? "manual" : trigger, srcMap.size(), dstMap.size(),
+                    missingAll, extraAll, sizeDiffAll, detailJson, truncated ? 1 : 0, System.currentTimeMillis() - t0);
+            Number id = metaJdbc.queryForObject("SELECT LAST_INSERT_ID()", Number.class);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("id", id == null ? null : id.longValue());
+            out.put("taskId", taskId);
+            out.put("sourceCount", srcMap.size());
+            out.put("targetCount", dstMap.size());
+            out.put("missingCount", missingAll);
+            out.put("extraCount", extraAll);
+            out.put("sizeDiffCount", sizeDiffAll);
+            out.put("missing", missing);
+            out.put("extra", extra);
+            out.put("sizeMismatch", sizeDiff);
+            out.put("truncated", truncated);
+            out.put("execHost", task.get("exec_host"));
+            if ("agent".equals(String.valueOf(task.get("exec_host")))) {
+                out.put("note", "该任务执行端为 Agent: 本次对账在平台侧读取源路径(演示环境共享挂载);"
+                        + "生产业务机需 Agent 侧上报文件清单后对账");
+            }
+            out.put("elapsedMs", System.currentTimeMillis() - t0);
+            log.info("[filesync] 对账 task#{} 源{} 目标{} 缺{} 多{} 大小差{} ({}ms)",
+                    taskId, srcMap.size(), dstMap.size(), missingAll, extraAll, sizeDiffAll, out.get("elapsedMs"));
+            return out;
+        } catch (Exception e) {
+            throw new IllegalStateException("对账失败: " + e.getMessage(), e);
+        }
+    }
+
+    public List<Map<String, Object>> reconciles(long taskId, int limit) {
+        int lim = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 200));
+        return metaJdbc.queryForList(
+                "SELECT id, task_id, trigger_type, source_count, target_count, missing_count, extra_count, "
+                        + "size_diff_count, truncated, elapsed_ms, create_time, detail_json "
+                        + "FROM file_sync_reconcile WHERE task_id = ? ORDER BY id DESC LIMIT " + lim, taskId);
+    }
+
+    /** 列一侧清单: src=true(源, s3 经 alias / local 经 Files.walk) / false(目标, 恒 s3); 返回 相对路径→size */
+    private Map<String, Long> listSide(Map<String, String> conf, boolean isSrc) throws Exception {
+        Map<String, Long> out = new LinkedHashMap<>();
+        boolean local = isSrc && "local".equals(conf.get("type"));
+        String base;
+        if (local) {
+            base = conf.get("mirrorPath") == null ? "" : conf.get("mirrorPath");
+            java.nio.file.Path root = java.nio.file.Paths.get(base);
+            if (!java.nio.file.Files.exists(root)) throw new IllegalStateException("源目录不存在: " + base);
+            try (var walk = java.nio.file.Files.walk(root)) {
+                walk.filter(java.nio.file.Files::isRegularFile).forEach(p -> {
+                    if (out.size() >= RECONCILE_MAX_ENTRIES) return;
+                    try {
+                        out.put(root.relativize(p).toString().replace('\\', '/'), java.nio.file.Files.size(p));
+                    } catch (Exception ignored) {
+                    }
+                });
+            }
+            return out;
+        }
+        String alias = isSrc ? ALIAS_SRC : ALIAS_DST;
+        if (!isSrc) {
+            runMcQuiet(List.of("alias", "set", alias, conf.get("endpoint"), conf.get("accessKey"), conf.get("secretKey")));
+        } else {
+            runMcQuiet(List.of("alias", "set", alias, conf.get("endpoint"), conf.get("accessKey"), conf.get("secretKey")));
+        }
+        base = conf.get("mirrorPath");
+        String prefixBase;
+        if (isSrc) {
+            String bucket = conf.get("bucket") == null ? "" : conf.get("bucket");
+            String p = strip(conf.get("path"));
+            prefixBase = bucket + (p.isEmpty() ? "" : "/" + p);
+        } else {
+            prefixBase = conf.get("bucket") + (strip(conf.get("prefix")).isEmpty() ? "" : "/" + strip(conf.get("prefix")));
+        }
+        Process p = new ProcessBuilder("mc", "ls", "--recursive", "--json", base)
+                .redirectErrorStream(true).start();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.isBlank() || out.size() >= RECONCILE_MAX_ENTRIES) continue;
+                JsonNode n;
+                try {
+                    n = OM.readTree(line);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (!n.isObject() || !"success".equals(n.path("status").asText())) continue;
+                String key = n.path("key").asText("");
+                if (key.isEmpty() || key.endsWith("/")) continue;
+                String rel = key.startsWith(prefixBase) ? key.substring(prefixBase.length()) : key;
+                rel = strip(rel);
+                if (rel.isEmpty()) continue;
+                out.put(rel, n.path("size").asLong(0));
+            }
+        }
+        if (!p.waitFor(120, TimeUnit.SECONDS)) {
+            p.destroyForcibly();
+            throw new IllegalStateException("mc ls 超时");
+        }
+        return out;
+    }
+
+    private static Map<String, Object> item(String rel, long srcSize, long dstSize, String kind) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("relPath", rel);
+        m.put("sourceSize", srcSize);
+        m.put("targetSize", dstSize);
+        m.put("kind", kind);
+        return m;
     }
 
     private static String strip(String p) {
