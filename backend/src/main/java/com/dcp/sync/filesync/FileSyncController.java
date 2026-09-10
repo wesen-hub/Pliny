@@ -9,17 +9,21 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 文件同步 V3 API(mc mirror 原生, 取代 V2 /api/filesync/copy/*):
+ * 文件同步 V3 API(rclone 引擎, 取代 V2 /api/filesync/copy/*):
  *
  * <pre>
  *   GET    /api/filesync/tasks                     列表
- *   POST   /api/filesync/tasks                     创建(任务定义 JSON)
+ *   POST   /api/filesync/tasks                     创建(任务定义 JSON, 含 syncMode 三态)
  *   GET    /api/filesync/tasks/{id}                详情
  *   PUT    /api/filesync/tasks/{id}                更新(version 乐观锁)
  *   DELETE /api/filesync/tasks/{id}                删除(agent 任务附带 task_remove 指令)
- *   POST   /api/filesync/tasks/{id}/run            手动触发一轮(异步)
+ *   POST   /api/filesync/tasks/{id}/run            手动触发一轮(异步; agent 任务下发 run_now)
+ *   POST   /api/filesync/tasks/{id}/stop           停止(仅 agent 任务: 下发 task_stop)
  *   GET    /api/filesync/tasks/{id}/runs           run 分页(传输历史)
  *   GET    /api/filesync/tasks/{id}/runs/{runId}/files  run 文件明细分页
+ *   GET    /api/filesync/tasks/{id}/browse         目标桶浏览(rclone lsjson)
+ *   POST   /api/filesync/tasks/{id}/reconcile      一致性对账(只报告不修改)
+ *   GET    /api/filesync/tasks/{id}/reconciles     对账历史
  * </pre>
  */
 @RestController
@@ -77,24 +81,20 @@ public class FileSyncController {
         if (d == null) {
             return ApiResponse.error(404, "任务不存在: " + id);
         }
-        boolean isWatch = Boolean.TRUE.equals(d.get("watch")) || "1".equals(String.valueOf(d.get("watch")));
-        if (isWatch && "platform".equals(String.valueOf(d.get("exec_host")))) {
-            try {
-                boolean started = service.startWatch(id);
-                return ApiResponse.ok(Map.of("started", started, "watching", started, "id", id));
-            } catch (IllegalStateException e) {
-                return ApiResponse.error(400, e.getMessage());
-            }
-        }
         boolean started = service.runAsync(id);
         if (!started) {
             return ApiResponse.error(400, "任务正在执行中, 请稍后再试");
         }
         boolean agentTask = "agent".equals(String.valueOf(d.get("exec_host")));
-        return ApiResponse.ok(Map.of("started", true, "id", id, "execHost", d.get("exec_host"),
-                "online", agentTask ? Boolean.TRUE.equals(d.get("online")) : null));
+        Map<String, Object> out = new java.util.LinkedHashMap<>();   // Map.of 不容 null(平台任务 online=null)
+        out.put("started", true);
+        out.put("id", id);
+        out.put("execHost", d.get("exec_host"));
+        out.put("online", agentTask ? Boolean.TRUE.equals(d.get("online")) : null);
+        return ApiResponse.ok(out);
     }
 
+    /** 停止: rclone 无常驻会话, 仅 agent 任务可下发 task_stop(否则无可停对象) */
     @PostMapping("/{id}/stop")
     @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> stop(@PathVariable long id) {
@@ -102,13 +102,11 @@ public class FileSyncController {
         if (d == null) {
             return ApiResponse.error(404, "任务不存在: " + id);
         }
-        boolean stopped;
-        if ("agent".equals(String.valueOf(d.get("exec_host")))) {
-            stopped = service.stopAgentWatch(id);
-            return ApiResponse.ok(Map.of("stopped", stopped, "id", id, "dispatchedToAgent", stopped));
+        if (!"agent".equals(String.valueOf(d.get("exec_host")))) {
+            return ApiResponse.error(400, "平台任务为一次性执行(rclone 无常驻会话), 无可停对象");
         }
-        stopped = service.stopWatch(id);
-        return ApiResponse.ok(Map.of("stopped", stopped, "id", id));
+        boolean stopped = service.stopAgentWatch(id);
+        return ApiResponse.ok(Map.of("stopped", stopped, "id", id, "dispatchedToAgent", stopped));
     }
 
     @GetMapping("/{id}/runs")
