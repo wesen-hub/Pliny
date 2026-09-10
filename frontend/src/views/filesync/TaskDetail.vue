@@ -51,13 +51,12 @@
       <el-text v-else size="small" type="info">默认策略:增量同步,只搬新增文件,不覆盖已有</el-text>
     </el-card>
 
-    <el-card shadow="never" style="margin-top:12px">
-      <template #header>
+    <el-tabs v-model="activeTab" style="margin-top:12px" @tab-change="onTabChange">
+      <el-tab-pane label="传输历史" name="history">
         <div class="sec-head">
           <b>传输历史(每轮 = 一次 mc mirror)</b>
           <el-text size="small" type="info">共 {{ runs.total }} 轮 · 目标桶即当前状态,轮次文件明细用于审计</el-text>
         </div>
-      </template>
       <el-table :data="runs.items" size="small" border stripe v-loading="runsLoading">
         <el-table-column type="expand">
           <template #default="{ row }">
@@ -94,15 +93,13 @@
       </el-table>
       <el-pagination style="margin-top:10px" background layout="total, prev, pager, next" :total="runs.total"
         :page-size="pageSize" :current-page="page" @current-change="loadRuns" />
-    </el-card>
+      </el-tab-pane>
 
-    <el-card shadow="never" style="margin-top:12px">
-      <template #header>
+      <el-tab-pane label="目标浏览" name="browse">
         <div class="sec-head">
           <b>目标浏览(实时)</b>
           <el-text size="small" type="info">直接从目标桶 mc ls,当前状态以这里为准</el-text>
         </div>
-      </template>
       <div style="margin-bottom:10px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
         <el-link type="primary" :underline="false" @click="go('')">s3://{{ task.target_bucket }}</el-link>
         <template v-for="(seg, i) in browsePath" :key="i">
@@ -129,15 +126,13 @@
         <el-table-column prop="lastModified" label="修改时间" width="190" />
       </el-table>
       <el-text v-if="!browseLoading && !browseItems.length" size="small" type="info">目标下暂无文件(或目录为空)</el-text>
-    </el-card>
+      </el-tab-pane>
 
-    <el-card shadow="never" style="margin-top:12px">
-      <template #header>
+      <el-tab-pane label="一致性对账" name="reconcile">
         <div class="sec-head">
           <b>一致性对账</b>
           <el-text size="small" type="info">只报告不修改: 源/目标清单递归比对</el-text>
         </div>
-      </template>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <el-button size="small" type="primary" :loading="reconcileLoading" @click="doReconcile">开始对账</el-button>
         <template v-if="reconcile">
@@ -193,7 +188,8 @@
           </el-table-column>
         </el-table>
       </template>
-    </el-card>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -211,6 +207,13 @@ const runs = ref({ items: [], total: 0 })
 const page = ref(1)
 const pageSize = 10
 const runsLoading = ref(false)
+const activeTab = ref('history')
+const browseLoaded = ref(false)
+const reconcileLoaded = ref(false)
+function onTabChange(name) {
+  if (name === 'browse' && !browseLoaded.value) loadBrowse()
+  if (name === 'reconcile' && !reconcileLoaded.value) loadReconcileHistory()
+}
 
 const RunFiles = defineComponent({
   name: 'RunFiles',
@@ -298,6 +301,7 @@ const browsePath = ref([])
 const browseItems = ref([])
 const browseLoading = ref(false)
 async function loadBrowse() {
+  browseLoaded.value = true
   browseLoading.value = true
   try {
     const r = await request.get(`/filesync/tasks/${id}/browse`, { params: { path: browsePath.value.join('/') } })
@@ -359,6 +363,7 @@ async function doReconcile() {
   }
 }
 async function loadReconcileHistory() {
+  reconcileLoaded.value = true
   try {
     reconcileHistory.value = (await request.get(`/filesync/tasks/${id}/reconciles`, { params: { limit: 10 } })) || []
   } catch (e) { /* 历史为空不打扰 */ }
@@ -384,7 +389,7 @@ function fmtBytes(b) {
   return n + 'B'
 }
 
-onMounted(() => { load(); loadRuns(1); loadBrowse(); loadReconcileHistory() })
+onMounted(() => { load(); loadRuns(1) })
 </script>
 
 <style scoped>
