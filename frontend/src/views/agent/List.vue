@@ -74,7 +74,7 @@
       <div class="code-box">
         <div class="code-line">DCP_AGENT_PLATFORM_URL=http://&lt;平台地址&gt;:8081</div>
         <div class="code-line">DCP_AGENT_DATA_DIR=/var/lib/dcp-agent   # 持久化目录(含凭据,勿丢)</div>
-        <div class="code-line">DCP_AGENT_MC=/usr/local/bin/mc          # 需预装 mc 客户端</div>
+        <div class="code-line">DCP_AGENT_RCLONE=/usr/local/bin/rclone    # 需预装 rclone(镜像内已预置 v1.71.0)</div>
         <div class="code-line">java -jar dcp-agent.jar</div>
       </div>
       <el-text size="small" type="info" style="display:block;margin-top:8px">mc 下载:<code>curl -o mc https://dl.min.io/client/mc/release/&#123;os&#125;-&#123;arch&#125;/mc && chmod +x mc</code></el-text>

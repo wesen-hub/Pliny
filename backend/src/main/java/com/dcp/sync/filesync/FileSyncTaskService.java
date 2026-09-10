@@ -135,7 +135,7 @@ public class FileSyncTaskService {
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "run_id BIGINT NOT NULL,"
                 + "rel_path VARCHAR(1024),"
-                + "status VARCHAR(16) COMMENT 'success|error',"
+                + "status VARCHAR(16) COMMENT 'success|deleted|error',"
                 + "size BIGINT DEFAULT 0, error_msg VARCHAR(2000),"
                 + "event_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 + "KEY idx_run (run_id))");

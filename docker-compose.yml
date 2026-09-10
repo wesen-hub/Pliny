@@ -252,7 +252,7 @@ services:
     ports:
       - "8080:80"
 
-  # 采集 Agent(模拟业务机): mc mirror 直推目标 MinIO; 注册码启动时经 DCP_AGENT_REGISTER_CODE 注入(一次性)
+  # 采集 Agent(模拟业务机): rclone sync/copy 直推目标 MinIO; 注册码启动时经 DCP_AGENT_REGISTER_CODE 注入(一次性)
   agent:
     build: ./agent
     container_name: dcp-agent
