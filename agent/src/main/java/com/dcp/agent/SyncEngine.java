@@ -10,10 +10,9 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Agent 执行引擎: 任务管理 + 本地调度(interval/cron) + mc mirror 执行(--json 解析)
+ * Agent 执行引擎: 任务管理 + 本地调度(interval/cron) + rclone 执行(sync/copy + --use-json-log 解析)
  * + 断线补报(本地 pending 队列) + 对账(清理平台已删任务)
  */
 public final class SyncEngine {
@@ -32,25 +31,6 @@ public final class SyncEngine {
     });
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
-    /** 本地 watch 常驻会话(任务级): mc mirror --watch 子进程 + 事件批上报 */
-    private static final class AgentWatch {
-        final long taskId;
-        final String runId;
-        final Process p;
-        final AtomicBoolean stopped = new AtomicBoolean(false);
-        final List<Map<String, Object>> batch = new ArrayList<>();
-        long seq = 0;
-        boolean reported = false;
-        long okN = 0, bytes = 0, failN = 0;
-
-        AgentWatch(long taskId, String runId, Process p) {
-            this.taskId = taskId;
-            this.runId = runId;
-            this.p = p;
-        }
-    }
-
-    private final Map<Long, AgentWatch> watches = new ConcurrentHashMap<>();
 
     private volatile boolean started = false;
 
@@ -157,11 +137,8 @@ public final class SyncEngine {
                     }
                 }
                 case "task_stop" -> {
-                    if (taskIdObj != null) {
-                        long tid = ((Number) taskIdObj).longValue();
-                        stopAgentWatch(tid, "COMPLETED");
-                        log("收到 task_stop, 已停止实时监听 task=" + tid);
-                    }
+                    // rclone 无常驻会话(引擎切换后 watch 已移除): 一次性轮不在可停范围内, 仅记日志
+                    log("收到 task_stop, 但 rclone 全文一次性执行无常驻会话, 忽略 task=" + taskIdObj);
                 }
                 default -> log("未知指令: " + cmd);
             }
@@ -186,34 +163,34 @@ public final class SyncEngine {
                 p.put("lastRunAt", t.get("lastRunAt"));
                 p.put("localStatus", t.get("localStatus"));
                 p.put("lastCronKey", t.get("lastCronKey"));
+                p.put("baselineDoneLocal", t.get("baselineDoneLocal"));   // 本地基线标记随任务定义变更保留
                 tasks.set(tasks.indexOf(t), p);
                 store.saveTasks(tasks);
-                syncWatchState(p);
                 return;
             }
         }
         p.put("lastRunAt", null);
         p.put("localStatus", "IDLE");
+        p.put("baselineDoneLocal", false);
         tasks.add(p);
         store.saveTasks(tasks);
-        syncWatchState(p);
-    }
-
-    /** 任务定义变更后对齐 watch 常驻状态 */
-    private void syncWatchState(Map<String, Object> p) {
-        long tid = ((Number) p.get("taskId")).longValue();
-        boolean wantWatch = Boolean.TRUE.equals(p.get("watch")) || "1".equals(String.valueOf(p.get("watch")));
-        if (wantWatch) {
-            startAgentWatch(p);
-        } else {
-            stopAgentWatchSilent(tid);
-        }
     }
 
     private synchronized void removeTask(long tid) {
-        stopAgentWatchSilent(tid);
         List<Map<String, Object>> tasks = store.tasks();
         tasks.removeIf(t -> ((Number) t.get("taskId")).longValue() == tid);
+        store.saveTasks(tasks);
+    }
+
+    /** 全量轮成功后置本地基线(store.tasks() 每次返回新对象, 必须回写持久化) */
+    private synchronized void markBaseline(long tid) {
+        List<Map<String, Object>> tasks = store.tasks();
+        for (Map<String, Object> t : tasks) {
+            if (((Number) t.get("taskId")).longValue() == tid) {
+                t.put("baselineDoneLocal", true);
+                break;
+            }
+        }
         store.saveTasks(tasks);
     }
 
@@ -282,6 +259,7 @@ public final class SyncEngine {
         int failN = 0;
         String errorTail = null;
         String runStatus = "COMPLETED";
+        String opUsed = null;
         try {
             Map<String, Object> source = mapOf(task.get("source"));
             Map<String, Object> target = mapOf(task.get("target"));
@@ -307,37 +285,58 @@ public final class SyncEngine {
             String dstEndpoint = String.valueOf(target.getOrDefault("endpoint", ""));
             String dstAk = String.valueOf(target.getOrDefault("accessKey", ""));
             String dstSk = String.valueOf(target.getOrDefault("secretKey", ""));
-            runMc(List.of("alias", "set", "tgt", dstEndpoint, dstAk, dstSk));
-
-            List<String> args = new ArrayList<>();
-            args.add("mc");
-            args.add("mirror");
             Map<String, Object> st = mapOf(task.get("strategy"));
-            if (bool(st, "overwrite")) args.add("--overwrite");
-            if (bool(st, "remove")) args.add("--remove");
-            if (bool(st, "preserve")) args.add("--preserve");
-            if (bool(st, "dryRun")) args.add("--dry-run");
-            if (bool(st, "retry")) args.add("--retry");
-            for (Object ex : listOf(st.get("exclude"))) {
+            // 模式三态: full_once 恒全量; incr_scheduled 恒增量; full_then_incr 首次(无基线)全量
+            String syncMode = String.valueOf(task.getOrDefault("syncMode", "full_then_incr"));
+            boolean baseline = bool(task, "baselineDone") || bool(task, "baselineDoneLocal");
+            boolean full = "full_once".equals(syncMode) || ("full_then_incr".equals(syncMode) && !baseline);
+            boolean deleteExtras = st.get("deleteExtras") == null || bool(st, "deleteExtras");
+            String op = full && deleteExtras ? "sync" : "copy";
+            opUsed = op;
+
+            Path conf = writeRcloneConf(tid, dstEndpoint, dstAk, dstSk);
+            List<String> args = new ArrayList<>();
+            args.add(cfg.rcloneBin);
+            args.add(op);
+            args.add(srcDir);
+            args.add("dcpdst:" + dstBucket + (dstPrefix.isEmpty() ? "" : "/" + dstPrefix));
+            args.add("--config");
+            args.add(conf.toString());
+            String cmp = String.valueOf(st.getOrDefault("compare", "size_mtime"));
+            if ("size_only".equals(cmp)) args.add("--size-only");
+            else if ("checksum".equals(cmp)) args.add("--checksum");
+            String um = String.valueOf(st.getOrDefault("updateMode", "overwrite"));
+            if ("update".equals(um)) args.add("--update");
+            else if ("ignore_existing".equals(um)) args.add("--ignore-existing");
+            for (Object inc : listOf(st.get("includes"))) {
+                args.add("--include");
+                args.add(String.valueOf(inc));
+            }
+            for (Object ex : listOf(st.get("excludes"))) {
                 args.add("--exclude");
                 args.add(String.valueOf(ex));
             }
-            Map<String, Object> tf = mapOf(st.get("timeFilter"));
-            if (!tf.isEmpty()) {
-                String dir = String.valueOf(tf.getOrDefault("dir", "newer"));
-                args.add("newer".equals(dir) ? "--newer-than" : "--older-than");
-                args.add(String.valueOf(tf.get("value")));
-            }
-            Map<String, Object> adv = mapOf(st.get("advanced"));
-            if (adv.get("maxWorkers") instanceof Number mw && mw.intValue() > 0) {
-                args.add("--max-workers");
-                args.add(String.valueOf(mw.intValue()));
-            }
-            String dstBase = "tgt/" + dstBucket + (dstPrefix.isEmpty() ? "" : "/" + dstPrefix);
-            args.add(srcDir.endsWith("/") ? srcDir : srcDir);
-            args.add(dstBase);
-            args.add("--json");
+            addOpt(args, st, "minAge", "--min-age");
+            addOpt(args, st, "maxAge", "--max-age");
+            addOpt(args, st, "minSize", "--min-size");
+            addOpt(args, st, "maxSize", "--max-size");
+            args.add("--transfers");
+            args.add(String.valueOf(intOf(st.get("transfers"), 8)));
+            args.add("--checkers");
+            args.add(String.valueOf(intOf(st.get("checkers"), 8)));
+            addOpt(args, st, "bwlimit", "--bwlimit");
+            args.add("--retries");
+            args.add(String.valueOf(intOf(st.get("retries"), 3)));
+            args.add("--low-level-retries");
+            args.add(String.valueOf(intOf(st.get("lowLevelRetries"), 10)));
+            if (bool(st, "dryRun")) args.add("--dry-run");
+            args.add("--use-json-log");
+            args.add("--log-level");
+            args.add("INFO");
+            args.add("--stats");
+            args.add("1s");
 
+            int delN = 0;
             Process p = new ProcessBuilder(args).redirectErrorStream(true).start();
             try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
@@ -350,38 +349,58 @@ public final class SyncEngine {
                         continue;
                     }
                     if (!n.isObject()) continue;
-                    String status = n.path("status").asText();
-                    if ("success".equals(status)) {
-                        String s = n.path("source").asText("");
-                        if (!s.isEmpty()) {
-                            Map<String, Object> f = new LinkedHashMap<>();
-                            f.put("relPath", relOf(s, srcDir));
-                            f.put("status", "success");
-                            f.put("size", n.path("size").asLong(0));
-                            files.add(f);
+                    String level = n.path("level").asText();
+                    String msg = n.path("msg").asText("");
+                    String object = n.path("object").asText("");
+                    if (msg.startsWith("Config file")) continue;   // rclone.conf 缺失噪声
+                    if ("error".equals(level)) {
+                        if (msg.startsWith("Attempt ")) {
+                            errorTail = msg;
+                            continue;
                         }
-                    } else if ("error".equals(status)) {
-                        String msg = n.path("error").path("message").asText(n.path("error").asText());
-                        Map<String, Object> f = new LinkedHashMap<>();
-                        f.put("relPath", "-");
-                        f.put("status", "error");
-                        f.put("error", msg);
-                        files.add(f);
-                        failN++;
+                        if (n.path("objectType").asText("").endsWith(".Object")) {
+                            Map<String, Object> f = new LinkedHashMap<>();
+                            f.put("relPath", object.isEmpty() ? "-" : object);
+                            f.put("status", "error");
+                            f.put("error", msg);
+                            files.add(f);
+                            failN++;
+                        }
                         errorTail = msg;
+                    } else if (msg.startsWith("Copied")) {
+                        Map<String, Object> f = new LinkedHashMap<>();
+                        f.put("relPath", object.isEmpty() ? "-" : object);
+                        f.put("status", "success");
+                        f.put("size", n.path("size").asLong(0));
+                        files.add(f);
+                    } else if ("Deleted".equals(msg)) {
+                        Map<String, Object> f = new LinkedHashMap<>();
+                        f.put("relPath", object.isEmpty() ? "-" : object);
+                        f.put("status", "deleted");
+                        f.put("size", 0L);
+                        files.add(f);
+                        delN++;
                     }
                 }
             }
             int code;
-            if (!p.waitFor(600, TimeUnit.SECONDS)) {
+            if (!p.waitFor(1800, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 code = -1;
+                if (errorTail == null) errorTail = "rclone 执行超时(1800s)";
             } else {
                 code = p.exitValue();
             }
+            try {
+                Files.deleteIfExists(conf);   // 临时 rclone.conf 含凭证, 轮次结束即删
+            } catch (Exception ignored) {
+            }
             if (code != 0 && files.stream().noneMatch(f -> "success".equals(f.get("status")))) {
                 failN = Math.max(failN, 1);
-                if (errorTail == null) errorTail = "mc mirror 退出码 " + code;
+                if (errorTail == null) errorTail = "rclone 退出码 " + code;
+            }
+            if (full && failN == 0 && code == 0) {
+                markBaseline(tid);   // 全量成功 → 置本地基线(full_then_incr 下次转增量)
             }
         } catch (Exception e) {
             failN++;
@@ -393,11 +412,15 @@ public final class SyncEngine {
         long okN = files.stream().filter(f -> "success".equals(f.get("status"))).count();
         long bytes = files.stream().filter(f -> "success".equals(f.get("status")))
                 .mapToLong(f -> f.get("size") instanceof Number n ? n.longValue() : 0).sum();
+        long delN2 = files.stream().filter(f -> "deleted".equals(f.get("status"))).count();
         Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("op", opUsed == null ? "copy" : opUsed);
         summary.put("transferred", okN);
+        summary.put("deleted", delN2);
         summary.put("bytes", bytes);
         summary.put("failed", failN);
         summary.put("durationMs", System.currentTimeMillis() - t0);
+        store.saveTasks(store.tasks());   // 持久化 baselineDoneLocal / 状态
 
         Map<String, Object> run = new LinkedHashMap<>();
         run.put("runId", runId);
@@ -447,223 +470,39 @@ public final class SyncEngine {
         store.saveTasks(tasks);
     }
 
-    // ────────────────────────── watch 常驻(agent 本地) ──────────────────────────
+    // ────────────────────────── 工具 ──────────────────────────
 
-    /** 启动本地常驻监听(payload.watch=true 的任务); 已运行则忽略 */
-    private void startAgentWatch(Map<String, Object> task) {
-        long tid = ((Number) task.get("taskId")).longValue();
-        AgentWatch w = watches.get(tid);
-        if (w != null && w.p.isAlive() && !w.stopped.get()) return;
+    /** 生成临时 rclone.conf(命名 remote dcpdst; 含目标凭证 → 轮次结束即删) */
+    private static Path writeRcloneConf(long tid, String endpoint, String ak, String sk) throws Exception {
+        String body = "[dcpdst]\n"
+                + "type = s3\n"
+                + "provider = Minio\n"
+                + "endpoint = " + endpoint + "\n"
+                + "access_key_id = " + ak + "\n"
+                + "secret_access_key = " + sk + "\n"
+                + "force_path_style = true\n";
+        Path f = Path.of("/tmp/dcp-agent-rclone-" + tid + "-" + System.nanoTime() + ".conf");
+        Files.writeString(f, body, StandardCharsets.UTF_8);
         try {
-            List<String> args = agentMirrorArgs(task, true);
-            Process p = new ProcessBuilder(args).redirectErrorStream(true).start();
-            AgentWatch aw = new AgentWatch(tid, AgentConfig.newRunId(), p);
-            watches.put(tid, aw);
-            Thread rd = new Thread(() -> watchReadLoop(aw), "agent-watch-" + tid);
-            Thread fl = new Thread(() -> watchFlushLoop(aw), "agent-watchflush-" + tid);
-            rd.setDaemon(true);
-            fl.setDaemon(true);
-            rd.start();
-            fl.start();
-            log("实时监听已启动 task=" + tid + " session=" + aw.runId);
-        } catch (Exception e) {
-            log("实时监听启动失败 task=" + tid + ": " + e.getMessage());
-        }
-    }
-
-    /** 事件读循环: 实时事件入批; 进程退出即收尾 */
-    private void watchReadLoop(AgentWatch aw) {
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(aw.p.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (line.isBlank()) continue;
-                JsonNode n;
-                try {
-                    n = AgentConfig.OM.readTree(line);
-                } catch (Exception e) {
-                    continue;
-                }
-                if (!n.isObject()) continue;
-                String status = n.path("status").asText();
-                if ("success".equals(status)) {
-                    String s = n.path("source").asText("");
-                    if (!s.isEmpty()) {
-                        Map<String, Object> f = new LinkedHashMap<>();
-                        f.put("relPath", relOf(s, sourceDirOf(aw.taskId)));
-                        f.put("status", "success");
-                        f.put("size", n.path("size").asLong(0));
-                        synchronized (aw.batch) {
-                            aw.batch.add(f);
-                            aw.okN++;
-                            aw.bytes += n.path("size").asLong(0);
-                        }
-                    }
-                } else if ("error".equals(status)) {
-                    String msg = n.path("error").path("message").asText(n.path("error").asText());
-                    Map<String, Object> f = new LinkedHashMap<>();
-                    f.put("relPath", "-");
-                    f.put("status", "error");
-                    f.put("error", msg);
-                    synchronized (aw.batch) {
-                        aw.batch.add(f);
-                        aw.failN++;
-                    }
-                }
-            }
+            Files.setPosixFilePermissions(f, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
         } catch (Exception ignored) {
         }
-        if (!aw.stopped.get()) {
-            // 进程异常退出: 尝试收尾上报
-            log("实时监听进程退出 task=" + aw.taskId);
-            stopAgentWatch(aw.taskId, aw.failN > 0 && aw.okN == 0 ? "FAILED" : "COMPLETED");
-        }
+        return f;
     }
 
-    /** 批次刷盘循环: 每 5s 有事件则上报一批 */
-    private void watchFlushLoop(AgentWatch aw) {
-        while (!aw.stopped.get()) {
-            try {
-                Thread.sleep(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-            flushWatchBatch(aw, false);
-        }
-        flushWatchBatch(aw, false);
+    private static void addOpt(List<String> args, Map<String, Object> st, String key, String flag) {
+        Object v = st.get(key);
+        if (v == null || String.valueOf(v).isBlank()) return;
+        args.add(flag);
+        args.add(String.valueOf(v));
     }
 
-    /** 批次上报(watch 会话, first 标记 + seq 幂等); 走 pending 队列, 断线补报 */
-    private synchronized void flushWatchBatch(AgentWatch aw, boolean end) {
-        List<Map<String, Object>> files;
-        synchronized (aw.batch) {
-            if (aw.batch.isEmpty() && !end) return;
-            files = new ArrayList<>(aw.batch);
-            aw.batch.clear();
-        }
-        if (files.isEmpty() && !end) return;
-        Map<String, Object> run = new LinkedHashMap<>();
-        run.put("runId", aw.runId);
-        run.put("taskId", aw.taskId);
-        run.put("watch", true);
-        run.put("first", !aw.reported);
-        run.put("seq", aw.seq + 1);
-        run.put("files", files);
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("transferred", aw.okN);
-        summary.put("bytes", aw.bytes);
-        summary.put("failed", aw.failN);
-        run.put("summary", summary);
-        if (!aw.reported) {
-            run.put("status", "WATCHING");
-        }
-        if (end) {
-            run.put("end", true);
-            run.put("status", "COMPLETED");
-        }
-        aw.reported = true;
-        aw.seq++;
-        enqueuePending(run);
-    }
-
-    /** 停止监听并收尾(end 上报, 任务保留) */
-    private void stopAgentWatch(long tid, String status) {
-        AgentWatch aw = watches.remove(tid);
-        if (aw == null) return;
-        aw.stopped.set(true);
-        aw.p.destroy();
-        // 等 reader 退出
+    private static int intOf(Object v, int dft) {
+        if (v instanceof Number n) return n.intValue();
         try {
-            aw.p.waitFor(3, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        flushWatchBatch(aw, true);
-        log("实时监听已停止 task=" + tid + " status=" + status);
-    }
-
-    /** 静默停止(任务删除场景, 不上报) */
-    private void stopAgentWatchSilent(long tid) {
-        AgentWatch aw = watches.remove(tid);
-        if (aw == null) return;
-        aw.stopped.set(true);
-        aw.p.destroy();
-        log("实时监听已移除(任务删除/非 watch) task=" + tid);
-    }
-
-    /** 源目录(绝对): 供事件 relPath 剥离 */
-    private String sourceDirOf(long tid) {
-        Map<String, Object> task = findTask(tid);
-        if (task == null) return "";
-        Map<String, Object> source = mapOf(task.get("source"));
-        String path = String.valueOf(source.getOrDefault("path", ""));
-        if (path.startsWith("/")) return path;
-        String root = String.valueOf(source.getOrDefault("root", "/"));
-        return root.endsWith("/") ? root + path : root + "/" + path;
-    }
-
-    /** 拼 mirror 参数(task → 命令), watch=true 时带 --watch */
-    private List<String> agentMirrorArgs(Map<String, Object> task, boolean watch) throws Exception {
-        Map<String, Object> source = mapOf(task.get("source"));
-        Map<String, Object> target = mapOf(task.get("target"));
-        String type = String.valueOf(source.getOrDefault("type", "local"));
-        if (!"local".equals(type)) throw new IllegalStateException("Agent 仅执行 local 源任务, 收到 " + type);
-        String srcDir;
-        String path = String.valueOf(source.getOrDefault("path", ""));
-        if (path.startsWith("/")) {
-            srcDir = path;
-        } else {
-            String root = String.valueOf(source.getOrDefault("root", "/"));
-            srcDir = root.endsWith("/") ? root + path : root + "/" + path;
-        }
-        runMcQuiet(List.of("alias", "set", "tgt", String.valueOf(target.get("endpoint")),
-                String.valueOf(target.get("accessKey")), String.valueOf(target.get("secretKey"))));
-        List<String> args = new ArrayList<>();
-        args.add("mc");
-        args.add("mirror");
-        if (watch) args.add("--watch");
-        Map<String, Object> st = mapOf(task.get("strategy"));
-        if (bool(st, "overwrite")) args.add("--overwrite");
-        if (bool(st, "remove")) args.add("--remove");
-        if (bool(st, "preserve")) args.add("--preserve");
-        if (bool(st, "dryRun")) args.add("--dry-run");
-        for (Object ex : listOf(st.get("exclude"))) {
-            args.add("--exclude");
-            args.add(String.valueOf(ex));
-        }
-        Map<String, Object> tf = mapOf(st.get("timeFilter"));
-        if (!tf.isEmpty()) {
-            String dir = String.valueOf(tf.getOrDefault("dir", "newer"));
-            args.add("newer".equals(dir) ? "--newer-than" : "--older-than");
-            args.add(String.valueOf(tf.get("value")));
-        }
-        Map<String, Object> adv = mapOf(st.get("advanced"));
-        if (adv.get("maxWorkers") instanceof Number mw && mw.intValue() > 0) {
-            args.add("--max-workers");
-            args.add(String.valueOf(mw.intValue()));
-        }
-        String dstPrefix = String.valueOf(target.getOrDefault("prefix", ""));
-        args.add(srcDir);
-        args.add("tgt/" + target.get("bucket") + (dstPrefix.isEmpty() ? "" : "/" + dstPrefix));
-        args.add("--json");
-        return args;
-    }
-
-    private void runMcQuiet(List<String> args) throws Exception {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(cfg.mcBin);
-        cmd.addAll(args);
-        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (out.length() < 2000) out.append(line).append('\n');
-            }
-        }
-        if (!p.waitFor(60, TimeUnit.SECONDS) || p.exitValue() != 0) {
-            throw new IllegalStateException("mc " + args.get(0) + " 失败: " + out.toString().trim());
+            return v == null || String.valueOf(v).isBlank() ? dft : Integer.parseInt(String.valueOf(v).trim());
+        } catch (Exception e) {
+            return dft;
         }
     }
 
@@ -720,34 +559,6 @@ public final class SyncEngine {
 
     // ────────────────────────── 工具 ──────────────────────────
 
-    private void runMc(List<String> args) throws Exception {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(cfg.mcBin);
-        cmd.addAll(args);
-        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (out.length() < 2000) out.append(line).append('\n');
-            }
-        }
-        if (!p.waitFor(60, TimeUnit.SECONDS) || p.exitValue() != 0) {
-            throw new IllegalStateException("mc " + args.get(0) + " 失败: " + out.toString().trim());
-        }
-    }
-
-    /** mirror 事件 source(绝对路径) → 相对任务源目录路径 */
-    private static String relOf(String source, String srcDir) {
-        String s = source.replaceAll("^/+|/+$", "");
-        String d = srcDir.replaceAll("^/+|/+$", "");
-        if (d.isEmpty()) return s;
-        if (s.startsWith(d + "/")) {
-            return s.substring(d.length() + 1);
-        }
-        int idx = s.lastIndexOf('/');
-        return idx >= 0 ? s.substring(idx + 1) : s;
-    }
 
     /** 轻量 6 段 cron(秒 分 时 日 月 周; 5 段前补 0); 仅 * / , - ? 语义 */
     static boolean cronMatches(String expr, LocalDateTime t) {

@@ -286,12 +286,14 @@ public class AgentService {
                 Map<String, Object> f = new LinkedHashMap<>();
                 m.forEach((k, v) -> f.put(String.valueOf(k), v));
                 String rel = String.valueOf(f.get("relPath"));
-                String st = "error".equalsIgnoreCase(String.valueOf(f.get("status"))) ? "error" : "success";
+                String raw = String.valueOf(f.get("status"));
+                // rclone 引擎: 文件级状态含 deleted(全量轮删目标多余), 需原样落库
+                String st = "error".equalsIgnoreCase(raw) ? "error" : ("deleted".equalsIgnoreCase(raw) ? "deleted" : "success");
                 long size = f.get("size") instanceof Number n ? n.longValue() : 0L;
                 String err = f.get("error") == null ? null : String.valueOf(f.get("error"));
                 metaJdbc.update("INSERT INTO file_sync_run_file (run_id, rel_path, status, size, error_msg) VALUES (?, ?, ?, ?, ?)",
                         runPk, rel, st, size, err);
-                if ("error".equals(st)) failN++; else okN++;
+                if ("error".equals(st)) failN++; else if (!"deleted".equals(st)) okN++;
             }
         }
         metaJdbc.update("UPDATE file_sync_task SET run_status = ?, last_run_summary = ?, last_run_time = NOW() WHERE id = ?",

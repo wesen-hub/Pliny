@@ -10,7 +10,7 @@ public final class AgentConfig {
 
     public final String platformUrl;
     public final String registerCode;      // 首次注册用; 注册成功后可为空
-    public final String mcBin;
+    public final String rcloneBin;
     public final String dataDir;
     public final int heartbeatSec;
     public final int pollTimeoutSec;
@@ -22,7 +22,7 @@ public final class AgentConfig {
     public AgentConfig() {
         platformUrl = stripSlash(env("DCP_AGENT_PLATFORM_URL", "http://localhost:8080"));
         registerCode = env("DCP_AGENT_REGISTER_CODE", null);
-        mcBin = env("DCP_AGENT_MC", "mc");
+        rcloneBin = env("DCP_AGENT_RCLONE", "rclone");
         dataDir = env("DCP_AGENT_DATA_DIR", "./data");
         heartbeatSec = intEnv("DCP_AGENT_HEARTBEAT_SEC", 30);
         pollTimeoutSec = intEnv("DCP_AGENT_POLL_TIMEOUT", 25);
