@@ -1,15 +1,15 @@
 <template>
   <div class="page-card">
     <el-alert type="success" :closable="false" show-icon style="margin-bottom: 16px"
-      title="文件同步(mc mirror 原生):任务 = 源文件数据源 → 目标 MinIO + mirror 同步策略 + 触发方式;执行 = mc mirror,增量内建,审计按轮(run/文件明细)" />
+      title="文件同步(rclone 引擎):任务 = 源文件数据源 → 目标 MinIO + 同步模式(全量+定时增量/一次性全量/仅定时增量) + rclone 策略;执行 = rclone sync(全量镜像)/copy(增量),审计按轮(run/文件明细)" />
 
     <el-card shadow="never">
       <div class="toolbar">
         <div>
           <el-radio-group v-model="filter" size="small">
             <el-radio-button value="">全部</el-radio-button>
-            <el-radio-button value="WATCHING">实时中</el-radio-button>
             <el-radio-button value="RUNNING">执行中</el-radio-button>
+            <el-radio-button value="COMPLETED">已完成</el-radio-button>
             <el-radio-button value="FAILED">失败</el-radio-button>
           </el-radio-group>
           <el-text size="small" type="info" style="margin-left:12px">自动刷新: <el-switch v-model="autoRefresh" size="small" /></el-text>
@@ -30,22 +30,28 @@
             <el-text v-if="row.exec_host === 'agent' && !row.online" size="small" type="danger" style="display:block;font-size:10px">Agent 离线(最后心跳滞后)</el-text>
           </template>
         </el-table-column>
-        <el-table-column label="源 → 目标" min-width="230">
+        <el-table-column label="模式" width="150">
+          <template #default="{ row }">
+            <el-tag size="small" :type="modeType(row.sync_mode)" effect="plain">{{ modeName(row.sync_mode) }}</el-tag>
+            <el-text v-if="row.sync_mode !== 'full_once' && row.baseline_done" size="small" type="info" style="display:block;font-size:10px">基线已建</el-text>
+          </template>
+        </el-table-column>
+        <el-table-column label="调度" width="150">
+          <template #default="{ row }">{{ schedName(row) }}</template>
+        </el-table-column>
+        <el-table-column label="源 → 目标" min-width="220">
           <template #default="{ row }">
             <el-tag size="small" type="info" effect="plain">{{ row.source_ds_type || '?' }}</el-tag>
             <el-text size="small" style="margin-left:4px">{{ row.source_ds_name }}</el-text>
             <el-text size="small" type="info" style="display:block;font-size:11px">{{ row.source_path || '/(整源)' }} → {{ row.target_bucket }}{{ row.target_prefix ? '/' + row.target_prefix : '' }}</el-text>
           </template>
         </el-table-column>
-        <el-table-column label="同步策略" min-width="180">
+        <el-table-column label="同步策略" min-width="190">
           <template #default="{ row }">
             <div v-if="row.strategy">
-              <el-tag v-for="t in stratTags(row.strategy)" :key="t" size="small" effect="plain" :type="t.type" style="margin-right:4px">{{ t.text }}</el-tag>
-              <el-text v-if="!stratTags(row.strategy).length" size="small" type="info">默认(补缺失增量)</el-text>
+              <el-tag v-for="t in stratTags(row.strategy)" :key="t.text" size="small" effect="plain" :type="t.type" style="margin-right:4px">{{ t.text }}</el-tag>
+              <el-text v-if="!stratTags(row.strategy).length" size="small" type="info">默认(rclone 默认口径)</el-text>
             </div>
-            <el-text v-if="row.schedule_mode === 'interval'" size="small" type="info" style="display:block;font-size:10px">每 {{ row.interval_min }}min 自动</el-text>
-            <el-text v-else-if="row.schedule_mode === 'cron'" size="small" type="info" style="display:block;font-size:10px">{{ row.cron_expr }} 自动</el-text>
-            <el-text v-else size="small" type="info" style="display:block;font-size:10px">仅手动</el-text>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -57,25 +63,22 @@
           <template #default="{ row }">
             <template v-if="row.last_run_summary">
               <el-text size="small">{{ row.last_run_summary.transferred ?? 0 }} 文件 / {{ fmtBytes(row.last_run_summary.bytes) }}</el-text>
+              <el-text v-if="row.last_run_summary.deleted" size="small" type="info" style="display:block">删除 {{ row.last_run_summary.deleted }}</el-text>
               <el-text v-if="row.last_run_summary.failed" size="small" type="danger" style="display:block">失败 {{ row.last_run_summary.failed }}</el-text>
             </template>
             <el-text v-else size="small" type="info">—</el-text>
             <el-text v-if="row.last_run_time" size="small" type="info" style="display:block;font-size:10px">{{ row.last_run_time }}</el-text>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190">
+        <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-link type="primary" underline="never" @click="router.push(`/filesync/task/${row.id}`)">详情</el-link>
-            <template v-if="Number(row.watch) === 1">
-              <el-link v-if="row.watching || row.run_status === 'WATCHING'" type="danger" underline="never" style="margin-left:8px" @click="stopWatch(row)">停止实时</el-link>
-              <el-link v-else type="success" underline="never" style="margin-left:8px" @click="run(row)">启动实时</el-link>
-            </template>
-            <el-link v-else type="success" underline="never" style="margin-left:8px" :disabled="row.run_status === 'RUNNING'" @click="run(row)">执行</el-link>
+            <el-link type="success" underline="never" style="margin-left:8px" :disabled="row.run_status === 'RUNNING'" @click="run(row)">执行</el-link>
             <el-link type="danger" underline="never" style="margin-left:8px" @click="remove(row)">删除</el-link>
           </template>
         </el-table-column>
       </el-table>
-      <div class="tip">执行 = 触发一轮 mc mirror(增量内建:补缺失/overwrite 覆盖变更/0 变化跳过);agent 任务由 Agent 在业务机本地执行并回传</div>
+      <div class="tip">执行 = 触发一轮 rclone(全量轮 sync 镜像对齐,增量轮 copy 只搬新增/变更);agent 任务由 Agent 在业务机本地执行并回传</div>
     </el-card>
   </div>
 </template>
@@ -121,19 +124,35 @@ onUnmounted(stopAuto)
 
 const filtered = computed(() => tasks.value.filter(t => !filter.value || t.run_status === filter.value))
 
-const statusName = s => ({ IDLE: '未执行', RUNNING: '执行中', COMPLETED: '已完成', FAILED: '失败', WATCHING: '实时同步中' }[s] || s || '未执行')
-const statusType = s => ({ RUNNING: 'warning', COMPLETED: 'success', FAILED: 'danger', WATCHING: 'danger' }[s] || 'info')
+const statusName = s => ({ IDLE: '未执行', RUNNING: '执行中', COMPLETED: '已完成', FAILED: '失败' }[s] || s || '未执行')
+const statusType = s => ({ RUNNING: 'warning', COMPLETED: 'success', FAILED: 'danger' }[s] || 'info')
+const modeName = m => ({ full_then_incr: '全量+定时增量', full_once: '一次性全量', incr_scheduled: '仅定时增量' }[m] || m || '全量+定时增量')
+const modeType = m => ({ full_then_incr: 'success', full_once: 'warning', incr_scheduled: 'primary' }[m] || 'info')
+const schedName = r => {
+  if (r.sync_mode === 'full_once') return '无需调度(一次性)'
+  if (r.schedule_mode === 'interval') return `每 ${r.interval_min || 5}min 自动`
+  if (r.schedule_mode === 'cron') return `${r.cron_expr} 自动`
+  return '仅手动'
+}
 
 function stratTags(st) {
   const out = []
-  if (st.overwrite) out.push({ text: '同名覆盖', type: 'warning' })
-  if (st.remove) out.push({ text: '删除多余', type: 'danger' })
-  if (st.exclude && st.exclude.length) out.push({ text: `排除×${st.exclude.length}`, type: '' })
-  if (st.timeFilter) {
-    const m = String(st.timeFilter.value || '').match(/^(\d+)([hd])$/)
-    out.push({ text: `仅同步最近${m ? m[1] + (m[2] === 'h' ? '小时' : '天') : st.timeFilter.value}修改`, type: '' })
-  }
-  if (st.dryRun) out.push({ text: '演练', type: 'info' })
+  if (!st || typeof st !== 'object') return out
+  if (st.compare === 'checksum') out.push({ text: '校验=校验和', type: '' })
+  else if (st.compare === 'size_only') out.push({ text: '校验=仅大小', type: '' })
+  if (st.updateMode === 'update') out.push({ text: '覆盖=只搬更新', type: 'warning' })
+  else if (st.updateMode === 'ignore_existing') out.push({ text: '覆盖=跳过已存在', type: 'warning' })
+  if (st.deleteExtras === true) out.push({ text: '删除=删除目标多余', type: 'danger' })
+  else if (st.deleteExtras === false) out.push({ text: '删除=保留目标多余', type: '' })
+  if (st.includes?.length) out.push({ text: `包含×${st.includes.length}`, type: '' })
+  if (st.excludes?.length) out.push({ text: `排除×${st.excludes.length}`, type: 'warning' })
+  if (st.minAge) out.push({ text: `仅最近${st.minAge}`, type: '' })
+  if (st.maxAge) out.push({ text: `截至${st.maxAge}`, type: '' })
+  if (st.minSize) out.push({ text: `最小${st.minSize}`, type: '' })
+  if (st.maxSize) out.push({ text: `最大${st.maxSize}`, type: '' })
+  if (st.transfers || st.checkers) out.push({ text: `并发${st.transfers ?? 8}/${st.checkers ?? 8}`, type: 'info' })
+  if (st.bwlimit) out.push({ text: `限速${st.bwlimit}`, type: 'info' })
+  if (st.dryRun) out.push({ text: '试运行', type: 'info' })
   return out
 }
 function fmtBytes(b) {
@@ -146,21 +165,11 @@ function fmtBytes(b) {
 async function run(row) {
   try {
     const r = await request.post(`/filesync/tasks/${row.id}/run`)
-    if (r?.watching) ElMessage.success('实时同步已启动(启动即全量一轮,之后持续监听)')
-    else if (r?.online === false) ElMessage.warning('Agent 当前离线:执行指令已入队,Agent 重连后会自动执行')
+    if (r?.online === false) ElMessage.warning('Agent 当前离线:执行指令已入队,Agent 重连后会自动执行')
     else ElMessage.success(r?.started ? (row.exec_host === 'agent' ? '已下发执行指令给 Agent' : '已开始执行(异步)') : '任务已在执行中')
     setTimeout(load, 2500)
   } catch (e) {
     ElMessage.error('执行失败: ' + (e?.message || e))
-  }
-}
-async function stopWatch(row) {
-  try {
-    const r = await request.post(`/filesync/tasks/${row.id}/stop`)
-    ElMessage.success(r?.dispatchedToAgent ? '已下发停止指令给 Agent' : '已停止实时同步')
-    setTimeout(load, 2000)
-  } catch (e) {
-    ElMessage.error('停止失败: ' + (e?.message || e))
   }
 }
 async function remove(row) {

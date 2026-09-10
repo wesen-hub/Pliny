@@ -15,8 +15,7 @@ ENV PATH=$HADOOP_HOME/bin:$PATH
 # Hadoop 客户端(DistCp 引擎; 自带 s3a; 预下载进 build context 避免构建期网络抖动)
 COPY dist/hadoop-3.4.1.tar.gz /tmp/hadoop.tar.gz
 RUN tar xzf /tmp/hadoop.tar.gz -C /opt && mv /opt/hadoop-3.4.1 /opt/hadoop && rm /tmp/hadoop.tar.gz
-# mc 客户端(文件同步旧引擎; rclone 切换完成后移除)
-RUN curl -sfL -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-arm64/mc && chmod +x /usr/local/bin/mc
+# 注: 文件同步引擎已切 rclone(mc 已从镜像移除, 2026-09-10)
 # rclone(文件同步新引擎, v1.71.0 arm64; dist/ 预置二进制, 免构建期网络)
 COPY dist/rclone /usr/local/bin/rclone
 RUN chmod +x /usr/local/bin/rclone

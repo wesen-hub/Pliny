@@ -238,7 +238,7 @@ public final class SyncEngine {
         }
     }
 
-    // ────────────────────────── 执行(mc mirror) ──────────────────────────
+    // ────────────────────────── 执行(rclone sync/copy) ──────────────────────────
 
     private void execute(long tid, String trigger) {
         if (!running.add(tid)) return;

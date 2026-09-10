@@ -269,7 +269,9 @@ public class FileSyncTaskService {
 
     public Map<String, Object> detail(long id) {
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT * FROM file_sync_task WHERE id = ?", id);
+                "SELECT t.*, a.status AS agent_status, "
+                        + "TIMESTAMPDIFF(SECOND, a.last_heartbeat, NOW()) AS agent_age "
+                        + "FROM file_sync_task t LEFT JOIN dcp_agent a ON a.id = t.agent_id WHERE t.id = ?", id);
         if (rows.isEmpty()) return null;
         Map<String, Object> r = new LinkedHashMap<>(rows.get(0));
         r.put("strategy", parseJson(String.valueOf(r.get("strategy_json"))));
@@ -295,9 +297,17 @@ public class FileSyncTaskService {
         String sched = normSched(body.getOrDefault("scheduleMode", exist.get("schedule_mode")));
         String mode = body.get("syncMode") == null ? normMode(exist.get("sync_mode")) : normMode(body.get("syncMode"));
         if (MODE_FULL_ONCE.equals(mode)) sched = "none";
-        if (!MODE_FULL_ONCE.equals(mode) && "none".equals(sched)) {
-            throw new IllegalArgumentException("syncMode=" + mode + " 必须配置定时调度(interval|cron)");
-        }
+        // 合并现有值后走与 create 同一套校验(策略白名单/模式-调度/仅增量禁删等)
+        Map<String, Object> merged = new LinkedHashMap<>();
+        merged.put("name", body.getOrDefault("name", exist.get("name")));
+        merged.put("sourceDatasourceId", exist.get("source_datasource_id"));
+        merged.put("sourcePath", body.getOrDefault("sourcePath", exist.get("source_path")));
+        merged.put("targetBucket", body.getOrDefault("targetBucket", exist.get("target_bucket")));
+        merged.put("syncMode", mode);
+        merged.put("scheduleMode", sched);
+        merged.put("cronExpr", body.getOrDefault("cronExpr", exist.get("cron_expr")));
+        merged.put("strategy", body.getOrDefault("strategy", exist.get("strategy")));
+        validate(merged);
         metaJdbc.update("UPDATE file_sync_task SET name = ?, description = ?, source_path = ?, target_bucket = ?, "
                         + "target_prefix = ?, strategy_json = ?, sync_mode = ?, schedule_mode = ?, interval_min = ?, cron_expr = ?, "
                         + "version = version + 1 WHERE id = ?",
