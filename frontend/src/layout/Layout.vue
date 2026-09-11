@@ -28,8 +28,6 @@
         </el-sub-menu>
         <el-sub-menu index="subscribe">
           <template #title><el-icon><Promotion /></el-icon><span>订阅与分发</span></template>
-          <el-menu-item index="/subscribe">订阅中心</el-menu-item>
-          <el-menu-item index="/subscribe/create">新建订阅</el-menu-item>
           <el-menu-item index="/datasub">数据订阅中心</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="govern">
