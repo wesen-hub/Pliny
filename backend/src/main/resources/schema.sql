@@ -271,6 +271,25 @@ CREATE TABLE IF NOT EXISTS sync_task (
   update_time    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB COMMENT='同步任务配置(向导提交)';
 
+-- 字段流注册(源列 → 逻辑表列): 同一源列只能有一条采集流(跨任务唯一, 防重复采集同一列)
+-- 约束口径: 表级可多流(多源表→同一逻辑表), 字段级只能一条流(源表.列 → 逻辑表.列 全局唯一);
+-- 说明: 同一目标列可以有多个来源(不同源表的同名/异名列), 但一旦两个来源存在相同业务键的行,
+--       按“后写覆盖先写”语义收敛(零仲裁) —— 业务键重叠不做静态校验(需看具体行值, 无法在创建期判定)
+CREATE TABLE IF NOT EXISTS sync_field_flow (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  logical_table VARCHAR(128) NOT NULL COMMENT '目标逻辑表',
+  target_col    VARCHAR(128) NOT NULL COMMENT '目标列(模型字段)',
+  datasource_id BIGINT       NOT NULL COMMENT '源数据源',
+  source_db     VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '源库',
+  source_table  VARCHAR(64)  NOT NULL COMMENT '源表',
+  source_col    VARCHAR(128) NOT NULL COMMENT '源列',
+  sync_task_id  BIGINT UNSIGNED NOT NULL COMMENT '归属同步任务(sync_task.id)',
+  update_time   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_flow (datasource_id, source_db, source_table, source_col),
+  KEY idx_task (sync_task_id),
+  KEY idx_logical (logical_table)
+) ENGINE=InnoDB COMMENT='字段流注册: 同一源列只能有一条采集流(跨任务唯一)';
+
 -- 同步死信队列(消费失败消息落库; 页面: 同步任务 → 死信监控)
 CREATE TABLE IF NOT EXISTS dlt_message (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -156,12 +156,18 @@ public class SyncTaskController {
             return ApiResponse.ok(Map.of("saved", false, "issues", mergeIssues));
         }
         boolean newInstance = Boolean.TRUE.equals(body.get("asNewInstance"));
-        Long id = service.save(name, logicalTable, dsId, sourceDb, sourceTables,
-                fieldMapping, body.get("rowChain"), businessKey,
-                (String) body.get("syncMode"), (String) body.get("fullScope"),
-                (String) body.get("cronExpr"), (String) body.get("startMode"),
-                body.get("startValue") == null ? null : String.valueOf(body.get("startValue")),
-                originByTable, newInstance);
+        Long id;
+        try {
+            id = service.save(name, logicalTable, dsId, sourceDb, sourceTables,
+                    fieldMapping, body.get("rowChain"), businessKey,
+                    (String) body.get("syncMode"), (String) body.get("fullScope"),
+                    (String) body.get("cronExpr"), (String) body.get("startMode"),
+                    body.get("startValue") == null ? null : String.valueOf(body.get("startValue")),
+                    originByTable, newInstance);
+        } catch (IllegalArgumentException e) {
+            // 字段流唯一性等硬约束: 直接拒绝并给出可读原因(前端 catch 展示)
+            return ApiResponse.error(400, e.getMessage());
+        }
         return ApiResponse.ok(Map.of("saved", true, "id", id, "newInstance", newInstance,
                 "sources", sourceTables, "merge", sourceTables.size() > 1));
     }

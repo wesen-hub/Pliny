@@ -969,7 +969,7 @@ async function submit() {
       startValue: (form.value.syncMode === 'incremental' || form.value.syncMode === 'scheduled-batch') ? form.value.startValue : null
     })
     // 字段映射 + 行级链 + 业务主键 → 同步任务配置(实现 1: 后端校验并保存; 多源表 = 自动注册采集任务)
-    await saveSyncTask({
+    const savedRes = await saveSyncTask({
       name: `${modelName.value}-${tableName}`,
       logicalTable: tableName,
       datasourceId: form.value.ds,
@@ -991,6 +991,10 @@ async function submit() {
       cronExpr: form.value.cronExpr || null,
       startMode: form.value.startMode
     })
+    // 后端预校验(字段映射/字段流唯一性等)以 {saved:false, issues:[...]} 返回; 旧版前端会把它当成功吞掉
+    if (savedRes?.saved === false) {
+      throw new Error((savedRes.issues || []).join('; ') || '保存被拒绝(校验未通过)')
+    }
     const mergeTip = allTables.value.length > 1 ? `(多表合并: ${allTables.value.join(' + ')} → 宽表 ${tableName})` : ''
     ElMessage.success(`已提交审批(业务主键: ${bkSummary.value})→ 任务配置已保存, ${mergeTip} 在任务列表启动采集后自动全量+CDC 收敛`)
     setTimeout(() => { router.push('/sync/tasks') }, 1200)
