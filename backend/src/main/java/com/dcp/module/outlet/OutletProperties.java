@@ -1,0 +1,62 @@
+package com.dcp.module.outlet;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+/**
+ * 出口服务配置(前缀 {@code dcp.outlet})。
+ *
+ * <pre>
+ * dcp.outlet:
+ *   source: mock            # mock | kafka
+ *   registry: memory        # memory | mapper
+ *   epoch: 1                # 流代次(重建 changefeed / topic 重建时 +1)
+ *   kafka:
+ *     topics: dcp.cdc.target_db
+ *     group-id: dcp-outlet
+ *     start-tso: 0          # 流的起点(= changefeed.start_ts);earliest 不允许小于它
+ *     buffer-max-events: 20000
+ *   tidb:
+ *     url: jdbc:mysql://dcp-outlet-tidb1:4000/target_db
+ *     username: root
+ *     password: ***
+ *     pk-column: id
+ * </pre>
+ */
+@Data
+@Component
+@ConfigurationProperties(prefix = "dcp.outlet")
+public class OutletProperties {
+
+    /** 数据源:mock(骨架) | kafka(L1 内部流) */
+    private String source = "mock";
+    /** 注册表:memory(骨架) | mapper(元库) */
+    private String registry = "memory";
+    /** 流代次 */
+    private int epoch = 1;
+    /** 保留窗口(小时,决策 12:≥168) */
+    private int retentionHours = 168;
+
+    private Kafka kafka = new Kafka();
+    private Tidb tidb = new Tidb();
+
+    @Data
+    public static class Kafka {
+        private String topics = "dcp.cdc.target_db";
+        private String groupId = "dcp-outlet";
+        /** 流的起点(= changefeed.start_ts);earliest 不得小于它 */
+        private long startTso = 0L;
+        private int bufferMaxEvents = 20000;
+    }
+
+    @Data
+    public static class Tidb {
+        /** 快照只读入口(生产:契约化只读视图/账号,见设计 §6.3 技术要点 3) */
+        private String url;
+        private String username;
+        private String password;
+        /** 游标分页主键列(绝不用 LIMIT/OFFSET) */
+        private String pkColumn = "id";
+    }
+}

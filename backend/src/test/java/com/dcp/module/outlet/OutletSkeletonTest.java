@@ -30,8 +30,8 @@ class OutletSkeletonTest {
     void setUp() {
         source = new MockChangeStreamSource();
         source.seed();
-        OutletRegistry registry = new OutletRegistry();
-        registry.seed();
+        OutletRegistry registry = new OutletRegistry(null, null, "memory");
+        registry.init();
         svc = new ChangeOutletService(registry,
                 new OutletPermissionEngine(null),
                 new OutletQuotaLimiter(),

@@ -22,7 +22,34 @@
 | `OutletErrorCode` | 6xxx 错误码(含边界三规则错误码) | §6.4.2 |
 | `model/*` | `ChangeEvent` / `ChangeBatch` / `StreamStatus` / `SnapshotPage` / `PositionKey` / `ConsumerAccount` / `Contract` | §6.8 / §6.9 |
 | `source/ChangeStreamSource` | **数据源 SPI**(唯一可替换点) | §6.1 |
-| `source/MockChangeStreamSource` | 骨架期内存实现(可跑通全部语义) | — |
+| `source/MockChangeStreamSource` | 骨架期内存实现(`source=mock`,无需 TiDB 即可跑) | — |
+| `source/KafkaChangeStreamSource` | **真实 L1 流接入**(`source=kafka`):canal-json 消费 + 水位 + `AS OF TIMESTAMP` 快照/回查 | §5.3 / §6.5 / §6.6 |
+| `source/CanalJsonParser` | canal-json 报文解析(data/old/commitTs/WATERMARK/DDL) | §5.3 |
+| `OutletProperties` | 配置(`dcp.outlet.*`) | — |
+| `entity/*` + `mapper/*` | 元库实体与 Mapper(consumer / contract 表) | §7.5 |
+
+## 配置(`dcp.outlet.*`)
+
+```yaml
+dcp:
+  outlet:
+    source: mock          # mock | kafka
+    registry: memory      # memory | mapper(读元库 consumer/contract 表)
+    epoch: 1              # 流代次;重建 changefeed / topic 重建时 +1
+    retention-hours: 168  # 决策 12
+    kafka:
+      topics: dcp.cdc.target_db
+      group-id: dcp-outlet
+      start-tso: 0        # 流的起点(= changefeed.start_ts);earliest 不得小于它
+      buffer-max-events: 20000
+    tidb:                 # 快照/回查的只读入口
+      url: jdbc:mysql://dcp-outlet-tidb1:4000/target_db
+      username: root
+      password: ***
+      pk-column: id       # 游标分页主键(绝不用 LIMIT/OFFSET)
+```
+
+> 上线口径:`source=kafka` + `registry=mapper`;`dcp.outlet.tidb` 指向**契约化只读账号/视图**(不得用超管账号,见设计 §6.3 技术要点 3)。
 
 ## 接口一览
 
@@ -67,12 +94,12 @@ curl -s 'http://localhost:8081/api/chg/t_order/changes?consumerId=demo-sub&limit
 
 ## 待建(下一步,按设计节顺序)
 
-| # | 待建 | 依据 | 说明 |
+| # | 待建 | 依据 | 状态 |
 |---|---|---|---|
-| 1 | `OutletRegistry` → Mapper 版 | §7.5 / DDL | 读写 `consumer` / `contract`;token 短时化 + 吊销 |
-| 2 | `KafkaChangeStreamSource` | §5 / §6 | 消费 L1 `dcp.cdc.{schema}.{table}`,canal-json 解析(整行 + old + `_tidb.commitTs` + WATERMARK),`AS OF TIMESTAMP` 走快照只读入口 |
-| 3 | `snapshot_job` 登记与 TTL | §6.5 / DDL | 发首页即登记 boundary;过期作废并要求重来 |
-| 4 | 集中配额计数 | §7.2 | 多实例下内存计数 = N 倍配额,需 Redis/计数表 |
-| 5 | 行级条件下推 + 脱敏执行器 | §7.6 | 现为契约侧简谓词;生产接 `DataSecurityService` 行规则并下推 |
-| 6 | 消费方 SDK(执行器 A) | §6.2 | 位点表 + 同事务提交 + 幂等 upsert + 退避重试 + 自动重快照 |
-| 7 | 执行器 B 作业模板 | §6.3 | Spark bootstrap / 增量批 + manifest 原子发布 + 位点收口 |
+| 1 | `OutletRegistry` → Mapper 版 | §7.5 / DDL | ✅ 已完成(`registry=mapper` 读元库;JSON 列解析 + 过期过滤) |
+| 2 | `KafkaChangeStreamSource` | §5 / §6 | 🟡 已完成主体(消费 + 解析 + 水位 + `AS OF TIMESTAMP` 快照/回查);**遗留**:内存环形缓冲 → 按位点 seek 重读 Kafka;`stream_job` 登记 |
+| 3 | `snapshot_job` 登记与 TTL | §6.5 / DDL | ⏳ 发首页时登记 boundary + TTL |
+| 4 | 集中配额计数 | §7.2 | ⏳ 多实例下内存计数 = N 倍配额,需 Redis/计数表 |
+| 5 | 行级条件下推 + 脱敏执行器 | §7.6 | ⏳ 现为契约侧简谓词 |
+| 6 | 消费方 SDK(执行器 A) | §6.2 | ⏳ 位点表 + 同事务提交 + 幂等 upsert + 退避重试 + 自动重快照 |
+| 7 | 执行器 B 作业模板 | §6.3 | ⏳ Spark bootstrap / 增量批 + manifest 原子发布 + 位点收口 |

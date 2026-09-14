@@ -1,33 +1,202 @@
 package com.dcp.module.outlet;
 
+import com.dcp.module.outlet.entity.OutletConsumerEntity;
+import com.dcp.module.outlet.entity.OutletContractEntity;
+import com.dcp.module.outlet.mapper.OutletConsumerMapper;
+import com.dcp.module.outlet.mapper.OutletContractMapper;
 import com.dcp.module.outlet.model.ConsumerAccount;
 import com.dcp.module.outlet.model.Contract;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 消费方与契约注册表(设计 §7.5)。
  *
- * <p><b>骨架实现为内存版</b>,字段与《表结构DDL-2026-09-14.sql》的 {@code consumer}/{@code contract} 表一一对应;
- * 落地时把本类替换为 Mapper 版即可,**上层服务不感知**。
+ * <p>两种模式,由 {@code dcp.outlet.registry} 决定:
+ * <ul>
+ *   <li>{@code mapper}(推荐/生产):读元库的 {@code consumer} / {@code contract} 表
+ *       (DDL 见《变更流出口-表结构DDL-2026-09-14.sql》);</li>
+ *   <li>{@code memory}(默认,骨架/单测):内存种子数据,字段与表一一对应,便于无库跑通。</li>
+ * </ul>
+ * 上层服务只依赖本类的三个查询方法,**不感知**底层实现。
  */
 @Slf4j
 @Component
 public class OutletRegistry {
 
-    private final Map<String, ConsumerAccount> consumers = new LinkedHashMap<>();
-    private final Map<String, Contract> contracts = new LinkedHashMap<>();
+    private final OutletConsumerMapper consumerMapper;
+    private final OutletContractMapper contractMapper;
+    private final String mode;
+    private final ObjectMapper json = new ObjectMapper();
+
+    /** memory 模式的数据 */
+    private final Map<String, ConsumerAccount> memConsumers = new LinkedHashMap<>();
+    private final Map<String, Contract> memContracts = new LinkedHashMap<>();
+
+    public OutletRegistry(@Autowired(required = false) OutletConsumerMapper consumerMapper,
+                          @Autowired(required = false) OutletContractMapper contractMapper,
+                          @Value("${dcp.outlet.registry:memory}") String mode) {
+        this.consumerMapper = consumerMapper;
+        this.contractMapper = contractMapper;
+        this.mode = mode;
+    }
 
     @PostConstruct
-    public void seed() {
-        // 消费方 ①:对外订阅供数(通道 api;列白名单 + 行条件 + 密级上限 + 脱敏)
+    public void init() {
+        seedMemory();
+        log.info("[outlet] 注册表模式={}(mapper 可用={}, contract mapper 可用={})",
+                mode, consumerMapper != null, contractMapper != null);
+        if ("mapper".equalsIgnoreCase(mode) && (consumerMapper == null || contractMapper == null)) {
+            log.warn("[outlet] 配置为 mapper 模式但 Mapper 未注入 → 自动退回 memory 模式");
+        }
+    }
+
+    private boolean useMapper() {
+        return "mapper".equalsIgnoreCase(mode) && consumerMapper != null && contractMapper != null;
+    }
+
+    /* ------------------------------------------------------------------ 查询入口 */
+
+    public ConsumerAccount consumer(String consumerId) {
+        if (useMapper()) {
+            OutletConsumerEntity e = consumerMapper.selectById(consumerId);
+            if (e == null) {
+                return null;
+            }
+            return toModel(e);
+        }
+        return memConsumers.get(consumerId);
+    }
+
+    public Contract contract(String contractId) {
+        if (useMapper()) {
+            OutletContractEntity e = contractMapper.selectById(contractId);
+            return e == null ? null : toModel(e);
+        }
+        return memContracts.get(contractId);
+    }
+
+    /** 取该消费方当前生效的契约(status=active 且未过期) */
+    public Contract activeContractOf(String consumerId) {
+        if (useMapper()) {
+            List<OutletContractEntity> list = contractMapper.selectList(
+                    new QueryWrapper<OutletContractEntity>()
+                            .eq("consumer_id", consumerId)
+                            .eq("status", Contract.STATUS_ACTIVE));
+            return list.stream().map(this::toModel).filter(Contract::active).findFirst().orElse(null);
+        }
+        return memContracts.values().stream()
+                .filter(c -> c.getConsumerId().equals(consumerId) && c.active())
+                .findFirst().orElse(null);
+    }
+
+    /* ------------------------------------------------------------------ 实体 → 模型 */
+
+    private ConsumerAccount toModel(OutletConsumerEntity e) {
+        ConsumerAccount c = new ConsumerAccount();
+        c.setConsumerId(e.getConsumerId());
+        c.setName(e.getName());
+        c.setConsumerType(e.getConsumerType());
+        c.setStatus(e.getStatus() == null ? "active" : e.getStatus());
+        c.setChannel(e.getChannel() == null ? "api" : e.getChannel());
+        c.setExecutor(e.getExecutor() == null ? ConsumerAccount.EXEC_STREAM : e.getExecutor());
+        c.setSubjectId(e.getSubjectId());
+        if (e.getQuotaQps() != null) {
+            c.setQuotaQps(e.getQuotaQps());
+        }
+        if (e.getQuotaRowsDay() != null) {
+            c.setQuotaRowsPerDay(e.getQuotaRowsDay());
+        }
+        if (e.getQuotaConn() != null) {
+            c.setQuotaConcurrent(e.getQuotaConn());
+        }
+        return c;
+    }
+
+    private Contract toModel(OutletContractEntity e) {
+        Contract c = new Contract();
+        c.setContractId(e.getContractId());
+        c.setConsumerId(e.getConsumerId());
+        c.setStreams(parseStringSet(e.getStreams()));
+        c.setColumnWhitelist(parseColumnWhitelist(e.getColumnWhitelist()));
+        c.setRowCondition(e.getRowCondition());
+        c.setMaxLevel(e.getMaxLevel() == null ? 0 : e.getMaxLevel());
+        c.setMaskRules(parseStringMap(e.getMaskRules()));
+        c.setChannel(e.getChannel() == null ? "api" : e.getChannel());
+        c.setStartPolicy(e.getStartPolicy() == null ? "snapshot" : e.getStartPolicy());
+        c.setStatus(e.getStatus() == null ? Contract.STATUS_ACTIVE : e.getStatus());
+        c.setExpireAt(e.getTokenExpireAt());
+        return c;
+    }
+
+    private Set<String> parseStringSet(String jsonText) {
+        Set<String> out = new LinkedHashSet<>();
+        if (jsonText == null || jsonText.isBlank()) {
+            return out;
+        }
+        try {
+            JsonNode n = json.readTree(jsonText);
+            if (n.isArray()) {
+                n.forEach(x -> out.add(x.asText()));
+            } else if (n.isTextual()) {   // 兼容 "t_order,t_user" 这种写法
+                for (String s : n.asText().split(",")) {
+                    if (!s.isBlank()) {
+                        out.add(s.trim());
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("[outlet] streams JSON 解析失败: {}", jsonText);
+        }
+        return out;
+    }
+
+    private Map<String, Set<String>> parseColumnWhitelist(String jsonText) {
+        Map<String, Set<String>> out = new LinkedHashMap<>();
+        if (jsonText == null || jsonText.isBlank()) {
+            return out;
+        }
+        try {
+            JsonNode n = json.readTree(jsonText);
+            n.fields().forEachRemaining(f -> {
+                Set<String> cols = new LinkedHashSet<>();
+                if (f.getValue().isArray()) {
+                    f.getValue().forEach(x -> cols.add(x.asText()));
+                }
+                out.put(f.getKey(), cols);
+            });
+        } catch (Exception ex) {
+            log.warn("[outlet] column_whitelist JSON 解析失败: {}", jsonText);
+        }
+        return out;
+    }
+
+    private Map<String, String> parseStringMap(String jsonText) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (jsonText == null || jsonText.isBlank()) {
+            return out;
+        }
+        try {
+            JsonNode n = json.readTree(jsonText);
+            n.fields().forEachRemaining(f -> out.put(f.getKey(), f.getValue().asText()));
+        } catch (Exception ex) {
+            log.warn("[outlet] mask_rules JSON 解析失败: {}", jsonText);
+        }
+        return out;
+    }
+
+    /* ------------------------------------------------------------------ memory 种子 */
+
+    private void seedMemory() {
         ConsumerAccount sub = new ConsumerAccount();
         sub.setConsumerId("demo-sub");
         sub.setName("演示订阅方");
@@ -35,9 +204,8 @@ public class OutletRegistry {
         sub.setExecutor(ConsumerAccount.EXEC_STREAM);
         sub.setChannel("api");
         sub.setSubjectId("role_data_viewer");
-        consumers.put(sub.getConsumerId(), sub);
+        memConsumers.put(sub.getConsumerId(), sub);
 
-        // 消费方 ②:内部打标任务(走出口,不豁免;内部契约自动审批)
         ConsumerAccount tag = new ConsumerAccount();
         tag.setConsumerId("demo-tag");
         tag.setName("演示打标任务");
@@ -46,10 +214,9 @@ public class OutletRegistry {
         tag.setChannel("internal");
         tag.setSubjectId("role_data_engineer");
         tag.setQuotaQps(50);
-        consumers.put(tag.getConsumerId(), tag);
+        memConsumers.put(tag.getConsumerId(), tag);
 
-        // 契约 ①:列白名单 id/name/amount/phone;行条件 region='CN';密级上限 2;phone 脱敏
-        //          (region 不在白名单 → 验“越权列连 key 都不出现”;rowCondition 仍按源行判定)
+        // 契约 ①:列白名单含 phone(脱敏);region 不在白名单 → 验"越权列连 key 都不出现"
         Contract c1 = new Contract();
         c1.setContractId("ct-sub-t_order");
         c1.setConsumerId("demo-sub");
@@ -61,7 +228,7 @@ public class OutletRegistry {
         c1.setChannel("api");
         c1.setStartPolicy("snapshot");
         c1.setExpireAt(LocalDateTime.now().plusDays(7));
-        contracts.put(c1.getContractId(), c1);
+        memContracts.put(c1.getContractId(), c1);
 
         // 契约 ②:内部打标,列更宽(含 region),无脱敏
         Contract c2 = new Contract();
@@ -69,34 +236,17 @@ public class OutletRegistry {
         c2.setConsumerId("demo-tag");
         c2.setStreams(Set.of("t_order"));
         c2.setColumnWhitelist(Map.of("t_order", Set.of("id", "name", "amount", "region")));
-        c2.setRowCondition(null);
         c2.setMaxLevel(3);
         c2.setChannel("internal");
         c2.setStartPolicy("snapshot");
-        contracts.put(c2.getContractId(), c2);
-
-        log.info("[outlet] 注册表已seed:{} 个消费方 / {} 个契约", consumers.size(), contracts.size());
-    }
-
-    public ConsumerAccount consumer(String consumerId) {
-        return consumers.get(consumerId);
-    }
-
-    public Contract contract(String contractId) {
-        return contracts.get(contractId);
-    }
-
-    /** 落库版实现:select * from contract where consumer_id=? and status='active' */
-    public Contract activeContractOf(String consumerId) {
-        return contracts.values().stream()
-                .filter(c -> c.getConsumerId().equals(consumerId) && c.active())
-                .findFirst().orElse(null);
+        memContracts.put(c2.getContractId(), c2);
     }
 
     public Map<String, Object> snapshotForDebug() {
         Map<String, Object> m = new HashMap<>();
-        m.put("consumers", consumers.values());
-        m.put("contracts", contracts.values());
+        m.put("mode", useMapper() ? "mapper" : "memory");
+        m.put("consumers", useMapper() ? "见 consumer 表" : memConsumers.values());
+        m.put("contracts", useMapper() ? "见 contract 表" : memContracts.values());
         return m;
     }
 }
