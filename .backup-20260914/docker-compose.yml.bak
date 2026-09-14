@@ -1,0 +1,386 @@
+# 数据采集平台 - Docker Compose 编排
+# 服务: mysql(元数据库) + demo-db(演示源/目标库) + backend(Spring Boot) + frontend(Nginx)
+# 启动: docker compose up -d --build
+# 访问: http://localhost:8080   默认账号: admin / admin123
+name: data-collect-platform
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dcp-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: dcp
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # 演示用源库 + 目标库（数据采集平台的演示数据，业务系统模拟）
+  demo-db:
+    image: mysql:8.0
+    container_name: dcp-demo-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - ./demo-db/init:/docker-entrypoint-initdb.d:ro
+      - demo-db-data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # Kafka(V3 同步链路缓冲层; KRaft 单节点, 仅演示/开发)
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: dcp-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+
+  # 演示 MongoDB 源库（数据采集平台的 MongoDB 演示源）
+  mongo:
+    image: mongo:7
+    container_name: dcp-mongo
+    restart: unless-stopped
+    environment:
+      # 演示环境: 单节点副本集(change stream 必需) + 无认证(副本集+认证需 keyFile, 演示从简)
+      MONGO_INITDB_DATABASE: app_db
+      TZ: Asia/Shanghai
+    command: ["mongod", "--replSet", "rs0", "--setParameter", "diagnosticDataCollectionEnabled=false"]
+    volumes:
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # 演示 SQL Server 源库（CDC: 事务日志捕获, Debezium SqlServerConnector; 仅 amd64 镜像, Apple Silicon 走 Rosetta 模拟）
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest   # 2022 在 Rosetta 下有 VA 映射问题(Invalid mapping of address), 2019 可稳定运行
+    platform: linux/amd64
+    container_name: dcp-sqlserver
+    restart: "no"   # Rosetta 下 mssql 无法启动(VA 映射), 需 x86_64 环境
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "DcpDemo@123456"
+      MSSQL_PID: Developer
+      MSSQL_AGENT_ENABLED: "true"   # CDC 捕获作业依赖 SQL Server Agent
+      TZ: Asia/Shanghai
+    volumes:
+      - ./demo-sqlserver/init:/init:ro
+      - sqlserver-data:/var/opt/mssql
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'DcpDemo@123456' -C -Q 'SELECT 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+    ulimits:
+      # SQL Server 在 Rosetta 下 VA 映射错误("Invalid mapping of address ... below 0x400000000000")
+      # 是 stack size unlimited 触发, 显式限制 stack 可规避
+      stack: 8388608
+
+  # 演示 Oracle 源库（CDC: 归档日志 + LogMiner; Oracle Free 23c 支持 arm64）
+  oracle:
+    image: gvenzl/oracle-free:slim
+    container_name: dcp-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: root123
+      APP_USER: dcp
+      APP_USER_PASSWORD: dcp123
+      TZ: Asia/Shanghai
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  # 演示 PostgreSQL 源库（CDC: wal_level=logical, 逻辑复制 slot）
+  postgres:
+    image: postgres:16
+    container_name: dcp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: root123
+      TZ: Asia/Shanghai
+    command:
+      - -c
+      - wal_level=logical
+    volumes:
+      - ./demo-pg/init:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # SeaTunnel Zeta 执行引擎（设计文档 §3.4）
+  seatunnel:
+    build: ./seatunnel
+    container_name: dcp-seatunnel
+    restart: unless-stopped
+    depends_on:
+      demo-db:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "8082:8081"
+      - "5801:5801"
+      - "5802:5802"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/running-jobs >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  backend:
+    build: ./backend
+    container_name: dcp-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      demo-db:
+        condition: service_healthy
+      seatunnel:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root123
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://tidb:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      DCP_TAGENGINE_AUTO_RUN: ${DCP_TAGENGINE_AUTO_RUN:-false}
+      DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}
+      SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST:-dcp-redis}
+      SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
+      DCP_TAGSTREAM_FLINK_URL: ${DCP_TAGSTREAM_FLINK_URL:-http://flink-jobmanager:8081}
+      DCP_TAGSTREAM_JAR: ${DCP_TAGSTREAM_JAR:-/opt/dcp-tagstream.jar}
+      DCP_TAGSTREAM_REDIS_HOST: ${DCP_TAGSTREAM_REDIS_HOST:-dcp-redis}
+      DCP_TAGSTREAM_REDIS_PORT: ${DCP_TAGSTREAM_REDIS_PORT:-6379}
+      # 湖同步(LakeSync, Spark 批同步到 Iceberg REST catalog demo/dcp; job-json 由平台组装)
+      DCP_LAKESYNC_CATALOG_URI: ${DCP_LAKESYNC_CATALOG_URI:-http://dcp-polaris:8181/api/catalog}
+      DCP_LAKESYNC_CATALOG_TOKEN_URL: ${DCP_LAKESYNC_CATALOG_TOKEN_URL:-http://dcp-polaris:8181/api/catalog/v1/oauth/tokens}
+      DCP_LAKESYNC_CATALOG_S3_ENDPOINT: ${DCP_LAKESYNC_CATALOG_S3_ENDPOINT:-http://dcp-minio:9000}
+      DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY: ${DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY:-minioadmin}
+      DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: ${DCP_LAKESYNC_CATALOG_S3_SECRET_KEY:-minioadmin123}
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      SYNC_TOPICS: ""
+      TZ: Asia/Shanghai
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./demo-agent-dir:/data
+      - ./dcp-tagstream/target/dcp-tagstream.jar:/opt/dcp-tagstream.jar:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - default
+      - dcp-lake
+
+  frontend:
+    build: ./frontend
+    container_name: dcp-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  # 采集 Agent(模拟业务机): rclone sync/copy 直推目标 MinIO; 注册码启动时经 DCP_AGENT_REGISTER_CODE 注入(一次性)
+  agent:
+    build: ./agent
+    container_name: dcp-agent
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      DCP_AGENT_PLATFORM_URL: http://dcp-backend:8080
+      DCP_AGENT_REGISTER_CODE: ${DCP_AGENT_REGISTER_CODE:-}
+      DCP_AGENT_DATA_DIR: /var/lib/dcp-agent
+      DCP_AGENT_HEARTBEAT_SEC: "20"
+    volumes:
+      - agent-data:/var/lib/dcp-agent
+      - ./demo-agent-dir:/data          # 业务机文件目录(任务源, 挂载根 /data)
+
+  tidb:
+    image: pingcap/tidb:v7.5.0
+    container_name: dcp-tidb
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "10080:10080"
+    # 打标在线执行 Redis(P1): 在线层 tag:online:{entity} hash + TTL
+  dcp-redis:
+    image: redis:latest
+    container_name: dcp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # 打标流执行 Flink(P1): 事件流 → Drools → 双写(Redis 在线 + 投影事实层)
+  flink-jobmanager:
+    image: flink:1.18.1-java17
+    container_name: dcp-flink-jm
+    restart: unless-stopped
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+      - TZ=Asia/Shanghai
+    ports:
+      - "8084:8081"
+  flink-taskmanager:
+    image: flink:1.18.1-java17
+    container_name: dcp-flink-tm
+    restart: unless-stopped
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+      - TZ=Asia/Shanghai
+
+  # 血缘图存储 Neo4j(2026-09-09): 逻辑表核心/多源合流/下游多应用; 前端知识图谱与影响/溯源查询
+  neo4j:
+    image: neo4j:5-community
+    container_name: dcp-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/neo4j123
+      NEO4J_server_memory_heap_max__size: 512M
+      NEO4J_server_memory_pagecache_size: 256M
+      TZ: Asia/Shanghai
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # 数据面 TiDB(单节点, MySQL 协议); 切换: SYNC_TARGET_URL=jdbc:mysql://tidb:4000/target_db...
+  # 水平扩容实测: 第二个消费者实例(同镜像/同 group, Kafka rebalance 自动分摊分区)
+  backend2:
+    build: ./backend
+    container_name: dcp-backend2
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      demo-db:
+        condition: service_healthy
+      seatunnel:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root123
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://tidb:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      DCP_TAGENGINE_AUTO_RUN: ${DCP_TAGENGINE_AUTO_RUN:-false}
+      DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}
+      SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST:-dcp-redis}
+      SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      SYNC_TOPICS: ""
+      TZ: Asia/Shanghai
+    ports:
+      - "8083:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  agent-data:
+  sqlserver-data:
+  oracle-data:
+  neo4j-data:
+  mysql-data:
+  demo-db-data:
+  mongo-data:
+  postgres-data:
+
+networks:
+  default:
+  dcp-lake:
+    external: true

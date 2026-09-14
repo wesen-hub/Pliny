@@ -91,12 +91,12 @@ dcp:
     poll-interval-ms: ${ENGINE_POLL_INTERVAL_MS:10000}
   seatunnel:
     url: ${SEATUNNEL_URL:http://seatunnel:8081}
-  # V3 同步链路(P0):目标分表库(默认 target_db;生产指向目标 MySQL 分表集群)
+  # V3 同步链路(P0):数据面目标库(2026-09-14 起默认指向新 TiDB 集群 dcp-outlet-tidb1:4000/target_db)
   sync:
     # 消费端监听的 topic(逗号分隔; CDC 演示链路用 dcp.order.cdc)
     topics: ${SYNC_TOPICS:dcp.order.demo,dcp.order.cdc}
     target:
-      url: ${SYNC_TARGET_URL:jdbc:mysql://localhost:3307/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       username: ${SYNC_TARGET_USERNAME:root}
       password: ${SYNC_TARGET_PASSWORD:root123}
     # SeaTunnel CDC 采集端(CdcSeqTransform 领号用的元库地址, 从 seatunnel 容器内可达)

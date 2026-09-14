@@ -1,0 +1,123 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: dcp
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 10000
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+  servlet:
+    multipart:
+      max-file-size: 10MB
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+      enable-idempotence: true
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:dcp-sync-demo}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      max-poll-records: 500
+    listener:
+      ack-mode: manual_immediate
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /api/actuator
+  health:
+    mail:
+      enabled: false
+    neo4j:
+      enabled: false   # 血缘图库 Neo4j 单独开关(未就绪/故障不影响平台 health)
+
+logging:
+  level:
+    com.dcp: info
+
+dcp:
+  enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
+  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
+  # 执行引擎: seatunnel (默认, 需要 seatunnel 容器) | light (轻量 JDBC 兑底)
+  engine:
+    type: ${ENGINE_TYPE:seatunnel}
+    # 执行并发上限（对应设计文档 20 并发）
+    max-concurrency: ${ENGINE_MAX_CONCURRENCY:20}
+    # 批量写入行数
+    batch-size: ${ENGINE_BATCH_SIZE:1000}
+    # 源端 fetchSize
+    fetch-size: ${ENGINE_FETCH_SIZE:1000}
+    # SeaTunnel 状态轮询间隔
+    poll-interval-ms: ${ENGINE_POLL_INTERVAL_MS:10000}
+  seatunnel:
+    url: ${SEATUNNEL_URL:http://seatunnel:8081}
+  # V3 同步链路(P0):目标分表库(默认 target_db;生产指向目标 MySQL 分表集群)
+  sync:
+    # 消费端监听的 topic(逗号分隔; CDC 演示链路用 dcp.order.cdc)
+    topics: ${SYNC_TOPICS:dcp.order.demo,dcp.order.cdc}
+    target:
+      url: ${SYNC_TARGET_URL:jdbc:mysql://localhost:3307/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      username: ${SYNC_TARGET_USERNAME:root}
+      password: ${SYNC_TARGET_PASSWORD:root123}
+    # SeaTunnel CDC 采集端(CdcSeqTransform 领号用的元库地址, 从 seatunnel 容器内可达)
+    cdc-st:
+      seq-db-url: ${SYNC_CDCST_SEQ_DB_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      seq-db-user: ${SYNC_CDCST_SEQ_DB_USER:root}
+      seq-db-password: ${SYNC_CDCST_SEQ_DB_PASSWORD:root123}
+      kafka-bootstrap: ${SYNC_CDCST_KAFKA_BOOTSTRAP:kafka:9092}
+      seq-batch: ${SYNC_CDCST_SEQ_BATCH:1000}
+    demo:
+      topic: ${SYNC_DEMO_TOPIC:dcp.order.demo}
+      concurrency: ${SYNC_DEMO_CONCURRENCY:2}
+    # 消费-写库解耦(有界队列 + 共享写线程池攒批), 见 BatchWriteService
+    buffer:
+      queue-capacity: ${SYNC_BUFFER_QUEUE_CAPACITY:2000}
+      batch-size: ${SYNC_BUFFER_BATCH_SIZE:500}
+      batch-timeout-ms: ${SYNC_BUFFER_BATCH_TIMEOUT_MS:100}
+      write-threads: ${SYNC_BUFFER_WRITE_THREADS:4}
+      commit-interval-ms: ${SYNC_BUFFER_COMMIT_INTERVAL_MS:5000}
+      drain-per-queue: ${SYNC_BUFFER_DRAIN_PER_QUEUE:200}
+  alarm:
+    # 默认告警 webhook（钉钉/企微），可空
+    default-webhook: ${ALARM_WEBHOOK:}
+
