@@ -76,7 +76,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listLakeSyncTasks, deleteLakeSyncTask, updateLakeSyncTask, runLakeSyncTask, consumerMetrics } from '../../api'
+import { listLakeSyncTasks, deleteLakeSyncTask, updateLakeSyncTask, runLakeSyncTask, consumerMetricsQuiet } from '../../api'
 
 const tasks = ref([])
 const metrics = ref({})          // logical_table -> { lagSeconds, caughtUp }
@@ -119,7 +119,7 @@ async function load() {
     tasks.value = (await listLakeSyncTasks()) || []
     // 指标:消费方命名约定 lake-{table}(待后端绑定后生效;失败静默为“—”)
     const names = tasks.value.map(t => `lake-${t.logical_table}`)
-    const res = await Promise.allSettled(names.map(n => consumerMetrics(n, 1)))
+    const res = await Promise.allSettled(names.map(n => consumerMetricsQuiet(n, 1)))
     res.forEach((r, i) => {
       if (r.status !== 'fulfilled' || !r.value) return
       const s = (r.value.streams || [])[0]

@@ -102,7 +102,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getLakeSyncTask, listLakeSyncRuns, runLakeSyncTask, updateLakeSyncTask, consumerMetrics } from '../../api'
+import { getLakeSyncTask, listLakeSyncRuns, runLakeSyncTask, updateLakeSyncTask, consumerMetricsQuiet } from '../../api'
 
 const route = useRoute()
 const taskId = route.params.id
@@ -145,7 +145,7 @@ async function loadRuns() {
 async function loadMetrics() {
   metricsLoading.value = true
   try {
-    const m = await consumerMetrics(consumerId.value, 10)
+    const m = await consumerMetricsQuiet(consumerId.value, 10)
     const s = (m?.streams || [])[0]
     metrics.value = m ? {
       positionTso: s?.positionTso, watermarkTso: s?.watermarkTso,

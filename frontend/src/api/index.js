@@ -1,4 +1,5 @@
 import request from './request'
+import axios from 'axios'
 
 // ---------- 认证 ----------
 export const login = (data) => request.post('/auth/login', data)
@@ -167,3 +168,15 @@ export const getLakeSyncRun = (id) => request.get(`/lake-sync/runs/${id}`)
 export const lakeSyncCatalog = () => request.get('/data-sub/catalog')
 // 消费侧指标(任务详情页: 现场读, 不依赖 Prometheus)
 export const consumerMetrics = (consumerId, recent = 10) => request.get(`/chg/consumers/${consumerId}/metrics`, { params: { recent } })
+// 同上·静默版:未绑定消费方时后端返 6002「消费方不存在」,自动加载不该弹错误提示 → 静默归 null
+export const consumerMetricsQuiet = async (consumerId, recent = 10) => {
+  try {
+    const r = await axios.get(`/api/chg/consumers/${consumerId}/metrics`, {
+      params: { recent },
+      headers: { Authorization: `Bearer ${localStorage.getItem('dcp_token')}` }
+    })
+    return r.data?.code === 0 ? r.data.data : null
+  } catch (e) {
+    return null
+  }
+}
