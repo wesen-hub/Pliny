@@ -166,7 +166,9 @@ public class KafkaChangeStreamSource implements ChangeStreamSource {
         page.setEpoch(epoch);
 
         String pk = props.getTidb().getPkColumn();
-        String snapshotClause = " AS OF TIMESTAMP '" + toDatetime(boundaryTso) + "'";
+        // ★ TSO→时间**在服务端换算**(FROM_UNIXTIME):避免客户端时区与 TiDB 集群时区不一致导致
+        //   "cannot set read timestamp to a future time"(实测坑:集群跑 UTC,客户端算本地时间 +8h)
+        String snapshotClause = " AS OF TIMESTAMP FROM_UNIXTIME(" + (boundaryTso >> 18) / 1000.0 + ")";
         String cursor = pageToken == null || pageToken.isBlank() ? null : pageToken;
 
         StringBuilder sql = new StringBuilder("SELECT * FROM ").append(streamId).append(snapshotClause);
@@ -209,7 +211,8 @@ public class KafkaChangeStreamSource implements ChangeStreamSource {
         StringBuilder sql = new StringBuilder("SELECT * FROM ").append(streamId);
         if (asOfTso != null) {
             // ★ 必须按位点回查:否则读到的是"未来值",会把未来状态混进历史批次(设计 §6.6)
-            sql.append(" AS OF TIMESTAMP '").append(toDatetime(asOfTso)).append("'");
+            //   同样用服务端换算,避免时区错位
+            sql.append(" AS OF TIMESTAMP FROM_UNIXTIME(").append((asOfTso >> 18) / 1000.0).append(")");
         }
         sql.append(" WHERE ").append(pk).append(" = ? LIMIT 1");
         List<Map<String, Object>> rows = readJdbc.queryForList(sql.toString(), bizKey.getOrDefault(pk, bizKey.values().iterator().next()));
@@ -271,7 +274,7 @@ public class KafkaChangeStreamSource implements ChangeStreamSource {
         return latest;
     }
 
-    /** TSO → 时间字符串(TSO 物理部分 = 毫秒),用于 AS OF TIMESTAMP 字面量 */
+    /** TSO → 时间字符串(仅供日志/展示;SQL 里一律用服务端 FROM_UNIXTIME 换算,避免时区耦合) */
     private String toDatetime(long tso) {
         long ms = tso >> 18;
         LocalDateTime dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), ZoneId.systemDefault());

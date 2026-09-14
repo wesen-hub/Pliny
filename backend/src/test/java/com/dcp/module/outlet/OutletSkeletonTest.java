@@ -63,8 +63,11 @@ class OutletSkeletonTest {
     @DisplayName("② 边界规则:T0 > latest → BOUNDARY_IN_FUTURE")
     void boundaryInFuture() {
         var st = svc.streamStatus("demo-sub", STREAM);
+        // 注意:TSO 物理部分在 >>18 位,TSO 差值 1_000_000 只相当于约 3.8 毫秒,
+        // 会被“服务端重读 latest”追上而不再报错(历史坑)→ 这里用真正的“未来一小时”
+        long oneHourInTso = 3_600L << 18;
         BizException e = assertThrows(BizException.class,
-                () -> svc.snapshot("demo-sub", STREAM, st.getLatest() + 1_000_000L, null, 10));
+                () -> svc.snapshot("demo-sub", STREAM, st.getLatest() + oneHourInTso, null, 10));
         assertEquals(OutletErrorCode.BOUNDARY_IN_FUTURE, e.getCode());
     }
 

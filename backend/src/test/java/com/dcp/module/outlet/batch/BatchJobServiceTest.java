@@ -158,6 +158,26 @@ class BatchJobServiceTest {
         assertEquals(2000L, o2.getOffsetSubmitted());
     }
 
+    @Test
+    @DisplayName("⑧ 复用不回退位点:消费方已跑到 hi 后,复用 bootstrap 不得把位点写回 T0")
+    void reuseBootstrapDoesNotRewindOffset() {
+        BatchJobOutcome first = svc.run(spec("bootstrap"));     // 位点 = T0
+        long t0 = first.getBoundaryTso();
+        api.append(3000L, "INSERT", Map.of("id", "5", "name", "e"));
+        api.watermark = 3000L;
+        svc.run(spec("incr_batch"));                            // 消费方推进到 hi
+        long hi = offsets.load("demo-tag", STREAM)[1];
+        assertEquals(3000L, hi);
+
+        BatchJobSpec again = spec("bootstrap");
+        again.setBoundaryTso(t0);                               // 同一个 boundary → 应命中已发布产物
+        BatchJobOutcome reuse = svc.run(again);
+        assertTrue(reuse.isReused(), "应走复用分支");
+        assertEquals(1, executor.execCount(first.getStagingPath()), "复用不得重复搬数");
+        assertEquals(hi, offsets.load("demo-tag", STREAM)[1], "位点只前不退,不得回退成 T0=" + t0);
+        assertEquals(hi, reuse.getOffsetSubmitted(), "回执位点也应是当前位点,不是 T0");
+    }
+
     /* ------------------------------------------------------------------ 测试替身 */
 
     static class FakeApi implements OutletApi {

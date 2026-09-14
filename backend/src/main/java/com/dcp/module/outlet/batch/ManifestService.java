@@ -81,9 +81,12 @@ public class ManifestService {
 
     public void fail(SnapshotManifestEntity m, String error) {
         m.setStatus(SnapshotManifestEntity.STATUS_FAILED);
-        m.setChecksum("error:" + error);
+        // 错误文本截断:checksum 列只有 varchar(128),超长会反过来把原始异常盖掉(实测坑)
+        String detail = error == null ? "unknown" : error;
+        String brief = ("error:" + detail).length() > 120 ? ("error:" + detail).substring(0, 120) : "error:" + detail;
+        m.setChecksum(brief);
         save(m);
-        log.warn("[outlet-batch] manifest 失败 id={} err={}", m.getManifestId(), error);
+        log.warn("[outlet-batch] manifest 失败 id={} err={}", m.getManifestId(), detail);
     }
 
     private void save(SnapshotManifestEntity m) {

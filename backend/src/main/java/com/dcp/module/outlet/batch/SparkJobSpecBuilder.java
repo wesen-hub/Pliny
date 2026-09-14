@@ -39,9 +39,11 @@ public class SparkJobSpecBuilder {
         job.put("stream", spec.getStreamId());
         if (boundaryTso != null) {
             job.put("boundaryTso", boundaryTso);
+            // ★ 与出口服务一致:TSO→时间**在服务端换算**(FROM_UNIXTIME),避免时区耦合
             job.put("snapshotSql", "SELECT * FROM " + spec.getStreamId()
-                    + " AS OF TIMESTAMP '" + toDatetime(boundaryTso) + "' WHERE " + pkColumn() + " > ? ORDER BY "
-                    + pkColumn() + " LIMIT " + spec.getSnapshotLimit());
+                    + " AS OF TIMESTAMP FROM_UNIXTIME(" + (boundaryTso >> 18) / 1000.0 + ") WHERE " + pkColumn()
+                    + " > ? ORDER BY " + pkColumn() + " LIMIT " + spec.getSnapshotLimit());
+            // 会话级兜底直接设 TSO(与集群时区无关)
             job.put("sessionInitStatement", "SET @@tidb_snapshot='" + boundaryTso + "'");
         } else {
             job.put("loTso", loTso);

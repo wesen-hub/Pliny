@@ -71,11 +71,13 @@ public class BatchJobService {
         SnapshotManifestEntity exist = manifests.findPublished(spec.getConsumerId(), spec.getStreamId(),
                 SnapshotManifestEntity.TYPE_BOOTSTRAP, t0, null, null);
         if (exist != null) {
-            offsets.save(spec.getConsumerId(), spec.getStreamId(), st.getEpoch(), t0);
+            // ★ 幂等复用:产物已在,只**保证位点不落后**,绝不回退
+            //   (实测坑:bootstrap 的位点=T0,而复用前消费方可能已通过增量批跑到更大的位点)
+            saveOffsetIfAhead(spec.getConsumerId(), spec.getStreamId(), st.getEpoch(), t0);
             log.info("[outlet-batch] bootstrap 复用已发布产物 staging={}(重跑幂等)", exist.getStagingPath());
             return new BatchJobOutcome(exist.getManifestId(), exist.getJobType(), t0, null, null,
                     exist.getStagingPath(), exist.getRowsWritten() == null ? 0 : exist.getRowsWritten(),
-                    true, true, t0, "复用已发布产物(未重复搬数)");
+                    true, true, readOffset(spec.getConsumerId(), spec.getStreamId()), "复用已发布产物(未重复搬数)");
         }
 
         SnapshotManifestEntity m = manifests.start(spec.getConsumerId(), spec.getStreamId(),
@@ -85,6 +87,7 @@ public class BatchJobService {
             r = executor.bootstrap(spec, t0, st.getEpoch());
             manifests.publish(m, r);
         } catch (RuntimeException e) {
+            log.error("[outlet-batch] bootstrap 作业失败 id={} err={}", m.getManifestId(), e.getMessage(), e);
             manifests.fail(m, String.valueOf(e.getMessage()));
             throw e;
         }
@@ -116,10 +119,10 @@ public class BatchJobService {
         SnapshotManifestEntity exist = manifests.findPublished(spec.getConsumerId(), spec.getStreamId(),
                 SnapshotManifestEntity.TYPE_INCR_BATCH, null, lo, hi);
         if (exist != null) {
-            offsets.save(spec.getConsumerId(), spec.getStreamId(), st.getEpoch(), hi);
+            saveOffsetIfAhead(spec.getConsumerId(), spec.getStreamId(), st.getEpoch(), hi);
             return new BatchJobOutcome(exist.getManifestId(), exist.getJobType(), null, lo, hi,
                     exist.getStagingPath(), exist.getRowsWritten() == null ? 0 : exist.getRowsWritten(),
-                    true, true, hi, "复用已发布产物(未重复搬数)");
+                    true, true, readOffset(spec.getConsumerId(), spec.getStreamId()), "复用已发布产物(未重复搬数)");
         }
 
         SnapshotManifestEntity m = manifests.start(spec.getConsumerId(), spec.getStreamId(),
@@ -129,6 +132,7 @@ public class BatchJobService {
             r = executor.incrBatch(spec, lo, hi, st.getEpoch());
             manifests.publish(m, r);
         } catch (RuntimeException e) {
+            log.error("[outlet-batch] incr_batch 作业失败 id={} err={}", m.getManifestId(), e.getMessage(), e);
             manifests.fail(m, String.valueOf(e.getMessage()));
             throw e;
         }
@@ -138,6 +142,19 @@ public class BatchJobService {
     }
 
     /* ------------------------------------------------------------------ helpers */
+
+    /** 位点只前不退:已有位点更大(或 epoch 不同步)时不动(实测坑:bootstrap 复用会把 hi 回退成 T0) */
+    private void saveOffsetIfAhead(String consumerId, String streamId, int epoch, long tso) {
+        long[] cur = offsets.load(consumerId, streamId);
+        if (cur == null || tso > cur[1]) {
+            offsets.save(consumerId, streamId, epoch, tso);
+        }
+    }
+
+    private long readOffset(String consumerId, String streamId) {
+        long[] cur = offsets.load(consumerId, streamId);
+        return cur == null ? 0 : cur[1];
+    }
 
     /** 边界三规则(设计 §6.4.2) */
     private void validateBoundary(StreamStatus st, long t0) {

@@ -10,6 +10,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -35,6 +36,8 @@ public class OutletController {
     private final ChangeOutletService service;
     private final OutletRegistry registry;
     private final ObjectProvider<MockChangeStreamSource> mockSource;
+    private final com.dcp.module.outlet.batch.BatchJobService batchJobs;
+    private final com.dcp.module.outlet.sdk.OutletSdkRunner sdkRunner;
 
     private String consumer(String token, String consumerId) {
         return (token != null && !token.isBlank()) ? token : consumerId;
@@ -126,5 +129,47 @@ public class OutletController {
     public ApiResponse<Map<String, Object>> seen(@PathVariable String stream,
                                                  @RequestParam String consumerId) {
         return ApiResponse.ok(service.seen(consumerId, stream));
+    }
+
+    /**
+     * 手动触发一次批作业(执行器 B 的调试入口;生产应由调度器触发)。
+     * <p>用途:在没有 Spark/调度器的情况下，用 {@code LocalBatchExecutor} 跑通
+     * 「定边界 → 校验 → 执行 + 原子发布 → 位点收口」四步，验证批通道语义。
+     */
+    @PostMapping("/_debug/batch-run")
+    public ApiResponse<com.dcp.module.outlet.batch.BatchJobOutcome> batchRun(
+            @RequestParam String consumerId,
+            @RequestParam String stream,
+            @RequestParam(defaultValue = "bootstrap") String jobType,
+            @RequestParam(required = false) String target,
+            @RequestParam(required = false) String transform,
+            @RequestParam(required = false) Long boundaryTso,
+            @RequestParam(required = false) Long hiTso) {
+        var spec = new com.dcp.module.outlet.batch.BatchJobSpec();
+        spec.setConsumerId(consumerId);
+        spec.setStreamId(stream);
+        spec.setJobType(jobType);
+        spec.setTarget(target == null ? "staging://batch-debug/" + stream : target);
+        spec.setTransform(transform);
+        spec.setBoundaryTso(boundaryTso);
+        spec.setHiTso(hiTso);
+        return ApiResponse.ok(batchJobs == null
+                ? null : batchJobs.run(spec));
+    }
+
+    /**
+     * 手动触发一次「真跑 SDK」消费(demo 消费方进程)。
+     * <p>用途:把消费方 SDK 从单测推到真跑——按 SDK 与真实消费方完全一致的方式
+     *（open → poll → commitWithBusinessWrite)消费真实出口,位点落元库 consumer_offset,
+     * 可跨进程/跨重启续跑;返回批次数、处理行/事件数、位点、是否追平。
+     */
+    @PostMapping("/_debug/sdk-run")
+    public ApiResponse<Map<String, Object>> sdkRun(
+            @RequestParam String consumerId,
+            @RequestParam List<String> streams,
+            @RequestParam(defaultValue = "SNAPSHOT") String startPolicy,
+            @RequestParam(defaultValue = "20") int maxBatches,
+            @RequestParam(defaultValue = "15000") long maxMillis) {
+        return ApiResponse.ok(sdkRunner.runOnce(consumerId, streams, startPolicy, maxBatches, maxMillis));
     }
 }
