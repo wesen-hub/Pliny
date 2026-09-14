@@ -32,6 +32,10 @@ public final class OutletErrorCode {
     public static final int FORBIDDEN = 6009;
     /** 出口内部错误(投影/规范化异常) */
     public static final int OUTLET_INTERNAL = 6099;
+    /** 快照任务不存在(续拉时未提供 boundary 或未登记) */
+    public static final int SNAPSHOT_JOB_NOT_FOUND = 6010;
+    /** 快照任务已过期(超过 TTL / GC 窗口)→ 必须用新 T0 重来 */
+    public static final int SNAPSHOT_JOB_EXPIRED = 6011;
 
     public static String message(int code) {
         return switch (code) {
@@ -44,6 +48,8 @@ public final class OutletErrorCode {
             case EPOCH_MISMATCH -> "位点代次(epoch)与当前流不一致,请重做快照";
             case QUOTA_EXCEEDED -> "超出契约配额";
             case FORBIDDEN -> "无权读取该数据";
+            case SNAPSHOT_JOB_NOT_FOUND -> "快照任务不存在:续拉需带上 boundary(或先发起首页)";
+            case SNAPSHOT_JOB_EXPIRED -> "快照任务已过期(超过 TTL),请用新的 T0 重新发起";
             default -> "出口内部错误";
         };
     }

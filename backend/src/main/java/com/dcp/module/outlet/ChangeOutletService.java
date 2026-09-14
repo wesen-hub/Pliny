@@ -1,6 +1,7 @@
 package com.dcp.module.outlet;
 
 import com.dcp.common.BizException;
+import com.dcp.module.outlet.entity.SnapshotJobEntity;
 import com.dcp.module.outlet.model.*;
 import com.dcp.module.outlet.source.ChangeStreamSource;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class ChangeOutletService {
     private final OutletQuotaLimiter quota;
     private final OutletAuditService audit;
     private final ChangeStreamSource source;
+    private final SnapshotJobService snapshotJobs;
 
     /**
      * 平台侧位点观测(设计 §6.8:consumer_offset_seen)。
@@ -49,8 +51,16 @@ public class ChangeOutletService {
     /* ==================================================================== 接口 ② snapshot */
 
     /**
-     * 快照分页。{@code boundaryTso} 为空表示"由平台发放新边界"(= 当前 lastest)。
-     * 发放前强制校验边界(设计 §6.4.2):不合法**直接报错**,绝不静默从当前水位开始。
+     * 快照分页(设计 §6.5)。
+     *
+     * <p>任务化语义:
+     * <ul>
+     *   <li>首页({@code pageToken} 为空):发放边界({@code boundaryTso} 为空则取 latest)并**登记 snapshot_job**(boundary + TTL);</li>
+     *   <li>续页:必须带 {@code boundaryTso} 且任务存在、未过期 —— 否则报
+     *       {@code SNAPSHOT_JOB_NOT_FOUND} / {@code SNAPSHOT_JOB_EXPIRED}(绝不返回半截错数据);</li>
+     *   <li>拉完:任务置 {@code DONE}。</li>
+     * </ul>
+     * 边界不合法(§6.4.2)一律直接报错。
      */
     public SnapshotPage snapshot(String consumerId, String streamId, Long boundaryTso, String pageToken, int limit) {
         Ctx ctx = context(consumerId);
@@ -58,8 +68,31 @@ public class ChangeOutletService {
         quota.acquire(ctx.consumer);
         try {
             StreamStatus st = source.status(streamId);
-            long t0 = boundaryTso == null ? st.getLatest() : boundaryTso;
-            validateBoundary(st, t0);
+            SnapshotJobEntity job;
+            long t0;
+            if (pageToken == null || pageToken.isBlank()) {
+                t0 = boundaryTso == null ? st.getLatest() : boundaryTso;
+                validateBoundary(st, t0);
+                job = snapshotJobs.register(consumerId, streamId, ctx.contract.getContractId(), t0);
+            } else {
+                if (boundaryTso == null) {
+                    throw new BizException(com.dcp.common.ErrorCode.PARAM_ERROR,
+                            "续拉快照必须带上 boundaryTso(与首页返回的 boundary 一致)");
+                }
+                t0 = boundaryTso;
+                job = snapshotJobs.find(consumerId, streamId, t0);
+                snapshotJobs.assertUsable(job);
+                validateBoundary(st, t0);   // GC 可能已推进 → 仍然拦住
+                if (SnapshotJobEntity.STATUS_DONE.equals(job.getStatus())) {
+                    SnapshotPage done = new SnapshotPage();
+                    done.setStreamId(streamId);
+                    done.setBoundaryTso(t0);
+                    done.setEpoch(st.getEpoch());
+                    done.setDone(true);
+                    done.setRowsExported(job.getRowsExported() == null ? 0L : job.getRowsExported());
+                    return done;
+                }
+            }
 
             SnapshotPage page = source.snapshot(streamId, t0, st.getEpoch(), pageToken, limit);
             OutletPermissionEngine.ProjectionPlan plan =
@@ -71,9 +104,15 @@ public class ChangeOutletService {
                     .filter(plan.rowFilter)
                     .map(r -> permission.projectRow(plan, r))
                     .toList());
-            // 说明:真实实现必须在**发第一页时就登记 snapshot_job(boundary + TTL)**,
-            //       否则 GC 推进后同一 boundary 不可再续(见 DDL 的 snapshot_job 表)。
             quota.addRows(ctx.consumer, page.getRows().size());
+
+            long exported = (job.getRowsExported() == null ? 0L : job.getRowsExported()) + page.getRows().size();
+            if (page.isDone()) {
+                snapshotJobs.advance(job, null, null, exported, page.getRowsEstimate());
+                snapshotJobs.complete(job);
+            } else {
+                snapshotJobs.advance(job, page.getPageToken(), page.getPageToken(), exported, page.getRowsEstimate());
+            }
             audit.recordRead(consumerId, ctx.contract.getContractId(), streamId,
                     t0, t0, page.getRows().size(), plan.trimmedColumns, plan.maskedColumns);
             return page;

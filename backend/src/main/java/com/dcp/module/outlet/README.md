@@ -26,6 +26,7 @@
 | `source/KafkaChangeStreamSource` | **真实 L1 流接入**(`source=kafka`):canal-json 消费 + 水位 + `AS OF TIMESTAMP` 快照/回查 | §5.3 / §6.5 / §6.6 |
 | `source/CanalJsonParser` | canal-json 报文解析(data/old/commitTs/WATERMARK/DDL) | §5.3 |
 | `OutletProperties` | 配置(`dcp.outlet.*`) | — |
+| `SnapshotJobService` | **快照任务化**:首页登记 boundary+TTL、续页校验、拉完置 DONE、过期作废 | §6.5 |
 | `entity/*` + `mapper/*` | 元库实体与 Mapper(consumer / contract 表) | §7.5 |
 
 ## 配置(`dcp.outlet.*`)
@@ -47,7 +48,18 @@ dcp:
       username: root
       password: ***
       pk-column: id       # 游标分页主键(绝不用 LIMIT/OFFSET)
+    snapshot:
+      ttl-hours: 24       # 快照任务 TTL(必须 ≤ GC 窗口,否则同一 boundary 不可再续)
+      page-limit: 1000
 ```
+
+### 快照任务语义(§6.5,已实现)
+
+| 阶段 | 行为 | 失败口径 |
+|---|---|---|
+| 首页(`pageToken` 空) | 发放 boundary(缺省 = latest)→ **登记 snapshot_job**(boundary + TTL) | 边界不合法 → `BOUNDARY_*` |
+| 续页 | 必须带 `boundaryTso`;校验任务存在 + 未过期 + boundary 仍合法 | `SNAPSHOT_JOB_NOT_FOUND` / `SNAPSHOT_JOB_EXPIRED` / `BOUNDARY_EXPIRED` |
+| 拉完 | 任务置 `DONE`;再续拉返回空页 done | —— |
 
 > 上线口径:`source=kafka` + `registry=mapper`;`dcp.outlet.tidb` 指向**契约化只读账号/视图**(不得用超管账号,见设计 §6.3 技术要点 3)。
 
@@ -98,7 +110,7 @@ curl -s 'http://localhost:8081/api/chg/t_order/changes?consumerId=demo-sub&limit
 |---|---|---|---|
 | 1 | `OutletRegistry` → Mapper 版 | §7.5 / DDL | ✅ 已完成(`registry=mapper` 读元库;JSON 列解析 + 过期过滤) |
 | 2 | `KafkaChangeStreamSource` | §5 / §6 | 🟡 已完成主体(消费 + 解析 + 水位 + `AS OF TIMESTAMP` 快照/回查);**遗留**:内存环形缓冲 → 按位点 seek 重读 Kafka;`stream_job` 登记 |
-| 3 | `snapshot_job` 登记与 TTL | §6.5 / DDL | ⏳ 发首页时登记 boundary + TTL |
+| 3 | `snapshot_job` 登记与 TTL | §6.5 / DDL | ✅ 已完成(登记/续拉校验/过期作废/DONE;6 个用例) |
 | 4 | 集中配额计数 | §7.2 | ⏳ 多实例下内存计数 = N 倍配额,需 Redis/计数表 |
 | 5 | 行级条件下推 + 脱敏执行器 | §7.6 | ⏳ 现为契约侧简谓词 |
 | 6 | 消费方 SDK(执行器 A) | §6.2 | ⏳ 位点表 + 同事务提交 + 幂等 upsert + 退避重试 + 自动重快照 |

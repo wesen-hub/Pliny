@@ -36,7 +36,8 @@ class OutletSkeletonTest {
                 new OutletPermissionEngine(null),
                 new OutletQuotaLimiter(),
                 new OutletAuditService(null),
-                source);
+                source,
+                new SnapshotJobService(null, null));
     }
 
     @Test

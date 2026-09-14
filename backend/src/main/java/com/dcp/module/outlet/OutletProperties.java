@@ -40,6 +40,7 @@ public class OutletProperties {
 
     private Kafka kafka = new Kafka();
     private Tidb tidb = new Tidb();
+    private Snapshot snapshot = new Snapshot();
 
     @Data
     public static class Kafka {
@@ -51,8 +52,15 @@ public class OutletProperties {
     }
 
     @Data
-    public static class Tidb {
-        /** 快照只读入口(生产:契约化只读视图/账号,见设计 §6.3 技术要点 3) */
+    public static class Snapshot {
+        /** 快照任务 TTL(小时)。默认 24h;必须 ≤ GC 窗口,否则同一 boundary 不可再续 */
+        private int ttlHours = 24;
+        /** 单页行数上限 */
+        private int pageLimit = 1000;
+    }
+
+    @Data
+    public static class Tidb {        /** 快照只读入口(生产:契约化只读视图/账号,见设计 §6.3 技术要点 3) */
         private String url;
         private String username;
         private String password;
