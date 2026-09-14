@@ -1,0 +1,30 @@
+# ============================================================================
+# 变更流出口 · Prometheus 抓取配置(2026-09-14)
+#
+# 设计口径:栈指标由后端 OutletStackCollector 定时采集(TiCDC / TiDB GC / Kafka ISR),
+# 注册为 chg_* Gauge;业务指标(outlet_*)由埋点在批作业/SDK/快照任务路径上打点。
+# → 因此 **Prometheus 只抓后端一个 target**,不给 monitor-outlet-stack.sh 写 exporter。
+#
+# target 说明:Prometheus 与 backend 同处外部网络 data-collect-platform_default,
+# 走服务名 backend:8080(容器内端口),不是宿主 8081。
+# ============================================================================
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    stack: dcp-outlet
+    env: local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ---------------------------------------------------------------- 出口后端(唯一 target)
+  - job_name: dcp-outlet-backend
+    metrics_path: /api/actuator/prometheus
+    static_configs:
+      - targets: ["backend:8080"]
+        labels:
+          service: dcp-backend
+          component: outlet

@@ -43,6 +43,7 @@ public class OutletProperties {
     private Snapshot snapshot = new Snapshot();
     private Api api = new Api();
     private Spark spark = new Spark();
+    private Monitor monitor = new Monitor();
 
     @Data
     public static class Kafka {
@@ -91,5 +92,34 @@ public class OutletProperties {
         private String password;
         /** 游标分页主键列(绝不用 LIMIT/OFFSET) */
         private String pkColumn = "id";
+    }
+
+    /**
+     * 出口监控配置(前缀 {@code dcp.outlet.monitor})。
+     *
+     * <p>阈值口径与 {@code outlet/monitor-outlet-stack.sh} 和 Prometheus 告警规则**必须一致**:
+     * LAG_WARN=300s / LAG_CRIT=3600s / GC_WARN=21600s / ISR&lt;RF。
+     */
+    @Data
+    public static class Monitor {
+        private boolean enabled = true;
+        /** 采集间隔(ms,建议 15000~30000) */
+        private long intervalMs = 20000L;
+        private long initialDelayMs = 20000L;
+        /** 被观测的 changefeed(topic 与之一一对应) */
+        private String changefeedId = "chg-target-db";
+        /** TiCDC OpenAPI 基地址(集群内:http://ticdc1:8300) */
+        private String ticdcUrl = "http://ticdc1:8300";
+        /** 被观测的 topic */
+        private String topic = "dcp.cdc.target_db";
+        /** Kafka 引导地址;为空则回退 spring.kafka.bootstrap-servers */
+        private String kafkaBootstrap = "";
+        /** changefeed checkpoint 滞后 WARN/CRIT(秒) */
+        private long lagWarnSeconds = 300L;
+        private long lagCritSeconds = 3600L;
+        /** GC 剩余窗口 WARN(秒) */
+        private long gcWarnSeconds = 21600L;
+        /** 批作业失败率告警窗口(分钟) */
+        private int batchFailWindowMinutes = 10;
     }
 }

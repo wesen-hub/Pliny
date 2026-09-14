@@ -26,6 +26,7 @@ import java.util.Map;
  *
  * 鉴权(骨架):请求头 X-Dcp-Token 或 query consumerId;生产改为契约 token 解析消费方身份(§7.5)。
  * 另附调试接口:POST /_mock/append(仅 mock 数据源)、GET /_debug/registry。
+ * 监控:GET /consumers/{consumerId}/metrics(消费任务详情页用;现场读数,不依赖 Prometheus)。
  * </pre>
  */
 @RestController
@@ -38,6 +39,7 @@ public class OutletController {
     private final ObjectProvider<MockChangeStreamSource> mockSource;
     private final com.dcp.module.outlet.batch.BatchJobService batchJobs;
     private final com.dcp.module.outlet.sdk.OutletSdkRunner sdkRunner;
+    private final com.dcp.module.outlet.metrics.OutletConsumerMetricsService consumerMetrics;
 
     private String consumer(String token, String consumerId) {
         return (token != null && !token.isBlank()) ? token : consumerId;
@@ -129,6 +131,24 @@ public class OutletController {
     public ApiResponse<Map<String, Object>> seen(@PathVariable String stream,
                                                  @RequestParam String consumerId) {
         return ApiResponse.ok(service.seen(consumerId, stream));
+    }
+
+    /* ------------------------------------------------------------------ 监控(消费任务详情页) */
+
+    /**
+     * 按消费方读出口指标(2026-09-14 出口监控)。
+     *
+     * <p>返回:当前位点/水位/滞后秒/是否追平、最近 N 次批作业(类型/行数/耗时/结果)、
+     * 快照任务存量、当前告警判定(命中 warn/crit 阈值的项)。
+     * <b>所有值现场读(位点表 + MeterRegistry + 采集器快照),不依赖 Prometheus</b>;
+     * Prometheus 只负责时序与告警通知。
+     *
+     * @param recent 最近批作业条数(≤50)
+     */
+    @GetMapping("/consumers/{consumerId}/metrics")
+    public ApiResponse<Map<String, Object>> consumerMetrics(@PathVariable String consumerId,
+                                                            @RequestParam(defaultValue = "10") int recent) {
+        return ApiResponse.ok(consumerMetrics.forConsumer(consumerId, recent));
     }
 
     /**

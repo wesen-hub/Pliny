@@ -4,6 +4,7 @@ import com.dcp.module.outlet.batch.BatchExecutor;
 import com.dcp.module.outlet.batch.BatchJobService;
 import com.dcp.module.outlet.batch.LocalBatchExecutor;
 import com.dcp.module.outlet.batch.ManifestService;
+import com.dcp.module.outlet.metrics.OutletMetrics;
 import com.dcp.module.outlet.sdk.ConsumerOffsetStore;
 import com.dcp.module.outlet.sdk.HttpOutletApi;
 import com.dcp.module.outlet.sdk.InProcessOutletApi;
@@ -69,7 +70,8 @@ public class OutletConfig {
     @Bean
     @ConditionalOnMissingBean
     public BatchJobService batchJobService(OutletApi api, BatchExecutor executor,
-                                           ManifestService manifests, ConsumerOffsetStore offsets) {
-        return new BatchJobService(api, executor, manifests, offsets);
+                                           ManifestService manifests, ConsumerOffsetStore offsets,
+                                           OutletMetrics metrics) {
+        return new BatchJobService(api, executor, manifests, offsets, metrics);
     }
 }

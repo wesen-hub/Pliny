@@ -1,6 +1,7 @@
 package com.dcp.module.outlet.sdk;
 
 import com.dcp.module.outlet.OutletProperties;
+import com.dcp.module.outlet.metrics.OutletMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class OutletSdkRunner {
     private final OutletApiFactory apiFactory;
     private final ConsumerOffsetStore offsets;
     private final OutletProperties props;
+    private final OutletMetrics metrics;
 
     /**
      * 跑一轮消费(最多 {@code maxBatches} 批或 {@code maxMillis} 毫秒)。
@@ -73,6 +75,10 @@ public class OutletSdkRunner {
             batches++;
             rows += b.getRows().size();
             events += b.getEvents().size();
+            // ★ 指标埋点(维度:consumer_id / stream_id / kind)—— 消费任务详情页按消费方读
+            metrics.recordSdkBatch(consumerId, b.getStreamId(),
+                    b.getKind() == null ? "unknown" : b.getKind().name(),
+                    b.getRows().size(), b.getEvents().size());
         }
 
         Map<String, Object> out = new LinkedHashMap<>();

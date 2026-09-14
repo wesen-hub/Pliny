@@ -62,7 +62,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
       base-path: /api/actuator
   health:
     mail:
@@ -98,6 +98,21 @@ dcp:
     snapshot:
       ttl-hours: 24
       page-limit: 1000
+    # 出口监控(2026-09-14):Spring 定时采集栈指标(chg_*)→ Gauge,Prometheus 只抓后端一个 target
+    # 阈值口径与 outlet/monitor-outlet-stack.sh 完全一致(LAG_WARN=300s / LAG_CRIT=3600s / GC_WARN=21600s / ISR<RF)
+    monitor:
+      enabled: ${OUTLET_MONITOR_ENABLED:true}
+      interval-ms: ${OUTLET_MONITOR_INTERVAL_MS:20000}   # 采集间隔(15~30s)
+      initial-delay-ms: ${OUTLET_MONITOR_INITIAL_DELAY_MS:20000}
+      changefeed-id: ${OUTLET_MONITOR_CHANGEFEED:chg-target-db}
+      ticdc-url: ${OUTLET_MONITOR_TICDC_URL:http://ticdc1:8300}
+      topic: ${OUTLET_MONITOR_TOPIC:dcp.cdc.target_db}
+      # 为空则回退到 spring.kafka.bootstrap-servers(compose 已指向 3 broker 新集群)
+      kafka-bootstrap: ${OUTLET_MONITOR_KAFKA_BOOTSTRAP:}
+      lag-warn-seconds: ${OUTLET_LAG_WARN:300}
+      lag-crit-seconds: ${OUTLET_LAG_CRIT:3600}
+      gc-warn-seconds: ${OUTLET_GC_WARN:21600}
+      batch-fail-window-minutes: ${OUTLET_BATCH_FAIL_WINDOW_MIN:10}
   enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
   jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
   jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}

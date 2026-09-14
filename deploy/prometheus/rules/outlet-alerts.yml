@@ -1,0 +1,100 @@
+# ============================================================================
+# 变更流出口 · 告警规则(2026-09-14)
+#
+# ★ 阈值口径必须与 outlet/monitor-outlet-stack.sh 及后端 OutletAlertEvaluator 一致:
+#     LAG_WARN=300s / LAG_CRIT=3600s / GC_WARN=21600s / ISR<RF / changefeed state≠normal
+#   同一套口径三处落地(脚本 / 后端现场判定 / Prometheus 时序告警),改一处必须三处同改。
+#
+# 指标来源:后端 /api/actuator/prometheus(唯一 target)
+#   业务:outlet_*   栈:chg_*   (chg_* 为采集失败时登记 -1,表示"未知≠正常")
+# ============================================================================
+groups:
+  - name: outlet-stack
+    rules:
+      # -------------------------------------------------- changefeed 可用性 / 滞后
+      - alert: OutletChangefeedDown
+        expr: chg_changefeed_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "changefeed {{ $labels.id }} state≠normal 或采集失败(-1)"
+          description: "TiCDC changefeed 未处于 normal 状态,增量链路中断风险。"
+
+      - alert: OutletChangefeedLagCritical
+        expr: chg_changefeed_checkpoint_lag_seconds > 3600
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "changefeed {{ $labels.id }} checkpoint 滞后 > 3600s"
+          description: "滞后 {{ $value }}s,下游数据新鲜度严重劣化。"
+
+      - alert: OutletChangefeedLagWarn
+        expr: chg_changefeed_checkpoint_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "changefeed {{ $labels.id }} checkpoint 滞后 > 300s"
+          description: "滞后 {{ $value }}s,仍在追赶但已超 WARN 线。"
+
+      # -------------------------------------------------- TiDB GC 窗口
+      - alert: OutletGcWindowShrinking
+        expr: chg_gc_remaining_seconds >= 0 and chg_gc_remaining_seconds < 21600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TiDB GC 剩余窗口 < 21600s(6h)"
+          description: "剩余 {{ $value }}s,快照续拉(snapshot pagination)将不可用。"
+
+      # -------------------------------------------------- Kafka 写可用性
+      - alert: OutletKafkaIsrBelowRf
+        expr: chg_kafka_isr_min >= 0 and chg_kafka_isr_min < chg_kafka_replication_factor
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "topic {{ $labels.topic }} 最小 ISR < RF"
+          description: "ISR {{ $value }},副本不足,broker 故障将影响写可用性。"
+
+      - alert: OutletKafkaBrokerDown
+        expr: chg_kafka_broker_up >= 0 and chg_kafka_broker_up < 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka 存活 broker {{ $value }}/3"
+          description: "broker 数不足 3,容灾能力下降。"
+
+      # -------------------------------------------------- 采集器自身
+      - alert: OutletStackCollectorStale
+        expr: chg_changefeed_checkpoint_lag_seconds < 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "栈采集失败(-1):TiCDC 探针不可达"
+          description: "指标为 -1 表示采集失败,当时值未知,不得当作正常。"
+
+  - name: outlet-business
+    rules:
+      # -------------------------------------------------- 批作业健康(执行器 B)
+      - alert: OutletBatchJobFailures
+        expr: sum by (consumer_id, stream_id) (increase(outlet_batch_job_total{result="fail"}[10m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费方 {{ $labels.consumer_id }}/{{ $labels.stream_id }} 近 10m 有批作业失败"
+          description: "fail 次数 {{ $value }},位点不会推进,需查 manifest/位点。"
+
+      - alert: OutletBatchJobNoProgress
+        expr: sum by (consumer_id) (increase(outlet_batch_job_total{result="ok"}[30m])) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费方 {{ $labels.consumer_id }} 近 30m 无成功批作业"
+          description: "可能是空转(noop,正常)或调度停摆,结合 lag 判定。"

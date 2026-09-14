@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dcp.common.BizException;
 import com.dcp.module.outlet.entity.SnapshotJobEntity;
 import com.dcp.module.outlet.mapper.SnapshotJobMapper;
+import com.dcp.module.outlet.metrics.OutletMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -28,15 +31,24 @@ public class SnapshotJobService {
 
     private final SnapshotJobMapper mapper;
     private final OutletProperties props;
+    /** 指标登记(可为 null:单测/无监控场景 → 跳过埋点) */
+    private final OutletMetrics metrics;
 
     /** 内存模式:{consumer::stream::boundary → job} */
     private final Map<String, SnapshotJobEntity> mem = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong();
 
+    public SnapshotJobService(SnapshotJobMapper mapper, OutletProperties props) {
+        this(mapper, props, null);
+    }
+
+    @Autowired
     public SnapshotJobService(@Autowired(required = false) SnapshotJobMapper mapper,
-                              @Autowired(required = false) OutletProperties props) {
+                              @Autowired(required = false) OutletProperties props,
+                              @Autowired(required = false) OutletMetrics metrics) {
         this.mapper = mapper;
         this.props = props == null ? new OutletProperties() : props;
+        this.metrics = metrics;
     }
 
     /** 首页调用:登记任务(READY → PAGING)。同一 boundary 重复发起时复用已有任务。 */
@@ -58,6 +70,7 @@ public class SnapshotJobService {
         job.setCreateTime(LocalDateTime.now());
         job.setUpdateTime(LocalDateTime.now());
         save(job);
+        snapshotMetric(consumerId, streamId, SnapshotJobEntity.STATUS_PAGING);
         log.info("[outlet] 登记快照任务 consumer={} stream={} boundary={} ttl={}h",
                 consumerId, streamId, boundaryTso, ttlHours());
         return job;
@@ -83,6 +96,7 @@ public class SnapshotJobService {
         if (expired(job)) {
             job.setStatus(SnapshotJobEntity.STATUS_EXPIRED);
             save(job);
+            snapshotMetric(job.getConsumerId(), job.getStreamId(), SnapshotJobEntity.STATUS_EXPIRED);
             throw new BizException(OutletErrorCode.SNAPSHOT_JOB_EXPIRED,
                     "boundary=" + job.getBoundaryTso() + " 已过期(" + job.getExpireAt() + ")");
         }
@@ -116,8 +130,40 @@ public class SnapshotJobService {
         job.setPageToken(null);
         job.setUpdateTime(LocalDateTime.now());
         save(job);
+        snapshotMetric(job.getConsumerId(), job.getStreamId(), SnapshotJobEntity.STATUS_DONE);
         log.info("[outlet] 快照任务完成 consumer={} stream={} boundary={} rows={}",
                 job.getConsumerId(), job.getStreamId(), job.getBoundaryTso(), job.getRowsExported());
+    }
+
+    /**
+     * 某消费方的快照任务**当前存量**(按状态)—— 消费任务详情页直接读,不依赖 Prometheus。
+     * 与 {@code outlet_snapshot_job_total} 的区别:后者是「状态迁移累计次数」(counter),
+     * 前者是「此刻有多少个任务处于该状态」(盘点存量)。
+     */
+    public Map<String, Long> countsByStatus(String consumerId) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        if (useMapper()) {
+            List<SnapshotJobEntity> rows = mapper.selectList(new QueryWrapper<SnapshotJobEntity>()
+                    .eq("consumer_id", consumerId).select("status"));
+            for (SnapshotJobEntity r : rows) {
+                String st = r.getStatus() == null ? "UNKNOWN" : r.getStatus();
+                counts.merge(st, 1L, Long::sum);
+            }
+            return counts;
+        }
+        for (SnapshotJobEntity job : mem.values()) {
+            if (consumerId.equals(job.getConsumerId())) {
+                String st = job.getStatus() == null ? "UNKNOWN" : job.getStatus();
+                counts.merge(st, 1L, Long::sum);
+            }
+        }
+        return counts;
+    }
+
+    private void snapshotMetric(String consumerId, String streamId, String status) {
+        if (metrics != null) {
+            metrics.recordSnapshotJob(consumerId, streamId, status);
+        }
     }
 
     /** 调试/观测 */

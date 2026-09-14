@@ -301,7 +301,31 @@ services:
       - kafka3-data:/var/lib/kafka/data
     mem_limit: 700m
 
+  # -------------------------------------------- Prometheus(出口监控,2026-09-14)
+  # 只抓后端一个 target(/api/actuator/prometheus):栈指标 chg_* 由后端
+  # OutletStackCollector 定时采集注册,业务指标 outlet_* 由埋点打点;
+  # 因此 monitor-outlet-stack.sh 不需要写 exporter。
+  # 宿主 9090;不装 Grafana(查询用 HTTP API,见验证脚本)。
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dcp-outlet-prometheus
+    <<: *outlet-net
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    mem_limit: 500m
+
 volumes:
+  prometheus-data:
   pd1-data:
   pd2-data:
   pd3-data:

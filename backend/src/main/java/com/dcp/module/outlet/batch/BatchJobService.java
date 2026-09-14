@@ -4,11 +4,12 @@ import com.dcp.common.BizException;
 import com.dcp.common.ErrorCode;
 import com.dcp.module.outlet.OutletErrorCode;
 import com.dcp.module.outlet.entity.SnapshotManifestEntity;
+import com.dcp.module.outlet.metrics.OutletMetrics;
 import com.dcp.module.outlet.model.StreamStatus;
 import com.dcp.module.outlet.sdk.ConsumerOffsetStore;
 import com.dcp.module.outlet.sdk.OutletApi;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 
@@ -27,39 +28,97 @@ import java.util.List;
  * **不重复搬数**(设计 §6.4.1 衔接契约 4:重跑必须幂等)。
  */
 @Slf4j
-@RequiredArgsConstructor
 public class BatchJobService {
 
     private final OutletApi api;
     private final BatchExecutor executor;
     private final ManifestService manifests;
     private final ConsumerOffsetStore offsets;
+    /** 指标登记(可为 null:单测/无监控场景 → 只跳过埋点,不影响语义) */
+    private final OutletMetrics metrics;
+
+    public BatchJobService(OutletApi api, BatchExecutor executor, ManifestService manifests,
+                           ConsumerOffsetStore offsets) {
+        this(api, executor, manifests, offsets, null);
+    }
+
+    @Autowired
+    public BatchJobService(OutletApi api, BatchExecutor executor, ManifestService manifests,
+                           ConsumerOffsetStore offsets, OutletMetrics metrics) {
+        this.api = api;
+        this.executor = executor;
+        this.manifests = manifests;
+        this.offsets = offsets;
+        this.metrics = metrics;
+    }
 
     public BatchJobOutcome run(BatchJobSpec spec) {
+        long startedAt = System.nanoTime();
         List<String> errs = spec.validate();
         if (!errs.isEmpty()) {
+            record(spec, OutletMetrics.RESULT_FAIL, 0, startedAt, "参数校验失败:" + String.join("; ", errs));
             throw new BizException(ErrorCode.PARAM_ERROR.getCode(), String.join("; ", errs));
         }
-        StreamStatus st = api.streamStatus(spec.getStreamId());
-        return switch (spec.getJobType()) {
-            case SnapshotManifestEntity.TYPE_BOOTSTRAP -> bootstrap(spec, st);
-            case SnapshotManifestEntity.TYPE_INCR_BATCH -> incr(spec, st);
-            case SnapshotManifestEntity.TYPE_MIXED -> {
-                // mixed 语义:首次(bootstrap 未打过底)先 bootstrap,之后一律走增量批接力
-                long[] saved = offsets.load(spec.getConsumerId(), spec.getStreamId());
-                if (saved == null) {
-                    BatchJobOutcome boot = bootstrap(spec, st);
-                    BatchJobOutcome inc = incr(spec, api.streamStatus(spec.getStreamId()));
-                    if (!inc.isPublished() && boot.isPublished()) {
-                        boot.setNote("mixed: bootstrap " + (boot.isReused() ? "复用" : "完成") + ";" + inc.getNote());
-                        yield boot;
-                    }
-                    yield inc;
-                }
-                yield incr(spec, st);
+        try {
+            StreamStatus st = api.streamStatus(spec.getStreamId());
+            BatchJobOutcome out = switch (spec.getJobType()) {
+                case SnapshotManifestEntity.TYPE_BOOTSTRAP -> bootstrap(spec, st);
+                case SnapshotManifestEntity.TYPE_INCR_BATCH -> incr(spec, st);
+                case SnapshotManifestEntity.TYPE_MIXED -> mixed(spec, st);
+                default -> throw new BizException(ErrorCode.PARAM_ERROR.getCode(), "jobType 非法:" + spec.getJobType());
+            };
+            record(spec, classify(out), out == null ? 0 : out.getRowsWritten(), startedAt,
+                    out == null ? "无返回" : out.getNote());
+            return out;
+        } catch (RuntimeException e) {
+            record(spec, OutletMetrics.RESULT_FAIL, 0, startedAt, String.valueOf(e.getMessage()));
+            throw e;
+        }
+    }
+
+    /**
+     * 结果分类(口径写入文档 §18):
+     * <ul>
+     *   <li>{@code ok} —— 真执行并发布(staging 已写、manifest PUBLISHED);</li>
+     *   <li>{@code reuse} —— 命中幂等复用(产物已在,**未重复搬数**);</li>
+     *   <li>{@code noop} —— 空转(无新数据 lo ≥ hi / mixed 短路),不是失败;</li>
+     *   <li>{@code fail} —— 异常或未发布(位点不推进)。</li>
+     * </ul>
+     */
+    static String classify(BatchJobOutcome out) {
+        if (out == null) {
+            return OutletMetrics.RESULT_FAIL;
+        }
+        if (out.isReused()) {
+            return OutletMetrics.RESULT_REUSED;
+        }
+        if (out.isPublished()) {
+            return OutletMetrics.RESULT_OK;
+        }
+        return out.getRowsWritten() > 0 ? OutletMetrics.RESULT_FAIL : OutletMetrics.RESULT_NOOP;
+    }
+
+    private void record(BatchJobSpec spec, String result, long rows, long startedAt, String note) {
+        if (metrics == null) {
+            return;
+        }
+        double seconds = (System.nanoTime() - startedAt) / 1_000_000_000d;
+        metrics.recordBatchJob(spec.getConsumerId(), spec.getStreamId(), spec.getJobType(), result, rows, seconds, note);
+    }
+
+    private BatchJobOutcome mixed(BatchJobSpec spec, StreamStatus st) {
+        // mixed 语义:首次(bootstrap 未打过底)先 bootstrap,之后一律走增量批接力
+        long[] saved = offsets.load(spec.getConsumerId(), spec.getStreamId());
+        if (saved == null) {
+            BatchJobOutcome boot = bootstrap(spec, st);
+            BatchJobOutcome inc = incr(spec, api.streamStatus(spec.getStreamId()));
+            if (!inc.isPublished() && boot.isPublished()) {
+                boot.setNote("mixed: bootstrap " + (boot.isReused() ? "复用" : "完成") + ";" + inc.getNote());
+                return boot;
             }
-            default -> throw new BizException(ErrorCode.PARAM_ERROR.getCode(), "jobType 非法:" + spec.getJobType());
-        };
+            return inc;
+        }
+        return incr(spec, st);
     }
 
     /* ------------------------------------------------------------------ bootstrap */

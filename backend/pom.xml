@@ -60,6 +60,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- 出口监控: /api/actuator/prometheus 暴露指标(版本由 spring-boot-starter-parent 管理) -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
 
     <!-- ORM -->
     <dependency>
