@@ -1,0 +1,114 @@
+# ============================================================================
+# 变更流出口 · 告警规则(**模板** —— 不要直接改本文件)
+#
+# ★ 单一来源:backend/src/main/resources/application.yml 的 dcp.outlet.monitor.*
+#   改阈值流程:改 application.yml → 运行 outlet/render-alert-rules.sh → 运行 outlet/verify-thresholds.sh
+#   PLACEHOLDER 形式的占位符由 render-alert-rules.sh 从 thresholds-lib.sh(读 application.yml)替换。
+#
+# 指标来源:后端 /api/actuator/prometheus(唯一 target)
+#   业务:outlet_*   栈:chg_*(采集失败登记 -1,表示"未知≠正常")
+#
+# 判定语义提醒:chg_* 为 -1 时表示「采集不到」,因此可用性类规则一律写 `!= 1` 而不是 `== 0`,
+#   否则采集器坏掉时反而"看起来正常"(实测踩过)。
+# ============================================================================
+groups:
+  - name: outlet-stack
+    rules:
+      # ------------------------------------------------ 采集器自身(最先看这条)
+      - alert: OutletCollectorDown
+        expr: chg_collector_up == 0
+        for: @@COLLECT_UP_WINDOW@@
+        labels:
+          severity: warning
+        annotations:
+          summary: "出口栈指标采集器连续失败"
+          description: "本轮采集 of changefeed/GC/Kafka 未全部成功(其余 chg_* 可能已是 -1)。"
+
+      - alert: OutletCollectorStale
+        expr: (time() - chg_collector_last_success_timestamp_seconds) > @@COLLECT_STALE_SECONDS@@
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "出口栈指标采集器已停摆 > @@COLLECT_STALE_WINDOW@@"
+          description: "最近一次成功采集在 {{ $value }}s 前。采集线程卡死时写不出 up=0,只能靠这个时间戳判定。"
+
+      # ------------------------------------------------ changefeed 可用性 / 滞后
+      - alert: OutletChangefeedDown
+        expr: chg_changefeed_up != 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "changefeed {{ $labels.id }} state≠normal(或采集不到)"
+          description: "TiCDC changefeed 未处于 normal 状态,增量链路中断风险(this 值 -1 表示探测失败)。"
+
+      - alert: OutletChangefeedLagCritical
+        expr: chg_changefeed_checkpoint_lag_seconds > @@LAG_CRIT@@
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "changefeed {{ $labels.id }} checkpoint 滞后 > @@LAG_CRIT@@s"
+          description: "滞后 {{ $value }}s,下游数据新鲜度严重劣化。"
+
+      - alert: OutletChangefeedLagWarn
+        expr: chg_changefeed_checkpoint_lag_seconds > @@LAG_WARN@@
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "changefeed {{ $labels.id }} checkpoint 滞后 > @@LAG_WARN@@s"
+          description: "滞后 {{ $value }}s,仍在追赶但已超 WARN 线。"
+
+      # ------------------------------------------------ TiDB GC 窗口
+      - alert: OutletGcWindowShrinking
+        expr: chg_gc_remaining_seconds >= 0 and chg_gc_remaining_seconds < @@GC_WARN@@
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TiDB GC 剩余窗口 < @@GC_WARN@@s"
+          description: "剩余 {{ $value }}s,快照续拉(snapshot pagination)将不可用。"
+
+      # ------------------------------------------------ Kafka 写可用性
+      - alert: OutletKafkaIsrBelowRf
+        expr: chg_kafka_isr_min >= 0 and chg_kafka_isr_min < chg_kafka_replication_factor
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "topic {{ $labels.topic }} 最小 ISR < RF"
+          description: "ISR {{ $value }},副本不足,broker 故障将影响写可用性。"
+
+      - alert: OutletKafkaBrokerDown
+        expr: chg_kafka_broker_up >= 0 and chg_kafka_broker_up < @@EXPECTED_BROKERS@@
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka 存活 broker {{ $value }}/@@EXPECTED_BROKERS@@"
+          description: "broker 数低于期望 @@EXPECTED_BROKERS@@,容灾能力下降。"
+
+  - name: outlet-business
+    rules:
+      # ------------------------------------------------ 批作业健康(执行器 B)
+      - alert: OutletBatchJobFailures
+        expr: sum by (consumer_id, stream_id) (increase(outlet_batch_job_total{result="fail"}[10m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费方 {{ $labels.consumer_id }}/{{ $labels.stream_id }} 近 10m 有批作业失败"
+          description: "fail 次数 {{ $value }},位点不会推进,需查 manifest/位点。"
+
+      # 注意:该规则只在「有消费方在跑」时才有意义;
+      # 无任何消费方(全新环境)时会对每个 consumer_id 报 pending —— 属预期,靠 `for` 窗口与人工判读区分。
+      - alert: OutletBatchJobNoProgress
+        expr: sum by (consumer_id) (increase(outlet_batch_job_total{result="ok"}[30m])) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费方 {{ $labels.consumer_id }} 近 30m 无成功批作业"
+          description: "可能是空转(noop,正常)或调度停摆,结合 lag 判定。"

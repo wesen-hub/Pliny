@@ -112,6 +112,8 @@ dcp:
       lag-warn-seconds: ${OUTLET_LAG_WARN:300}
       lag-crit-seconds: ${OUTLET_LAG_CRIT:3600}
       gc-warn-seconds: ${OUTLET_GC_WARN:21600}
+      # Kafka 集群期望 broker 数(存活数低于它 → WARN);告警规则里的 "brokersUp < N" 由本键渲染
+      expected-brokers: ${OUTLET_MONITOR_EXPECTED_BROKERS:3}
       batch-fail-window-minutes: ${OUTLET_BATCH_FAIL_WINDOW_MIN:10}
   enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
   jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}

@@ -119,6 +119,8 @@ public class OutletProperties {
         private long lagCritSeconds = 3600L;
         /** GC 剩余窗口 WARN(秒) */
         private long gcWarnSeconds = 21600L;
+        /** Kafka 集群期望 broker 数(存活数低于它 → WARN);与告警规则同源 */
+        private int expectedBrokers = 3;
         /** 批作业失败率告警窗口(分钟) */
         private int batchFailWindowMinutes = 10;
     }

@@ -64,6 +64,10 @@ public class OutletStackCollector {
     public static final String M_ISR_MIN = "chg_kafka_isr_min";
     public static final String M_RF = "chg_kafka_replication_factor";
     public static final String M_BROKER_UP = "chg_kafka_broker_up";
+    /** 采集器存活(2026-09-15):本轮采集成功=1 / 失败=0(注意:线程被卡死时写不出 0,故配合下方时间戳指标) */
+    public static final String M_COLLECTOR_UP = "chg_collector_up";
+    /** 最近一次采集成功的时间戳(epoch 秒);不推进即说明采集器已停摆(卡死时写不出 0 的唯一可观测出口) */
+    public static final String M_COLLECTOR_LAST_SUCCESS = "chg_collector_last_success_timestamp_seconds";
 
     private static final DateTimeFormatter GC_SAFE_POINT_FMT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HH:mm:ss.SSS xx");
@@ -97,9 +101,40 @@ public class OutletStackCollector {
 
     /* ------------------------------------------------------------------ 定时采集 */
 
+    /** 最近一次采集成功的时间戳(epoch 秒) */
+    private volatile long lastCollectSuccessSeconds = 0L;
+
     @Scheduled(fixedDelayString = "${dcp.outlet.monitor.interval-ms:20000}",
             initialDelayString = "${dcp.outlet.monitor.initial-delay-ms:20000}")
     public void collect() {
+        boolean roundOk;
+        try {
+            roundOk = collectOnce();
+        } catch (Throwable t) {
+            // 采集轮整体异常也必须留下 up=0(不许静默:异常吞掉后堆栈指标会「整体消失」,只有 up 能看出来)
+            fail("collect-round", t instanceof Exception e ? e : new IllegalStateException(t));
+            roundOk = false;
+        }
+        metrics.setStackGauge(M_COLLECTOR_UP, Map.of(), roundOk ? 1d : 0d);
+        if (roundOk) {
+            lastCollectSuccessSeconds = System.currentTimeMillis() / 1000L;
+            metrics.setStackGauge(M_COLLECTOR_LAST_SUCCESS, Map.of(), lastCollectSuccessSeconds);
+        } else {
+            log.warn("[outlet-metrics] 采集轮失败 up=0 上次成功 ts={}", lastCollectSuccessSeconds);
+        }
+        Map<String, Object> snap = new LinkedHashMap<>(lastSnapshot);
+        snap.put("collector", Map.of(
+                "up", roundOk ? 1 : 0,
+                "lastSuccessSeconds", lastCollectSuccessSeconds,
+                "intervalMs", props.getMonitor().getIntervalMs()));
+        lastSnapshot = snap;
+    }
+
+    /**
+     * 单轮采集。返回本轮是否成功:{@code changefeed / gc / kafka} 三个栈探针全部成功才算成功。
+     * 逐消费方的位点/水位线失败不计入本轮(那是数据面问题,由 outlet_consumer_offset_lag_seconds=-1 与消费方级告警覆盖)。
+     */
+    private boolean collectOnce() {
         OutletProperties.Monitor m = props.getMonitor();
         Map<String, Object> snap = new LinkedHashMap<>();
         snap.put("collectedAtMillis", System.currentTimeMillis());
@@ -144,6 +179,12 @@ public class OutletStackCollector {
         log.info("[outlet-metrics] 采集完成 changefeed={}(probe={}) lag={}s | gcRemaining={}s | isrMin={} rf={} brokers={} | 消费方滞后={}",
                 cf.state, cf.probeOk, fmt(cf.lagSeconds), fmt(gc.remainingSeconds),
                 fmt(kafka.isrMin), fmt(kafka.rf), fmt(kafka.brokersUp), lags);
+        return cf.probeOk && gc.probeOk && kafka.probeOk;
+    }
+
+    /** 最近一次采集成功的时间戳(epoch 秒;供详情页/排障读「采集器是否还在跑」,不依赖 Prometheus) */
+    public long lastCollectSuccessSeconds() {
+        return lastCollectSuccessSeconds;
     }
 
     /** 最近一次采集快照(供详情页接口;无 Prometheus 也能读当前值) */
