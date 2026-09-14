@@ -34,9 +34,29 @@
 | `sdk/RetryPolicy` | 退避重试 + 分类处置(过期/epoch→重快照;权限→直接失败;配额→退避) | §6.1 |
 | `sdk/TxRunner` + `SpringTxRunner` | **业务写 + 位点推进同事务** | §6.8 |
 | `sdk/DeadLetterSink` | 重试耗尽后的死信出口 | §6.1 |
+| `batch/BatchJobService` | **执行器 B 编排**:定边界 → 校验 → 执行 → **原子发布** → **位点收口** | §6.3 |
+| `batch/BatchJobSpec` / `BatchJobOutcome` | 作业声明与结果(消费方只声明:输入/转换/目标/调度) | §6.3 |
+| `batch/BatchExecutor` / `LocalBatchExecutor` | 批执行器 SPI + 骨架实现;生产替换为 `spark-submit` 版(同输入同输出) | §6.3 |
+| `batch/ManifestService` | **物化清单**:start → publish(PUBLISHED 才对消费方可见)→ fail;重跑幂等 | §6.3 / §6.4.1 |
 | `entity/*` + `mapper/*` | 元库实体与 Mapper(consumer / contract 表) | §7.5 |
 
-## 配置(`dcp.outlet.*`)
+### 执行器 B 用法(批通道)
+
+```java
+var spec = new BatchJobSpec();
+spec.setConsumerId("demo-tag");
+spec.setStreamId("t_order");
+spec.setJobType("mixed");          // bootstrap | incr_batch | mixed(首次打底,之后走增量)
+spec.setTarget("tag_fact_view");
+spec.setTransform("tag_rule_v3.sql");   // Spark 侧解释的转换逻辑
+
+BatchJobOutcome o = new BatchJobService(api, executor, manifests, offsets).run(spec);
+// ① 定边界 ② 校验(T0 ≥ earliest / hi = WATERMARK)③ 执行 + 原子发布 ④ 发布后才提交位点
+o.isPublished(); o.isReused();     // reused=true 表示重跑复用了已发布产物(不重复搬数)
+```
+
+**衔接契约**(§6.4.1)落地点:`manifest PUBLISHED` 才算可见 → **位点只能在这之后提交**;
+staging 按 boundary/区间**版本化**,重跑复用同一路径;`_commit_ts` 版本收敛保证只允许更高 TSO 覆盖。
 
 ```yaml
 dcp:
@@ -143,4 +163,4 @@ curl -s 'http://localhost:8081/api/chg/t_order/changes?consumerId=demo-sub&limit
 | 4 | 集中配额计数 | §7.2 | ⏳ 多实例下内存计数 = N 倍配额,需 Redis/计数表 |
 | 5 | 行级条件下推 + 脱敏执行器 | §7.6 | ⏳ 现为契约侧简谓词 |
 | 6 | 消费方 SDK(执行器 A) | §6.2 | ✅ 已完成(`sdk/*`:主循环/位点/幂等写入/退避重试/死信/多输入对齐;8 个用例) |
-| 7 | 执行器 B 作业模板 | §6.3 | ⏳ Spark bootstrap / 增量批 + manifest 原子发布 + 位点收口 |
+| 7 | 执行器 B 作业模板 | §6.3 | 🟡 已完成编排与语义(BatchJobService + ManifestService + LocalBatchExecutor;7 用例);**遗留**:Spark 版执行器(`spark-submit` + Iceberg/对象存储 staging + 并行切片) |
