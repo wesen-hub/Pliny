@@ -18,9 +18,10 @@ TICDC_SERVER="${TICDC_SERVER:-http://ticdc1:8300}"
 CHANGEFEED_ID="${CHANGEFEED_ID:-chg-target-db}"
 TIDB_HOST="${TIDB_HOST:-dcp-outlet-tidb1}"
 TIDB_PORT="${TIDB_PORT:-4000}"
+TIDB_PWD="${TIDB_PWD:-root123}"
 RETENTION_HOURS="${RETENTION_HOURS:-168}"
 
-q() { docker exec dcp-mysql mysql -h "${TIDB_HOST}" -P "${TIDB_PORT}" -uroot -N -e "$1" 2>/dev/null; }
+q() { docker exec dcp-mysql mysql -h "${TIDB_HOST}" -P "${TIDB_PORT}" -uroot -p"${TIDB_PWD}" -N -e "$1" 2>/dev/null; }
 tso_dt() { python3 -c "import datetime;print(datetime.datetime.fromtimestamp((int('$1')>>18)/1000).strftime('%Y-%m-%d %H:%M:%S'))"; }
 dt_ms()  { python3 -c "
 import sys,re,datetime

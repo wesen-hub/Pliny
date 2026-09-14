@@ -18,12 +18,13 @@ TICDC_SERVER="${TICDC_SERVER:-http://ticdc1:8300}"
 CHANGEFEED_ID="${CHANGEFEED_ID:-chg-target-db}"
 TIDB_HOST="${TIDB_HOST:-dcp-outlet-tidb1}"
 TIDB_PORT="${TIDB_PORT:-4000}"
+TIDB_PWD="${TIDB_PWD:-root123}"
 TOPIC="${TOPIC:-dcp.cdc.target_db}"
 LAG_WARN="${LAG_WARN:-300}"
 LAG_CRIT="${LAG_CRIT:-3600}"
 GC_WARN="${GC_WARN:-21600}"
 
-q() { docker exec dcp-mysql mysql -h "${TIDB_HOST}" -P "${TIDB_PORT}" -uroot -N -e "$1" 2>/dev/null; }
+q() { docker exec dcp-mysql mysql -h "${TIDB_HOST}" -P "${TIDB_PORT}" -uroot -p"${TIDB_PWD}" -N -e "$1" 2>/dev/null; }
 
 latest_ts=$(q "SHOW MASTER STATUS;" | awk '{print $2}')
 gc_safe_point=$(q "SELECT variable_value FROM mysql.tidb WHERE variable_name='tikv_gc_safe_point';")

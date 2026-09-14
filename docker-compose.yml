@@ -226,7 +226,7 @@ services:
       DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: ${DCP_LAKESYNC_CATALOG_S3_SECRET_KEY:-minioadmin123}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
-      SYNC_TOPICS: ""
+      SYNC_TOPICS: ${SYNC_TOPICS:-dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync}
       TZ: Asia/Shanghai
     ports:
       - "8081:8080"
@@ -359,7 +359,7 @@ services:
       SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
       PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
       JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
-      SYNC_TOPICS: ""
+      SYNC_TOPICS: ${SYNC_TOPICS:-dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync}
       TZ: Asia/Shanghai
     ports:
       - "8083:8080"

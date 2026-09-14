@@ -8,7 +8,7 @@ set -uo pipefail
 PD_HOST="${PD_HOST:-http://localhost:12379}"
 TIDB_HOST="${TIDB_HOST:-dcp-outlet-tidb1}"
 TIDB_PORT="${TIDB_PORT:-4000}"
-TIDB_PWD="${TIDB_PWD:-}"
+TIDB_PWD="${TIDB_PWD:-root123}"
 KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-kafka1:9092}"
 MYSQL_CLI="${MYSQL_CLI:-docker exec dcp-mysql mysql}"
 
