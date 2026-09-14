@@ -208,7 +208,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root123
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       DCP_TAGENGINE_AUTO_RUN: ${DCP_TAGENGINE_AUTO_RUN:-false}
       DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}
@@ -351,7 +351,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root123
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       DCP_TAGENGINE_AUTO_RUN: ${DCP_TAGENGINE_AUTO_RUN:-false}
       DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}

@@ -104,7 +104,7 @@ dcp:
       seq-db-url: ${SYNC_CDCST_SEQ_DB_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
       seq-db-user: ${SYNC_CDCST_SEQ_DB_USER:root}
       seq-db-password: ${SYNC_CDCST_SEQ_DB_PASSWORD:root123}
-      kafka-bootstrap: ${SYNC_CDCST_KAFKA_BOOTSTRAP:kafka:9092}
+      kafka-bootstrap: ${SYNC_CDCST_KAFKA_BOOTSTRAP:dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
       seq-batch: ${SYNC_CDCST_SEQ_BATCH:1000}
     demo:
       topic: ${SYNC_DEMO_TOPIC:dcp.order.demo}
