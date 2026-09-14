@@ -27,6 +27,13 @@
 | `source/CanalJsonParser` | canal-json 报文解析(data/old/commitTs/WATERMARK/DDL) | §5.3 |
 | `OutletProperties` | 配置(`dcp.outlet.*`) | — |
 | `SnapshotJobService` | **快照任务化**:首页登记 boundary+TTL、续页校验、拉完置 DONE、过期作废 | §6.5 |
+| `sdk/OutletConsumer` | **消费方 SDK 主循环**:open/read/commit、快照↔增量路由、退化重试、多输入水位对齐 | §6.2 |
+| `sdk/OutletApi` + `HttpOutletApi` | L3 客户端抽象与 HTTP 实现(错误码→异常) | §6.9 |
+| `sdk/ConsumerOffsetStore` + `JdbcConsumerOffsetStore` | **位点自持**(consumer_offset 表,消费方自己的库) | §6.8 |
+| `sdk/IdempotentWriter` + `JdbcIdempotentWriter` | 幂等 upsert(ODKU + `_commit_ts` **版本收敛**) | §6.6 / §6.4.1 |
+| `sdk/RetryPolicy` | 退避重试 + 分类处置(过期/epoch→重快照;权限→直接失败;配额→退避) | §6.1 |
+| `sdk/TxRunner` + `SpringTxRunner` | **业务写 + 位点推进同事务** | §6.8 |
+| `sdk/DeadLetterSink` | 重试耗尽后的死信出口 | §6.1 |
 | `entity/*` + `mapper/*` | 元库实体与 Mapper(consumer / contract 表) | §7.5 |
 
 ## 配置(`dcp.outlet.*`)
@@ -53,7 +60,29 @@ dcp:
       page-limit: 1000
 ```
 
-### 快照任务语义(§6.5,已实现)
+### 消费方 SDK 用法(执行器 A)
+
+```java
+var consumer = OutletConsumer.builder(new HttpOutletApi("http://dcp-backend:8080", token, restTemplate), offsetStore)
+        .consumerId("demo-tag")
+        .streams(List.of("t_order", "tag_fact"))          // 多输入:打标
+        .txRunner(new SpringTxRunner(txManager))          // 位点与业务写同事务
+        .build();
+
+consumer.open(OutletConsumer.StartPolicy.SNAPSHOT);       // 首次拿快照边界;已存位点则续跑
+while (true) {
+    SdkBatch b = consumer.poll();                          // 快照段/增量段由 SDK 路由
+    if (b == null) { Thread.sleep(200); continue; }
+    consumer.commitWithBusinessWrite(b, () -> {            // ★ 位点推进 ⇔ 数据已落地
+        for (var row : b.getRows())  writer.upsert("tag_fact_view", row, b.getLastTso());
+        for (var e : b.getEvents())  { /* 按主键 upsert / DELETE 墓碑 */ }
+    });
+    if (consumer.caughtUp(b.getStreamId())) { /* 已追平,可转常驻报表/监控 */ }
+}
+```
+
+SDK 统一承担:位点持久化、快照↔增量路由、退避重试、死信、**位点过期/epoch 变化自动重快照**、
+WATERMARK 追平判定(`caughtUp`)、多输入最小水位对齐(`safeWatermark` / `safeProcessedTso`)。
 
 | 阶段 | 行为 | 失败口径 |
 |---|---|---|
@@ -113,5 +142,5 @@ curl -s 'http://localhost:8081/api/chg/t_order/changes?consumerId=demo-sub&limit
 | 3 | `snapshot_job` 登记与 TTL | §6.5 / DDL | ✅ 已完成(登记/续拉校验/过期作废/DONE;6 个用例) |
 | 4 | 集中配额计数 | §7.2 | ⏳ 多实例下内存计数 = N 倍配额,需 Redis/计数表 |
 | 5 | 行级条件下推 + 脱敏执行器 | §7.6 | ⏳ 现为契约侧简谓词 |
-| 6 | 消费方 SDK(执行器 A) | §6.2 | ⏳ 位点表 + 同事务提交 + 幂等 upsert + 退避重试 + 自动重快照 |
+| 6 | 消费方 SDK(执行器 A) | §6.2 | ✅ 已完成(`sdk/*`:主循环/位点/幂等写入/退避重试/死信/多输入对齐;8 个用例) |
 | 7 | 执行器 B 作业模板 | §6.3 | ⏳ Spark bootstrap / 增量批 + manifest 原子发布 + 位点收口 |

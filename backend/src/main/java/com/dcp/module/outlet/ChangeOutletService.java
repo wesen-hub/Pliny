@@ -95,6 +95,8 @@ public class ChangeOutletService {
             }
 
             SnapshotPage page = source.snapshot(streamId, t0, st.getEpoch(), pageToken, limit);
+            // 快照→增量的**衔接位点**:消费方拿到它即可直接调 changes(after=该位点)
+            page.setNextPosition(PositionKey.of(st.getEpoch(), t0));
             OutletPermissionEngine.ProjectionPlan plan =
                     permission.plan(ctx.consumer, ctx.contract, streamId, source.availableColumns(streamId));
             // ★ 铁律 3:快照段与增量段**同一套判定**。

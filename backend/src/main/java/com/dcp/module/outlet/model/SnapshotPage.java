@@ -21,6 +21,8 @@ public class SnapshotPage {
     private int epoch;
     /** 下一页令牌(为空表示拉完) */
     private String pageToken;
+    /** 快照的不透明位点(= boundary 的 `v1.{epoch}.{tso}` 形式);消费方拿到即可无缝接增量 */
+    private String nextPosition;
     /** 本页行(已按契约裁列/脱敏) */
     private List<Map<String, Object>> rows = new ArrayList<>();
     /** 已完成行数 / 预估总行数 */
