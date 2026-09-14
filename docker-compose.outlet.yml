@@ -211,6 +211,7 @@ services:
     <<: *outlet-net
     restart: unless-stopped
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
       CLUSTER_ID: dcpOutletKafkaCluster01
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -242,6 +243,7 @@ services:
     <<: *outlet-net
     restart: unless-stopped
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
       CLUSTER_ID: dcpOutletKafkaCluster01
       KAFKA_NODE_ID: 2
       KAFKA_PROCESS_ROLES: broker,controller
@@ -273,6 +275,7 @@ services:
     <<: *outlet-net
     restart: unless-stopped
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
       CLUSTER_ID: dcpOutletKafkaCluster01
       KAFKA_NODE_ID: 3
       KAFKA_PROCESS_ROLES: broker,controller
