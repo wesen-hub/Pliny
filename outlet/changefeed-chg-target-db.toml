@@ -1,0 +1,14 @@
+# TiCDC changefeed 配置 · chg-target-db(实测版 v7.5.0)
+# 实测记录:
+#   · v7.5 已移除 enable-old-value(canal-json 默认带 old 字段)
+#   · filter.ignore-tables 在本版本配置解析器中不接受(报 unknown options)
+#     → 内部表(*_authority)的排除改在**出口服务投影层**执行(设计里本就是出口的职责)
+[filter]
+rules = ['target_db.*']
+
+[sink]
+protocol = "canal-json"
+
+[[sink.dispatchers]]
+matcher = ['target_db.*']
+partition = 'index-value'

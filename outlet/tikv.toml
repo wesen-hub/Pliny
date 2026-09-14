@@ -1,0 +1,23 @@
+# TiKV 配置(容器内 /etc/tikv/tikv.toml)
+# 目的:在 16G 机器上跑 3 个 TiKV 实例,限制 block cache 与 RocksDB 写缓冲,避免容器 OOM
+[storage.block-cache]
+capacity = "256MB"
+
+[rocksdb]
+max-background-jobs = 2
+max-open-files = 256
+
+[rocksdb.defaultcf]
+write-buffer-size = "32MB"
+
+[rocksdb.writecf]
+write-buffer-size = "32MB"
+
+[rocksdb.lockcf]
+write-buffer-size = "8MB"
+
+[raftdb.defaultcf]
+write-buffer-size = "32MB"
+
+[raftstore]
+sync-log = true

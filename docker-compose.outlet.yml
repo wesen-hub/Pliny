@@ -90,11 +90,13 @@ services:
       - --addr=0.0.0.0:20160
       - --advertise-addr=tikv1:20160
       - --status-addr=0.0.0.0:20180
+      - --config=/etc/tikv/tikv.toml
       - --pd=pd1:2379,pd2:2379,pd3:2379
       - --data-dir=/data
     volumes:
       - tikv1-data:/data
-    mem_limit: 900m
+      - ./outlet/tikv.toml:/etc/tikv/tikv.toml:ro
+    mem_limit: 2g
     depends_on: [pd1, pd2, pd3]
 
   tikv2:
@@ -106,11 +108,13 @@ services:
       - --addr=0.0.0.0:20160
       - --advertise-addr=tikv2:20160
       - --status-addr=0.0.0.0:20180
+      - --config=/etc/tikv/tikv.toml
       - --pd=pd1:2379,pd2:2379,pd3:2379
       - --data-dir=/data
     volumes:
       - tikv2-data:/data
-    mem_limit: 900m
+      - ./outlet/tikv.toml:/etc/tikv/tikv.toml:ro
+    mem_limit: 2g
     depends_on: [pd1, pd2, pd3]
 
   tikv3:
@@ -122,11 +126,13 @@ services:
       - --addr=0.0.0.0:20160
       - --advertise-addr=tikv3:20160
       - --status-addr=0.0.0.0:20180
+      - --config=/etc/tikv/tikv.toml
       - --pd=pd1:2379,pd2:2379,pd3:2379
       - --data-dir=/data
     volumes:
       - tikv3-data:/data
-    mem_limit: 900m
+      - ./outlet/tikv.toml:/etc/tikv/tikv.toml:ro
+    mem_limit: 2g
     depends_on: [pd1, pd2, pd3]
 
   # --------------------------------------------------------------- TiDB ×2
@@ -141,7 +147,7 @@ services:
       - --advertise-address=tidb1
       - --host=0.0.0.0
       - -P=4000
-      - --status=0.0.0.0:10080
+      - --status=10080
     ports:
       - "14000:4000"
       - "14080:10080"
@@ -159,7 +165,7 @@ services:
       - --advertise-address=tidb2
       - --host=0.0.0.0
       - -P=4000
-      - --status=0.0.0.0:10080
+      - --status=10080
     ports:
       - "14010:4000"
     mem_limit: 700m
