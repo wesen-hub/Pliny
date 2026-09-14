@@ -75,6 +75,29 @@ logging:
     com.dcp: info
 
 dcp:
+  # 变更流出口(设计:《变更流出口设计-2026-09-14》)
+  outlet:
+    source: ${OUTLET_SOURCE:kafka}            # mock(内存) | kafka(消费 L1 内部流)
+    registry: ${OUTLET_REGISTRY:mapper}       # memory(种子) | mapper(元库 consumer/contract)
+    epoch: 1
+    retention-hours: 168
+    api:
+      mode: ${OUTLET_API_MODE:inprocess}      # inprocess(内部消费方直调) | http
+      base-url: ${OUTLET_API_BASE:http://localhost:8080}
+      consumer-id: ${OUTLET_API_CONSUMER:demo-tag}
+    kafka:
+      topics: ${OUTLET_KAFKA_TOPICS:dcp.cdc.target_db}
+      group-id: ${OUTLET_KAFKA_GROUP:dcp-outlet}
+      start-tso: ${OUTLET_START_TS:0}         # 生产应设为 changefeed.start_ts
+      buffer-max-events: 20000
+    tidb:                                     # 快照/回查的只读入口
+      url: ${OUTLET_TIDB_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      username: ${OUTLET_TIDB_USER:root}
+      password: ${OUTLET_TIDB_PASSWORD:root123}
+      pk-column: id
+    snapshot:
+      ttl-hours: 24
+      page-limit: 1000
   enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
   jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
   jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}

@@ -41,6 +41,8 @@ public class OutletProperties {
     private Kafka kafka = new Kafka();
     private Tidb tidb = new Tidb();
     private Snapshot snapshot = new Snapshot();
+    private Api api = new Api();
+    private Spark spark = new Spark();
 
     @Data
     public static class Kafka {
@@ -52,8 +54,31 @@ public class OutletProperties {
     }
 
     @Data
-    public static class Snapshot {
-        /** 快照任务 TTL(小时)。默认 24h;必须 ≤ GC 窗口,否则同一 boundary 不可再续 */
+    public static class Api {
+        /** 出口 L3 客户端模式:inprocess(默认,内部消费方直调) | http */
+        private String mode = "inprocess";
+        /** http 模式下的出口服务地址(如 http://localhost:8080) */
+        private String baseUrl = "http://localhost:8080";
+        /** 进程内模式的默认消费方身份(HTTP 模式由调用方通过 token 携带) */
+        private String consumerId = "demo-tag";
+    }
+
+    @Data
+    public static class Spark {
+        private String sparkSubmit = "spark-submit";
+        private String master = "yarn";
+        private String jobJar = "/opt/dcp/outlet-batch-job.jar";
+        private String executorCores = "2";
+        private String executorMemory = "2g";
+        private String queue = "dcp";
+        /** 不可变 staging 根目录(生产:Iceberg 仓库或对象存储) */
+        private String stagingRoot = "s3a://dcp-staging/outlet";
+        /** true = 只生成规格不真提交(无 Spark 环境时的安全默认) */
+        private boolean dryRun = true;
+    }
+
+    @Data
+    public static class Snapshot {        /** 快照任务 TTL(小时)。默认 24h;必须 ≤ GC 窗口,否则同一 boundary 不可再续 */
         private int ttlHours = 24;
         /** 单页行数上限 */
         private int pageLimit = 1000;
