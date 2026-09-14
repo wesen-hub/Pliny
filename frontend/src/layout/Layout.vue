@@ -18,6 +18,7 @@
           <el-menu-item index="/model">模型管理</el-menu-item>
           <el-menu-item index="/sync/task">同步任务</el-menu-item>
           <el-menu-item index="/filesync/task">文件同步</el-menu-item>
+          <el-menu-item index="/lakesync/list">湖表同步</el-menu-item>
           <el-menu-item index="/agent">采集 Agent</el-menu-item>
           <el-menu-item index="/ingest/app">事件接入</el-menu-item>
         </el-sub-menu>

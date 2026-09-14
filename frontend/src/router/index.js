@@ -26,6 +26,10 @@ const routes = [
       // ---------- 文件同步(mc mirror 原生) ----------
       { path: 'agent', name: 'agent-list', component: () => import('../views/agent/List.vue'), meta: { title: '采集 Agent' } },
       { path: 'filesync/task', name: 'filesync-task', component: () => import('../views/filesync/TaskList.vue'), meta: { title: '文件同步' } },
+      { path: 'lakesync/list', name: 'lakesync-list', component: () => import('../views/lakesync/TaskList.vue'), meta: { title: '湖表同步' } },
+      { path: 'lakesync/create', name: 'lakesync-create', component: () => import('../views/lakesync/TaskWizard.vue'), meta: { title: '新建同步任务', active: 'lakesync-list' } },
+      { path: 'lakesync/:id/edit', name: 'lakesync-edit', component: () => import('../views/lakesync/TaskWizard.vue'), meta: { title: '编辑同步任务', active: 'lakesync-list' } },
+      { path: 'lakesync/:id', name: 'lakesync-detail', component: () => import('../views/lakesync/TaskDetail.vue'), meta: { title: '同步任务详情', active: 'lakesync-list' } },
       { path: 'filesync/task/create', name: 'filesync-task-create', component: () => import('../views/filesync/TaskWizard.vue'), meta: { title: '新建文件任务', active: 'filesync-task' } },
       { path: 'filesync/task/:id/edit', name: 'filesync-task-edit', component: () => import('../views/filesync/TaskWizard.vue'), meta: { title: '编辑文件任务', active: 'filesync-task' } },
       { path: 'filesync/task/:id', name: 'filesync-task-detail', component: () => import('../views/filesync/TaskDetail.vue'), meta: { title: '文件任务详情', active: 'filesync-task' } },
