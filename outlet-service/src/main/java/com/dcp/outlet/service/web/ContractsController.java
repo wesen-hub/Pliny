@@ -11,6 +11,9 @@ import java.util.Map;
  *
  * <p>返回**扁平键值**而非 JSON,与指令协议同风格(可 curl 联调)。
  * <b>安全语义</b>:视图里的 allowedColumns 已是「契约 ∩ 主体」;契约不存在 → 返回**空视图**(拒绝)。
+ *
+ * <p>{@code consumerId} 参数**不参与授权判定**(授权以契约行 + 主体策略为准),只作审计标识;
+ * 因此它是可选的 —— 不存在"调用方自报身份就能放大权限"。
  */
 @RestController
 @RequestMapping("/api/outlet/contracts")
@@ -22,7 +25,7 @@ public class ContractsController {
 
     @GetMapping(value = "/{contractRef}", produces = "text/plain;charset=UTF-8")
     public String view(@PathVariable String contractRef,
-                       @RequestParam String consumerId,
+                       @RequestParam(required = false, defaultValue = "") String consumerId,
                        @RequestParam(defaultValue = "rt_sync_c") String stream) {
         return source.viewOf(contractRef, stream).map(v -> {
             if (!v.active || v.allowedColumns.isEmpty()) {

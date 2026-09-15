@@ -251,7 +251,7 @@ public final class EndToEndCheck {
                     leases.grant(unitId, taskId, TOPIC, p, 1, 30_000L, 0L);
                 }
                 dispatcher.dispatch(new DispatchRequest("req-" + tag + "-" + p, unitId,
-                        taskId, TOPIC, STREAM, List.of(p), Map.of(p, startOffset), group(),
+                        taskId, TOPIC, STREAM, "ct-e2e", List.of(p), Map.of(p, startOffset), group(),
                         LOGIC, VERSION, Map.of("idField", "id"), FailureSpec.defaults(), 30_000L));
             }
             Thread.sleep(150);

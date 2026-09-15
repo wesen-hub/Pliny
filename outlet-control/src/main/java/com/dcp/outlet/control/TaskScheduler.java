@@ -73,6 +73,7 @@ public class TaskScheduler {
             }
             dispatcher.dispatch(new DispatchRequest(
                     "req-" + pu.unitId() + "-" + t.epoch(), pu.unitId(), t.taskId(), pu.topic(), pu.stream(),
+                    t.contractRef(),
                     pu.partitions(), starts, t.consumerGroup(), t.logicId(), t.logicVersion(),
                     t.params(), t.failure(), leaseTtlMillis));
             units.markDispatched(pu.unitId());

@@ -11,6 +11,7 @@ public final class DispatchRequest {
     private final String taskId;
     private final String topic;
     private final String stream;                 // 逻辑表名(计算面据此填 batch.stream())
+    private final String contractRef;            // 契约(计算面据此拉契约视图;缺 = 拒绝消费)
     private final List<Integer> partitions;
     private final Map<Integer, Long> startOffsets;
     private final String consumerGroup;
@@ -21,10 +22,12 @@ public final class DispatchRequest {
     private final long leaseTtlMillis;
 
     public DispatchRequest(String reqId, String unitId, String taskId, String topic, String stream,
+                           String contractRef,
                            List<Integer> partitions, Map<Integer, Long> startOffsets, String consumerGroup,
                            String logicId, String logicVersion, Map<String, Object> params,
                            FailureSpec failure, long leaseTtlMillis) {
         this.reqId = reqId; this.unitId = unitId; this.taskId = taskId; this.topic = topic; this.stream = stream;
+        this.contractRef = contractRef;
         this.partitions = partitions; this.startOffsets = startOffsets; this.consumerGroup = consumerGroup;
         this.logicId = logicId; this.logicVersion = logicVersion; this.params = params;
         this.failure = failure; this.leaseTtlMillis = leaseTtlMillis;
@@ -35,6 +38,7 @@ public final class DispatchRequest {
     public String taskId() { return taskId; }
     public String topic() { return topic; }
     public String stream() { return stream; }
+    public String contractRef() { return contractRef; }
     public List<Integer> partitions() { return partitions; }
     public Map<Integer, Long> startOffsets() { return startOffsets; }
     public String consumerGroup() { return consumerGroup; }

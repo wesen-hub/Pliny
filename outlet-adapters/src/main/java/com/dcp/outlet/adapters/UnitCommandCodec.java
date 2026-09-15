@@ -19,7 +19,7 @@ import java.util.Map;
  * <p>用**扁平键值**而不是嵌套 JSON:两面都零 JSON 依赖,协议一眼可读、可直接 curl 联调。
  * 约定:
  * <pre>
- *   unitId / taskId / topic / stream / consumerGroup / logicId / logicVersion / reqId
+ *   unitId / taskId / topic / stream / contractRef / consumerGroup / logicId / logicVersion / reqId
  *   partition        = 可重复(分区组)
  *   startOffset.{p}  = 该分区起始 offset
  *   param.{k}        = 业务参数(内核只透传)
@@ -39,6 +39,9 @@ public final class UnitCommandCodec {
         m.put("taskId", r.taskId());
         m.put("topic", r.topic());
         m.put("stream", r.stream());
+        if (r.contractRef() != null && !r.contractRef().isBlank()) {
+            m.put("contractRef", r.contractRef());        // 计算面据此拉契约视图(缺 → fail-closed)
+        }
         m.put("consumerGroup", r.consumerGroup());
         m.put("logicId", r.logicId());
         m.put("logicVersion", r.logicVersion());
@@ -60,6 +63,7 @@ public final class UnitCommandCodec {
                 .taskId(m.get("taskId"))
                 .topic(m.get("topic"))
                 .stream(m.get("stream"))
+                .contractRef(m.get("contractRef"))
                 .consumerGroup(m.get("consumerGroup"))
                 .logic(LogicRef.of(m.get("logicId"), m.get("logicVersion")));
 

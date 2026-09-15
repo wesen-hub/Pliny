@@ -23,7 +23,8 @@ public final class UnitCommandCodecCheck {
         params.put("note", "a b&c=d");                       // 特殊字符(URL 编码)
 
         DispatchRequest req = new DispatchRequest("req-1", "u-t1-0-1", "t1",
-                "dcp.cdc.target_db.rt_sync_c", "rt_sync_c", List.of(0, 2), starts, "task-t1",
+                "dcp.cdc.target_db.rt_sync_c", "rt_sync_c", "ct-sub-rt_sync_c",
+                List.of(0, 2), starts, "task-t1",
                 "es-sync", "1.0.0", params,
                 new FailureSpec(7, 1500L, "dlq", "continue"), 30_000L);
 
@@ -31,6 +32,7 @@ public final class UnitCommandCodecCheck {
         check("编码含分区", kv.containsKey("partition.0") && kv.containsKey("partition.2"), true);
         check("编码含起始 offset", kv.get("startOffset.0"), "31785");
         check("编码含业务参数", kv.get("param.index"), "crm_rt_sync_c");
+        check("编码含契约引用", kv.get("contractRef"), "ct-sub-rt_sync_c");
 
         String query = UnitCommandCodec.toQuery(kv);
         Map<String, String> parsed = UnitCommandCodec.fromQuery(query);
@@ -40,6 +42,7 @@ public final class UnitCommandCodecCheck {
         check("往返:taskId", cmd.taskId(), "t1");
         check("往返:topic", cmd.topic(), "dcp.cdc.target_db.rt_sync_c");
         check("往返:stream", cmd.stream(), "rt_sync_c");
+        check("往返:契约引用(计算面据此拉视图)", cmd.contractRef(), "ct-sub-rt_sync_c");
         check("往返:consumerGroup", cmd.consumerGroup(), "task-t1");
         check("往返:logic", cmd.logic().toString(), "es-sync@1.0.0");
         check("往返:分区组(有序)", cmd.partitions(), List.of(0, 2));

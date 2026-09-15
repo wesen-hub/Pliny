@@ -59,16 +59,30 @@ public class UnitRunner {
     private final DeadLetterSink deadLetterSink;
     private final UnitMetrics metrics;
     private final Function<String, SdkLogger> logFactory;
+    /** 每单元一个契约视图提供者(生产:从控制面拉;缺省:无限制视图 —— **生产不得缺省**)。 */
+    private final ContractProviderFactory contractProviders;
     private final Map<String, Unit> units = new ConcurrentHashMap<>();
 
+    /** 兼容构造器:契约提供者缺省为无限制视图(仅骨架/自检用)。 */
     public UnitRunner(LogicLoader loader, MessageDecoder decoder, ContractFilter filter,
                       RecordSourceFactory sourceFactory, LeaseGuard leaseGuard, Heartbeat heartbeat,
                       WatermarkProvider watermarks, DeadLetterSink deadLetterSink,
                       UnitMetrics metrics, Function<String, SdkLogger> logFactory) {
+        this(loader, decoder, filter, sourceFactory, leaseGuard, heartbeat, watermarks, deadLetterSink,
+                metrics, logFactory, ContractProviderFactory.permissive());
+    }
+
+    public UnitRunner(LogicLoader loader, MessageDecoder decoder, ContractFilter filter,
+                      RecordSourceFactory sourceFactory, LeaseGuard leaseGuard, Heartbeat heartbeat,
+                      WatermarkProvider watermarks, DeadLetterSink deadLetterSink,
+                      UnitMetrics metrics, Function<String, SdkLogger> logFactory,
+                      ContractProviderFactory contractProviders) {
         this.loader = loader; this.decoder = decoder; this.filter = filter;
         this.sourceFactory = sourceFactory; this.leaseGuard = leaseGuard; this.heartbeat = heartbeat;
         this.watermarks = watermarks; this.deadLetterSink = deadLetterSink; this.metrics = metrics;
         this.logFactory = logFactory;
+        this.contractProviders = contractProviders == null
+                ? ContractProviderFactory.permissive() : contractProviders;
     }
 
     // ================= 生命周期 =================
@@ -135,9 +149,11 @@ public class UnitRunner {
             ConsumerLogic logic = loaded.logic();                  //    一单元一实例
             UnitRuntime rt = new UnitRuntime(cmd.unitId(), cmd.taskId(), cmd.topic(), cmd.partitions(),
                     cmd.consumerGroup(), cmd.logic().logicId(), cmd.logic().version(), cmd.params(),
-                    new RefreshingContractProvider(cmd), watermarks, deadLetterSink, metrics, log);
+                    contractProviders.forUnit(cmd), watermarks, deadLetterSink, metrics, log);
             u.rt = rt;
             if (u.state == State.STOPPING) rt.stop();              // 启动前就收到 stop → 不进入消费
+            rt.contractProvider().current();                       // ①' 契约必须可获取:拉不到且无缓存 → 直接失败
+                                                                   //     (fail-closed:宁可不启动,也不能无契约消费)
             logic.init(new InitContextImpl(rt));                   // ② 初始化(建连接池 / 加载规则)
 
             RecordSource source = sourceFactory.create(cmd);       // ③ 消费源 + 注入起点
@@ -289,29 +305,6 @@ public class UnitRunner {
             Thread.sleep(millis);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    /** 每批刷新契约:收窄 / 吊销在下一批生效(不必重启单元)。 */
-    private static class RefreshingContractProvider implements ContractProvider {
-        private final CreateUnitCmd cmd;
-        private volatile ContractView cached;
-        private volatile long loadedAt;
-
-        RefreshingContractProvider(CreateUnitCmd cmd) { this.cmd = cmd; }
-
-        @Override public ContractView current() {
-            long now = System.currentTimeMillis();
-            if (cached == null || now - loadedAt > 30_000L) {      // 每 30s 刷新一次
-                cached = currentContract();
-                loadedAt = now;
-            }
-            return cached;
-        }
-
-        /** 生产实现:调控制面 `GET /api/outlet/contracts?consumerId=`;当前先用无限制视图。 */
-        protected ContractView currentContract() {
-            return DefaultContractFilter.permissive().currentView();
         }
     }
 }

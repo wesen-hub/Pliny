@@ -46,7 +46,8 @@ public final class HttpDispatchCheck {
         Map<Integer, Long> starts = new LinkedHashMap<>();
         starts.put(1, 31785L);
         DispatchRequest req = new DispatchRequest("req-http-1", "u-http-1-1", "t1",
-                "dcp.cdc.target_db.rt_sync_c", "rt_sync_c", List.of(1), starts, "task-t1",
+                "dcp.cdc.target_db.rt_sync_c", "rt_sync_c", "ct-sub-rt_sync_c",
+                List.of(1), starts, "task-t1",
                 "es-sync", "1.0.0", Map.of("index", "crm_rt_sync_c"),
                 new FailureSpec(3, 1000L, "dlq", "stop"), 30_000L);
 

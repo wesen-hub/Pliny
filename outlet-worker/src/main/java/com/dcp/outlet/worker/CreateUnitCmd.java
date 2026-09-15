@@ -18,6 +18,7 @@ public final class CreateUnitCmd {
     private String taskId;
     private String topic;
     private String stream;          // 逻辑表名(batch.stream() 与契约白名单的键)
+    private String contractRef;     // 契约引用:计算面据此从控制面拉契约视图(**缺 = 拒绝消费**)
     private List<Integer> partitions = List.of();
     private Map<Integer, Long> startOffsets = new LinkedHashMap<>();
     private String consumerGroup;
@@ -37,6 +38,8 @@ public final class CreateUnitCmd {
     public CreateUnitCmd topic(String v) { this.topic = v; return this; }
     public String stream() { return stream; }
     public CreateUnitCmd stream(String v) { this.stream = v; return this; }
+    public String contractRef() { return contractRef; }
+    public CreateUnitCmd contractRef(String v) { this.contractRef = v; return this; }
     public List<Integer> partitions() { return partitions; }
     public CreateUnitCmd partitions(List<Integer> v) { this.partitions = v; return this; }
     public Map<Integer, Long> startOffsets() { return startOffsets; }

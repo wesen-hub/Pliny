@@ -4,6 +4,7 @@ import com.dcp.common.BizException;
 import com.dcp.module.outlet.model.ChangeEvent;
 import com.dcp.module.outlet.model.ConsumerAccount;
 import com.dcp.module.outlet.model.Contract;
+import com.dcp.module.outlet.perm.RowCondition;
 import com.dcp.module.tagengine.perm.DataSecurityService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -152,27 +153,19 @@ public class OutletPermissionEngine {
 
     /* ------------------------------------------------------------------ helpers */
 
-    /** 极简行条件:`col = value [AND col = value]...`(生产替换为 DataSecurityService 行规则 + 条件下推) */
+    /**
+     * 行条件 → 逐行谓词:委托 {@link RowCondition}。
+     *
+     * <p><b>语义变更(2026-09-16)</b>:原实现只支持 {@code col = value},且**解析不出来就静默放行**
+     * (等于放大权限)。现改为完整语法 + **fail-closed**(非空但非法 → 明确报错,拒绝下发)。
+     * 语法/语义与计算面 {@code ExpressionRowConditionEvaluator} 同源,由 parity 自检兜住。
+     */
     private Predicate<Map<String, Object>> buildRowFilter(String condition) {
-        if (condition == null || condition.isBlank()) {
-            return r -> true;
+        try {
+            return RowCondition.compile(condition);
+        } catch (IllegalArgumentException e) {
+            throw new BizException(OutletErrorCode.FORBIDDEN, "契约行条件非法:" + e.getMessage());
         }
-        List<String[]> conds = new ArrayList<>();
-        for (String part : condition.split("(?i)\\s+AND\\s+")) {
-            String[] kv = part.split("=", 2);
-            if (kv.length == 2) {
-                conds.add(new String[]{kv[0].trim(), kv[1].trim().replaceAll("^'|\"|'$", "").replace("'", "")});
-            }
-        }
-        return row -> {
-            for (String[] c : conds) {
-                Object v = row.get(c[0]);
-                if (v == null || !String.valueOf(v).equals(c[1])) {
-                    return false;
-                }
-            }
-            return true;
-        };
     }
 
     private Object applyMask(String rule, Object value) {

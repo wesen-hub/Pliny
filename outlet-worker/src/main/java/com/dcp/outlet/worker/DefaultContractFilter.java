@@ -39,6 +39,13 @@ public class DefaultContractFilter implements ContractFilter {
         int maxLevel = effective == null ? -1 : effective.maxLevel();
         String rowCondition = effective == null ? null : effective.rowCondition();
 
+        // ★ 空视图 = 契约无效 / 未覆盖该流 / 主体可见列为空 → **一条都不交付**(fail-closed)。
+        //   控制面下发放空视图就是这个意思("调用方 fail-closed");
+        //   若当成"裁掉所有列"继续交付,业务逻辑会收到一批空行(key 仍在)—— 等于"吊销了还在喂数据"。
+        if (whitelist != null && whitelist.isEmpty()) {
+            return List.of();
+        }
+
         List<ChangeRecord> out = new ArrayList<>(events.size());
         for (DecodedMessage e : events) {
             if (e.kind() != DecodedMessage.Kind.EVENT) continue;
