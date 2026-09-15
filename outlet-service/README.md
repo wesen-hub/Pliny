@@ -60,12 +60,30 @@ POST   /api/units/{unitId}/lease/renew          计算面续约
 
 ```yaml
 outlet:
-  meta:   { jdbc-url: jdbc:mysql://127.0.0.1:3306/dcp, username: root, password: *** }
+  meta:   { jdbc-url: jdbc:mysql://127.0.0.1:3306/dcp, username: root, password: <环境变量注入> }
   kafka:  { bootstrap: 127.0.0.1:19092, topic-prefix: "dcp.cdc." }
   start-offset: { max-scan-rows: 200000 }
+  worker: { url: http://127.0.0.1:8096 }        # CreateUnit 下发目标
 ```
+
+DB 密码**只从环境变量注入**(`OUTLET_META_PASSWORD`),不落盘;其余项同样可用 `OUTLET_*` 覆盖。
 
 ## 状态
 
-骨架与 REST 已就位并通过编译;**尚未本地真起过服务**(端到端 HTTP 属加分项)。
+**已本地真起(8095)**且 bean 图完整(启动实测);数据类接口需注入元数据库密码后才能验。
+
+**未接线项(已知,已用明确拒绝代替静默放行)**:
+
+| 项 | 现状 |
+|---|---|
+| 批阶段(`startPolicy=snapshot`) | `NotWiredBatchRunner` 直接把任务置 `BATCH_FAILED`。要真接线需三个生产适配器:changefeed `start_ts`(TiCDC API)、TiDB `@@tidb_gc_safe_point`、分区最新 TSO(水位表侧已具备) |
+| 主体侧行规则(「契约 ∩ 主体」的行级交集) | 列级已有 `SubjectColumnPolicy` 端口(现为 permissive);行级尚无端口 —— **契约行条件当前生效,主体行规则未叠加** |
+| 容器化 | Dockerfile + compose 片段待补 |
+
+启动方式(仓库根目录;`<cp>` 由 `mvn dependency:build-classpath` 产出):
+
+```bash
+OUTLET_META_PASSWORD=*** java -cp "<cp>:outlet-service/target/classes" \
+  com.dcp.outlet.service.OutletServiceApplication --server.port=8095
+```
 建表脚本:`outlet/v2-meta-ddl.sql`。
