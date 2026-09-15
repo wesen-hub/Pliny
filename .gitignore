@@ -9,6 +9,14 @@ agent/target/
 dist/
 seatunnel/dist/
 
+# v2 消费通道模块(outlet-*)
+outlet-sdk/target/
+outlet-control/target/
+outlet-worker/target/
+outlet-adapters/target/
+outlet-service/target/
+outlet-worker-service/target/
+
 # 演示挂载目录(容器运行期数据; 仅保留目录骨架)
 demo-agent-dir/*
 !demo-agent-dir/.gitkeep

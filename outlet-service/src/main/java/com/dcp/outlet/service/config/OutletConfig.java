@@ -82,8 +82,9 @@ public class OutletConfig {
         return new ProgressService(reader, watermarks, System::currentTimeMillis);
     }
 
+    /** 死信出口:返回**具体类型**(TasksController 注入的是 JdbcDeadLetterSink,不是端口)。 */
     @Bean
-    public DeadLetterSink deadLetterSink(DataSource ds) { return new JdbcDeadLetterSink(ds); }
+    public JdbcDeadLetterSink deadLetterSink(DataSource ds) { return new JdbcDeadLetterSink(ds); }
 
     @Bean
     public AlertSink alertSink() {
@@ -103,5 +104,54 @@ public class OutletConfig {
                                                  StreamRegistry registry,
                                                  @Value("${outlet.kafka.topic-prefix:dcp.cdc.}") String prefix) {
         return new KafkaAdminStreamScanner(bootstrap, registry, prefix);
+    }
+
+    /* ------------------------------------------------ 建任务校验 / 交接 所需的端口(生产实现) */
+
+    /** 契约摘要:建任务时拦"契约不存在 / 未生效 / 未覆盖流"。 */
+    @Bean
+    public ContractLookup contractLookup(DataSource ds) { return new JdbcContractLookup(ds); }
+
+    /** 逻辑目录:建任务时拦"逻辑未注册"。 */
+    @Bean
+    public LogicCatalog logicCatalog(DataSource ds) { return new JdbcLogicCatalog(ds); }
+
+    /** startPolicy=latest 的"最新 TSO" = 水位表(不猜时点;取不到=0)。 */
+    @Bean
+    public LatestTsoProvider latestTsoProvider(WatermarkStore watermarks) {
+        return new WatermarkStoreLatestTso(watermarks);
+    }
+
+    /** 交接:把 CreateUnit 下发给计算面(含 contractRef —— 计算面据此拉契约视图)。 */
+    @Bean
+    public UnitDispatcher unitDispatcher(@Value("${outlet.worker.url}") String workerUrl) {
+        return new HttpUnitDispatcher(workerUrl);
+    }
+
+    /**
+     * 批阶段:目前是**拒统占位**。
+     *
+     * <p>要真接线需要三个生产适配器:changefeed start_ts(TiCDC API)、
+     * TiDB GC safe point({@code SELECT @@tidb_gc_safe_point})、分区最新 TSO(水位表已具备),
+     * 再组装 {@code SchedulerBatchRunner}(快照源走平台快照 API)。接线前 snapshot 任务会被判失败,
+     * 而**不会带着错 T0 开跑**。
+     */
+    @Bean
+    public BatchRunner batchRunner() { return new NotWiredBatchRunner(); }
+
+    /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */
+    @Bean
+    public TaskScheduler outletTaskScheduler(TaskStore tasks, UnitStore units, UnitDispatcher dispatcher,
+                                            StartOffsetService startOffsets, LeaseManager leases,
+                                            LatestTsoProvider latestTso, BatchRunner batchRunner) {
+        return new TaskScheduler(tasks, units, dispatcher, startOffsets, leases, latestTso,
+                batchRunner, System::currentTimeMillis, 30_000L);
+    }
+
+    @Bean
+    public TaskKernelService taskKernelService(StreamRegistry streams, LogicCatalog logicCatalog,
+                                               ContractLookup contracts, TaskStore tasks, UnitStore units,
+                                               UnitPlanner planner, TaskScheduler outletTaskScheduler) {
+        return new TaskKernelService(streams, logicCatalog, contracts, tasks, units, planner, outletTaskScheduler);
     }
 }

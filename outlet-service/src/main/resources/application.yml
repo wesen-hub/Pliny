@@ -1,0 +1,29 @@
+server:
+  port: 8095
+
+spring:
+  application:
+    name: dcp-outlet-control
+
+outlet:
+  # 元数据库(v2 元数据表:consumer_task / consumer_unit / chg_anchor / chg_watermark_latest /
+  # consumer_logic / consumer_dlq / chg_stream;建表见 outlet/v2-meta-ddl.sql)
+  # 密码从环境变量注入,不落盘:OUTLET_META_PASSWORD=xxx
+  meta:
+    jdbc-url: ${OUTLET_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${OUTLET_META_USERNAME:root}
+    password: ${OUTLET_META_PASSWORD:}
+  # 出口栈 Kafka(**不是**平台那套 kafka:9092;出口栈是 19092)
+  kafka:
+    bootstrap: ${OUTLET_KAFKA_BOOTSTRAP:127.0.0.1:19092}
+    topic-prefix: dcp.cdc.
+  start-offset:
+    max-scan-rows: 200000
+  # 计算面服务地址(CreateUnit 下发目标);可多实例时改为网关/负载均衡地址
+  worker:
+    url: ${OUTLET_WORKER_URL:http://127.0.0.1:8096}
+
+logging:
+  level:
+    root: INFO
+    com.dcp.outlet: INFO
