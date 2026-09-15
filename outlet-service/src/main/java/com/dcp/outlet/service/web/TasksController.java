@@ -28,9 +28,15 @@ public class TasksController {
     private final TaskKernelService kernel;
     private final TaskStore tasks;
     private final UnitStore units;
+    private final UnitStatusStore statuses;
+    private final ProgressService progress;
+    private final com.dcp.outlet.adapters.JdbcDeadLetterSink dlq;
 
-    public TasksController(TaskKernelService kernel, TaskStore tasks, UnitStore units) {
+    public TasksController(TaskKernelService kernel, TaskStore tasks, UnitStore units,
+                           UnitStatusStore statuses, ProgressService progress,
+                           com.dcp.outlet.adapters.JdbcDeadLetterSink dlq) {
         this.kernel = kernel; this.tasks = tasks; this.units = units;
+        this.statuses = statuses; this.progress = progress; this.dlq = dlq;
     }
 
     /** 任务列表:前端列表页用(status / 单元数 / 逻辑版本 / 起止 TSO)。 */
@@ -84,7 +90,23 @@ public class TasksController {
         }
         out.put("units", unitViews);
         out.put("unitCount", unitViews.size());
+        // 每分区滞后(offset → TSO → 滞后秒/条);queryKafka=false 避免每次翻页都打 Kafka
+        List<PartitionProgress> rows = progress.progressOfTask(taskId, units.byTask(taskId),
+                statuses.byTask(taskId), t.epoch(), false);
+        out.put("progress", rows);
         return out;
+    }
+
+    /** 死信列表(前端详情页死信区块)。 */
+    @GetMapping("/{taskId}/dlq")
+    public List<Map<String, Object>> dlq(@PathVariable String taskId) {
+        return dlq.list(taskId);
+    }
+
+    /** 标记死信已重放(重投本身 = 回退位点并重启单元,属离线返工流程)。 */
+    @PostMapping("/dlq/{dlqId}/replay")
+    public Map<String, Object> replay(@PathVariable long dlqId) {
+        return Map.of("dlqId", dlqId, "updated", dlq.markReplayed(dlqId));
     }
 
     @GetMapping("/{taskId}/units")

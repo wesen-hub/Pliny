@@ -104,3 +104,21 @@ CREATE TABLE IF NOT EXISTS consumer_unit_partition (
   PRIMARY KEY (topic, partition_, epoch),        -- ★ 同分区同代只能被一个单元认领
   KEY idx_unit (unit_id)
 ) COMMENT 'v2 单元分区归属(同分区同代唯一 → 防双消费)';
+
+-- 8) 死信(重试耗尽后落这里;绝不静默丢弃)
+CREATE TABLE IF NOT EXISTS consumer_dlq (
+  dlq_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
+  task_id    VARCHAR(64)  NOT NULL,
+  unit_id    VARCHAR(128) NOT NULL,
+  topic      VARCHAR(255) NOT NULL,
+  partition_ INT          NOT NULL,
+  offset_    BIGINT       NOT NULL,
+  tso        BIGINT       NULL,
+  stream     VARCHAR(64)  NULL,
+  op         VARCHAR(16)  NULL,
+  error_msg  VARCHAR(1024) NULL,
+  retries    INT          NOT NULL DEFAULT 0,
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  replayed_at DATETIME    NULL,
+  KEY idx_task (task_id, created_at)
+) COMMENT 'v2 死信(可查/可重放)';

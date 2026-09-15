@@ -2,6 +2,7 @@ package com.dcp.outlet.service.config;
 
 import com.dcp.outlet.adapters.*;
 import com.dcp.outlet.control.*;
+import com.dcp.outlet.worker.DeadLetterSink;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -61,6 +62,30 @@ public class OutletConfig {
 
     @Bean
     public LeaseManager leaseManager() { return new LeaseManager(); }
+
+    @Bean
+    public UnitStatusStore unitStatusStore(DataSource ds) { return new JdbcUnitStatusStore(ds); }
+
+    @Bean
+    public ProgressService progressService(PartitionReader reader, WatermarkStore watermarks) {
+        return new ProgressService(reader, watermarks, System::currentTimeMillis);
+    }
+
+    @Bean
+    public DeadLetterSink deadLetterSink(DataSource ds) { return new JdbcDeadLetterSink(ds); }
+
+    @Bean
+    public AlertSink alertSink() {
+        // 生产实现:接平台告警通道 / Alertmanager;此处先落日志(平台只告警不补齐,D12)
+        return alert -> org.slf4j.LoggerFactory.getLogger("outlet-alert").warn("{}", alert);
+    }
+
+    @Bean
+    public Supervisor supervisor(TaskStore tasks, UnitStore units, UnitStatusStore statuses,
+                                 LeaseManager leases, AlertSink alertSink) {
+        return new Supervisor(tasks, units, statuses, leases, alertSink,
+                30_000L, 300_000L, 60_000L, System::currentTimeMillis);
+    }
 
     @Bean
     public KafkaAdminStreamScanner streamScanner(@Value("${outlet.kafka.bootstrap}") String bootstrap,
