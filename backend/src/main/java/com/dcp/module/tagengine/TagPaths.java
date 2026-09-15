@@ -53,6 +53,16 @@ public final class TagPaths {
     }
 
     /**
+     * @param rows {@code SELECT id, parent_id, name FROM tag_dict} 的结果
+     * @return id → path(展示用;不再把路径写进结果表,读时由 id 反查)
+     */
+    public static Map<Long, String> idToPath(List<Map<String, Object>> rows) {
+        Map<Long, String> out = new LinkedHashMap<>();
+        pathToId(rows).forEach((p, id) -> out.put(id, p));
+        return out;
+    }
+
+    /**
      * 把动作标签的**节点 id 固化进发布快照**:`visual.actions[].tagId` / `table.tagId`。
      *
      * <p>发布即冻结 —— 标签日后改名/移动时,已发布任务仍指向同一节点(路径会变,id 不会)。

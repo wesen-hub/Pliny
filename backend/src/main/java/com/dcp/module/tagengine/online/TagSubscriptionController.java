@@ -85,22 +85,24 @@ public class TagSubscriptionController {
     public ApiResponse<List<Map<String, Object>>> listSubs() {
         ensureSchema();
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT s.id,s.name,s.tag_path,s.tag_dict_id,s.tag_value,s.owner,s.status,s.create_time,s.update_time,"
+                "SELECT s.id,s.name,s.tag_dict_id,s.tag_value,s.owner,s.status,s.create_time,s.update_time,"
                         + " (SELECT COUNT(DISTINCT n.entity) FROM tag_notify n"
-                        + "   WHERE ((s.tag_dict_id IS NOT NULL AND n.tag_dict_id=s.tag_dict_id)"
-                        + "          OR (s.tag_dict_id IS NULL AND n.tag_path=s.tag_path))"
+                        + "   WHERE n.tag_dict_id=s.tag_dict_id"
                         + "     AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS hit_entities,"
                         + " (SELECT MAX(n.occur_ts) FROM tag_notify n"
-                        + "   WHERE ((s.tag_dict_id IS NOT NULL AND n.tag_dict_id=s.tag_dict_id)"
-                        + "          OR (s.tag_dict_id IS NULL AND n.tag_path=s.tag_path))"
+                        + "   WHERE n.tag_dict_id=s.tag_dict_id"
                         + "     AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS latest_at"
                         + " FROM tag_subscription s ORDER BY s.id DESC");
+        Map<Long, String> paths = TagPaths.idToPath(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) {
-            if (security.tagLevel(String.valueOf(r.get("tag_path"))) <= 0) continue;   // L0 订阅不可见
+            long tid = r.get("tag_dict_id") == null ? 0L : ((Number) r.get("tag_dict_id")).longValue();
+            String tagPath = paths.getOrDefault(tid, "(已删除:" + tid + ")");
+            if (security.tagLevel(tagPath) <= 0) continue;   // L0 订阅不可见
             Map<String, Object> m = new LinkedHashMap<>(r);
-            m.put("ownerLevel", security.tagLevel(String.valueOf(r.get("tag_path"))));  // 当前登录视角可见等级
-            m.put("ownerReadable", security.tagLevel(String.valueOf(r.get("tag_path"))) >= 2);
+            m.put("tag_path", tagPath);                       // 展示路径由 id 解析(响应形状不变)
+            m.put("ownerLevel", security.tagLevel(tagPath));  // 当前登录视角可见等级
+            m.put("ownerReadable", security.tagLevel(tagPath) >= 2);
             out.add(m);
         }
         return ApiResponse.ok(out);
@@ -194,11 +196,12 @@ public class TagSubscriptionController {
                                                        @RequestParam(required = false) String taskMode,
                                                        @RequestParam(defaultValue = "50") int limit) {
         StringBuilder sql = new StringBuilder(
-                "SELECT entity,tag_path,tag_value,task_id,task_mode,occur_ts FROM tag_notify WHERE 1=1");
+                "SELECT entity,tag_dict_id,tag_value,task_id,task_mode,occur_ts FROM tag_notify WHERE 1=1");
         List<Object> args = new ArrayList<>();
         if (tagPath != null && !tagPath.isBlank()) {
-            sql.append(" AND tag_path=?");
-            args.add(tagPath);
+            Long tid = TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")).get(tagPath);
+            sql.append(" AND tag_dict_id=?");
+            args.add(tid);
         }
         if (taskMode != null && !taskMode.isBlank()) {
             sql.append(" AND task_mode=?");
@@ -206,9 +209,14 @@ public class TagSubscriptionController {
         }
         sql.append(" ORDER BY occur_ts DESC LIMIT ").append(Math.min(Math.max(limit, 1), 200));
         List<Map<String, Object>> rows = metaJdbc.queryForList(sql.toString(), args.toArray());
+        Map<Long, String> paths = TagPaths.idToPath(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
         List<Map<String, Object>> visible = new ArrayList<>();
         for (Map<String, Object> r : rows) {
-            if (security.tagLevel(String.valueOf(r.get("tag_path"))) >= 2) visible.add(r);
+            long tid = r.get("tag_dict_id") == null ? 0L : ((Number) r.get("tag_dict_id")).longValue();
+            String p = paths.getOrDefault(tid, "(已删除:" + tid + ")");
+            if (security.tagLevel(p) < 2) continue;
+            r.put("tag_path", p);        // 展示路径由 id 解析
+            visible.add(r);
         }
         return ApiResponse.ok(Map.of("list", visible, "total", visible.size()));
     }

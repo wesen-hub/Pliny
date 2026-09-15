@@ -1278,6 +1278,21 @@ public class TagEngineService {
         return TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
     }
 
+    /** id → 展示路径(60s 缓存);结果表只存 id,读时由此解析 */
+    private volatile Map<Long, String> idPathCache;
+    private volatile long idPathAt;
+
+    private Map<Long, String> idToPathCached() {
+        Map<Long, String> c = idPathCache;
+        if (c != null && System.currentTimeMillis() - idPathAt < 60_000L) return c;
+        synchronized (this) {
+            if (idPathCache != null && System.currentTimeMillis() - idPathAt < 60_000L) return idPathCache;
+            idPathCache = TagPaths.idToPath(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
+            idPathAt = System.currentTimeMillis();
+            return idPathCache;
+        }
+    }
+
     /**
      * 发布时**固化动作标签的节点 id** 到快照(`actions[].tagId` / `table.tagId`)。
      * <p>存 id 而非路径 —— 标签日后改名/移动时,已发布任务仍指向同一节点。实现见 {@link TagPaths#freezeIds}。
@@ -1356,10 +1371,26 @@ public class TagEngineService {
     /* ---------- 标签服务查询(投影表 tag_fact_view; 湖 tag_fact 权威, 投影为圈选/订阅查询面) ---------- */
 
     public List<Map<String, Object>> labelSummary() {
+        // 结果表只存 id:按 id 聚合后再解析出展示路径(API 响应形状不变)
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT tag, COUNT(DISTINCT entity) AS entities, MAX(run_ts) AS lastRun FROM tag_fact_view GROUP BY tag ORDER BY tag");
-        // tag_fact_view 不存在(还没跑过带投影的轮次) → 空列表而非报错
-        return rows;
+                "SELECT tag_dict_id, COUNT(DISTINCT entity) AS entities, MAX(run_ts) AS lastRun"
+                        + " FROM tag_fact_view GROUP BY tag_dict_id");
+        Map<Long, String> paths = idToPathCached();
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>(r);
+            m.put("tag", resolvePath(paths, r.get("tag_dict_id")));
+            out.add(m);
+        }
+        out.sort((a, b) -> String.valueOf(a.get("tag")).compareTo(String.valueOf(b.get("tag"))));
+        return out;
+    }
+
+    /** id → 展示路径;id 缺失/树上已无此节点时给一个可辨识的占位(不静默丢行) */
+    private static String resolvePath(Map<Long, String> paths, Object idObj) {
+        if (idObj == null) return "(未映射)";
+        long id = ((Number) idObj).longValue();
+        return paths.getOrDefault(id, "(已删除:" + id + ")");
     }
 
     public Map<String, Object> labelCircle(String tagPath, String value, int limit) {
@@ -1436,10 +1467,13 @@ public class TagEngineService {
         List<Map<String, Object>> rows;
         try {
             rows = metaJdbc.queryForList(
-                    "SELECT task_id, tag, tag_dict_id, value, run_ts FROM tag_fact_view WHERE entity=? ORDER BY tag", entityKey);
+                    "SELECT task_id, tag_dict_id, value, run_ts FROM tag_fact_view WHERE entity=?", entityKey);
         } catch (org.springframework.dao.DataAccessException e) {
             throw new IllegalArgumentException("标签视图不可用(投影表未建/未同步): " + e.getMessage());
         }
+        Map<Long, String> paths = idToPathCached();
+        for (Map<String, Object> r : rows) r.put("tag", resolvePath(paths, r.get("tag_dict_id")));
+        rows.sort((a, b) -> String.valueOf(a.get("tag")).compareTo(String.valueOf(b.get("tag"))));
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("entity", entityKey);
         out.put("count", rows.size());
