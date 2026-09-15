@@ -1,4 +1,4 @@
-package com.dcp.outlet.integration;
+package com.dcp.outlet.adapters;
 
 import com.dcp.outlet.sdk.Op;
 import com.dcp.outlet.worker.DecodedMessage;

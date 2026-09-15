@@ -1,4 +1,4 @@
-package com.dcp.outlet.integration.support;
+package com.dcp.outlet.adapters.e2e.support;
 
 import com.dcp.outlet.control.PartitionReader;
 import com.dcp.outlet.control.TimeUtil;

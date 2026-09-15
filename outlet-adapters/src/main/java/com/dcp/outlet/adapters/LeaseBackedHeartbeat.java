@@ -1,4 +1,4 @@
-package com.dcp.outlet.integration;
+package com.dcp.outlet.adapters;
 
 import com.dcp.outlet.worker.Heartbeat;
 

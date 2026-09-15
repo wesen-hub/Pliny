@@ -1,7 +1,7 @@
 package com.dcp.outlet.workersvc;
 
 import com.dcp.outlet.adapters.*;
-import com.dcp.outlet.integration.SdkEventDecoder;
+
 import com.dcp.outlet.sdk.*;
 import com.dcp.outlet.worker.*;
 import org.springframework.beans.factory.annotation.Value;

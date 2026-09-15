@@ -1,8 +1,9 @@
-package com.dcp.outlet.integration;
+package com.dcp.outlet.adapters.e2e;
 
 import com.dcp.outlet.control.*;
+import com.dcp.outlet.adapters.*;
 import com.dcp.outlet.control.support.*;
-import com.dcp.outlet.integration.support.*;
+import com.dcp.outlet.adapters.e2e.support.*;
 import com.dcp.outlet.sdk.*;
 import com.dcp.outlet.worker.*;
 

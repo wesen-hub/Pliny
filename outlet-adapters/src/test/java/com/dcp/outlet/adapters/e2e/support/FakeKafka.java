@@ -1,4 +1,4 @@
-package com.dcp.outlet.integration.support;
+package com.dcp.outlet.adapters.e2e.support;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

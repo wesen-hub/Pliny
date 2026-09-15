@@ -11,6 +11,17 @@
 | 逻辑仓库 | `LogicRepository`/`LogicArtifact` · `FileLogicRepository`(目录 + sha256 sidecar)· `JarLogicLoader`(校验 + 独立 ClassLoader) |
 | 辅助 | `CanalJson`(轻量解析)· `Json`/`FlatJson`(极简 JSON,刻意不引库)· `PlatformMasker`(与引擎 `applyMask` 同源)· `DriverManagerDataSource` |
 
+## 接线(由 outlet-integration 并入)
+
+| 类 | 作用 |
+|---|---|
+| `UnitDispatcherAdapter` | 控制面 `DispatchRequest` → 计算面 `CreateUnitCmd` → `UnitRunner.start`(同进程部署) |
+| `LeaseBackedLeaseGuard` | 计算面续约 → 控制面 `LeaseManager`;**续约失败即单元自停** |
+| `LeaseBackedHeartbeat` | 心跳落地(offset/tso/时间) |
+| `SdkEventDecoder` | 极简事件解码(生产替换为完整 canal-json 解析) |
+
+> 2026-09-16:`outlet-integration` 模块并入本模块 —— 它本就同时依赖 control 与 worker,单独成模块属冗余(详见《架构图与模块说明》§1.3)。
+
 ## 真栈自检(需要 Kafka 19092 + MySQL 3306,库 `dcp`)
 
 ```bash
@@ -19,7 +30,8 @@ SJ=~/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar
 MJ=~/.m2/repository/mysql/mysql-connector-java/8.0.23/mysql-connector-java-8.0.23.jar
 javac --release 17 -cp /tmp/out:$KJ -d /tmp/adt $(find outlet-adapters/src -name '*.java')
 for c in RealStackCheck FoundationCheck ProgressDlqCheck SnapshotSourceCheck \
-         UnitCommandCodecCheck HttpDispatchCheck ContractViewHttpCheck JarLogicLoaderCheck; do
+         UnitCommandCodecCheck HttpDispatchCheck ContractViewHttpCheck JarLogicLoaderCheck \
+         e2e.EndToEndCheck; do
   java -cp /tmp/out:/tmp/adt:$KJ:$SJ:$MJ com.dcp.outlet.adapters.$c | grep 通过
 done
 ```
