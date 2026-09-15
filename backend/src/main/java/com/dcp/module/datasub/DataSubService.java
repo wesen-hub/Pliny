@@ -461,13 +461,16 @@ public class DataSubService {
         for (JsonNode t : view.path("tags")) {
             String path = t.path("path").asText("");
             String value = t.path("value").asText("");
-            if (path.isBlank()) continue;
-            List<Map<String, Object>> rows;
-            if (value.isBlank()) {
-                rows = metaJdbc.queryForList("SELECT DISTINCT entity FROM tag_fact_view WHERE tag=?", path);
-            } else {
-                rows = metaJdbc.queryForList("SELECT DISTINCT entity FROM tag_fact_view WHERE tag=? AND value=?", path, value);
+            Long tid = t.hasNonNull("tagDictId") ? t.path("tagDictId").asLong() : null;
+            if (path.isBlank() && tid == null) continue;
+            StringBuilder sql = new StringBuilder("SELECT DISTINCT entity FROM tag_fact_view WHERE ");
+            List<Object> args = new ArrayList<>();
+            appendTagCond(sql, args, tid, path);
+            if (!value.isBlank()) {
+                sql.append(" AND value=?");
+                args.add(value);
             }
+            List<Map<String, Object>> rows = metaJdbc.queryForList(sql.toString(), args.toArray());
             Set<String> cur = new LinkedHashSet<>();
             rows.forEach(r -> cur.add(s(r.get("entity"))));
             if (op.equals("AND")) {
@@ -478,16 +481,34 @@ public class DataSubService {
             }
         }
         if (acc == null) return new LinkedHashSet<>();
-        // exclude
+        // exclude(id 优先, 与 include 同语义)
         for (JsonNode ex : view.path("exclude")) {
+            Long tid = ex.hasNonNull("tagDictId") ? ex.path("tagDictId").asLong() : null;
             String path = ex.isTextual() ? ex.asText() : ex.path("path").asText("");
-            if (path.isBlank()) continue;
-            List<Map<String, Object>> rows = metaJdbc.queryForList("SELECT DISTINCT entity FROM tag_fact_view WHERE tag=?", path);
+            if (path.isBlank() && tid == null) continue;
+            StringBuilder sql = new StringBuilder("SELECT DISTINCT entity FROM tag_fact_view WHERE ");
+            List<Object> args = new ArrayList<>();
+            appendTagCond(sql, args, tid, path);
             Set<String> exSet = new HashSet<>();
-            rows.forEach(r -> exSet.add(s(r.get("entity"))));
+            metaJdbc.queryForList(sql.toString(), args.toArray()).forEach(r -> exSet.add(s(r.get("entity"))));
             acc.removeAll(exSet);
         }
         return acc;
+    }
+
+    /**
+     * 标签条件 → SQL 片段:
+     * **id 优先**(标签改名/移动后路径会变、id 不会);给 id 时同时兼容旧行(tag_dict_id 为空)按路径匹配。
+     */
+    private static void appendTagCond(StringBuilder sql, List<Object> args, Long tagDictId, String path) {
+        if (tagDictId != null) {
+            sql.append("(tag_dict_id=? OR (tag_dict_id IS NULL AND tag=?))");
+            args.add(tagDictId);
+            args.add(path);
+        } else {
+            sql.append("tag=?");
+            args.add(path);
+        }
     }
 
     /** 标签视图按形态渲染: entity 键 / matrix(每标签值列) / wide(回表字段) */

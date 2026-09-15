@@ -40,6 +40,7 @@ public class TagLabelController {
 
     @GetMapping("/circle")
     public ApiResponse<Map<String, Object>> circle(@RequestParam String tagPath,
+                                                   @RequestParam(required = false) Long tagDictId,
                                                    @RequestParam(required = false) String value,
                                                    @RequestParam(defaultValue = "100") int limit) {
         int lv = security.tagLevel(tagPath);
@@ -48,7 +49,7 @@ public class TagLabelController {
         }
         Map<String, Object> m;
         try {
-            m = engine.labelCircle(tagPath, value, Math.min(Math.max(limit, 1), 1000));
+            m = engine.labelCircle(tagPath, tagDictId, value, Math.min(Math.max(limit, 1), 1000));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
         }

@@ -63,7 +63,7 @@
       <el-form label-width="90px">
         <el-form-item label="订阅名"><el-input v-model="form.name" placeholder="如 黑名单监控" /></el-form-item>
         <el-form-item label="标签">
-          <el-select v-model="form.tagPath" filterable style="width:100%" placeholder="选已注册标签路径">
+          <el-select v-model="form.tagPath" filterable style="width:100%" placeholder="选标签(自标签树)">
             <el-option v-for="t in tagOpts" :key="t.path" :label="t.path" :value="t.path" />
           </el-select>
         </el-form-item>

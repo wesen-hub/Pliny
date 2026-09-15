@@ -1363,9 +1363,24 @@ public class TagEngineService {
     }
 
     public Map<String, Object> labelCircle(String tagPath, String value, int limit) {
-        StringBuilder sql = new StringBuilder("SELECT entity, MAX(value) AS value FROM tag_fact_view WHERE tag=?");
+        return labelCircle(tagPath, null, value, limit);
+    }
+
+    /**
+     * 圈选(id 优先):给了 tagDictId 就按 id 查 —— 标签改名/移动后路径会变、**id 不会**;
+     * 同时兼容旧行(tag_dict_id 为空)按路径匹配。未给 id 时自动解析一次路径。
+     */
+    public Map<String, Object> labelCircle(String tagPath, Long tagDictId, String value, int limit) {
+        Long resolved = tagDictId != null ? tagDictId : liveTagPaths().get(tagPath);
+        StringBuilder sql = new StringBuilder("SELECT entity, MAX(value) AS value FROM tag_fact_view WHERE "
+                + (resolved != null ? "(tag_dict_id=? OR (tag_dict_id IS NULL AND tag=?))" : "tag=?"));
         List<Object> args = new java.util.ArrayList<>();
-        args.add(tagPath);
+        if (resolved != null) {
+            args.add(resolved);
+            args.add(tagPath);
+        } else {
+            args.add(tagPath);
+        }
         if (value != null && !value.isBlank()) {
             sql.append(" AND value=?");
             args.add(value);
@@ -1421,7 +1436,7 @@ public class TagEngineService {
         List<Map<String, Object>> rows;
         try {
             rows = metaJdbc.queryForList(
-                    "SELECT task_id, tag, value, run_ts FROM tag_fact_view WHERE entity=? ORDER BY tag", entityKey);
+                    "SELECT task_id, tag, tag_dict_id, value, run_ts FROM tag_fact_view WHERE entity=? ORDER BY tag", entityKey);
         } catch (org.springframework.dao.DataAccessException e) {
             throw new IllegalArgumentException("标签视图不可用(投影表未建/未同步): " + e.getMessage());
         }

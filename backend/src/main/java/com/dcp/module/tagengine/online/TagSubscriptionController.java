@@ -85,11 +85,15 @@ public class TagSubscriptionController {
     public ApiResponse<List<Map<String, Object>>> listSubs() {
         ensureSchema();
         List<Map<String, Object>> rows = metaJdbc.queryForList(
-                "SELECT s.id,s.name,s.tag_path,s.tag_value,s.owner,s.status,s.create_time,s.update_time,"
+                "SELECT s.id,s.name,s.tag_path,s.tag_dict_id,s.tag_value,s.owner,s.status,s.create_time,s.update_time,"
                         + " (SELECT COUNT(DISTINCT n.entity) FROM tag_notify n"
-                        + "   WHERE n.tag_path=s.tag_path AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS hit_entities,"
+                        + "   WHERE ((s.tag_dict_id IS NOT NULL AND n.tag_dict_id=s.tag_dict_id)"
+                        + "          OR (s.tag_dict_id IS NULL AND n.tag_path=s.tag_path))"
+                        + "     AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS hit_entities,"
                         + " (SELECT MAX(n.occur_ts) FROM tag_notify n"
-                        + "   WHERE n.tag_path=s.tag_path AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS latest_at"
+                        + "   WHERE ((s.tag_dict_id IS NOT NULL AND n.tag_dict_id=s.tag_dict_id)"
+                        + "          OR (s.tag_dict_id IS NULL AND n.tag_path=s.tag_path))"
+                        + "     AND (s.tag_value IS NULL OR s.tag_value='' OR n.tag_value=s.tag_value)) AS latest_at"
                         + " FROM tag_subscription s ORDER BY s.id DESC");
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> r : rows) {
