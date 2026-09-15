@@ -55,4 +55,12 @@ public interface ChangeStreamSource {
     default java.util.Set<String> availableColumns(String streamId) {
         return null;
     }
+
+    /**
+     * 估算快照行数(供 v2 批阶段切片/执行体选择用)。
+     * <p>未知 / 失败一律返回 -1(调用方据此退化,不猜);实现=真实数据源 COUNT(*) AS OF T0。
+     */
+    default long estimateRows(String streamId, long boundaryTso) {
+        return -1L;
+    }
 }

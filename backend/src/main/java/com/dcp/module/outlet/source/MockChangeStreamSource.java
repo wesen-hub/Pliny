@@ -181,6 +181,12 @@ public class MockChangeStreamSource implements ChangeStreamSource {
     }
 
     @Override
+    public long estimateRows(String streamId, long boundaryTso) {
+        java.util.Map<?, ?> m = state.get(streamId);
+        return m == null ? 0L : m.size();
+    }
+
+    @Override
     public long positionAt(String streamId, long timestampMs) {
         long candidate = (timestampMs << 18);
         List<ChangeEvent> list = events.get(streamId);

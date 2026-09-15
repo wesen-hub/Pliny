@@ -62,6 +62,15 @@ public class OutletController {
         return ApiResponse.ok(service.snapshot(consumer(token, consumerId), stream, boundaryTso, pageToken, limit));
     }
 
+    /** 估算快照行数(v2 批阶段切片/执行体选择用;未知返回 -1)。 */
+    @GetMapping("/{stream}/count")
+    public ApiResponse<Long> count(@PathVariable String stream,
+                                   @RequestHeader(value = "X-Dcp-Token", required = false) String token,
+                                   @RequestParam(required = false) String consumerId,
+                                   @RequestParam(required = false) Long boundaryTso) {
+        return ApiResponse.ok(service.estimateRows(consumer(token, consumerId), stream, boundaryTso));
+    }
+
     @GetMapping("/{stream}/changes")
     public ApiResponse<ChangeBatch> changes(@PathVariable String stream,
                                             @RequestHeader(value = "X-Dcp-Token", required = false) String token,

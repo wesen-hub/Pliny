@@ -199,6 +199,19 @@ public class KafkaChangeStreamSource implements ChangeStreamSource {
     }
 
     @Override
+    public long estimateRows(String streamId, long boundaryTso) {
+        requireRead();
+        try {
+            String snapshotClause = " AS OF TIMESTAMP FROM_UNIXTIME(" + (boundaryTso >> 18) / 1000.0 + ")";
+            Long n = readJdbc.queryForObject("SELECT COUNT(*) FROM " + streamId + snapshotClause, Long.class);
+            return n == null ? -1L : n;
+        } catch (Exception e) {
+            log.warn("[outlet] 行数估算失败(返回 -1,切片退化为按分区): stream={} err={}", streamId, e.getMessage());
+            return -1L;
+        }
+    }
+
+    @Override
     public long positionAt(String streamId, long timestampMs) {
         // TSO 物理部分是毫秒;+1 保证落在该时刻之后
         return (timestampMs << 18) + 1;
@@ -207,8 +220,7 @@ public class KafkaChangeStreamSource implements ChangeStreamSource {
     @Override
     public Map<String, Object> keyLookup(String streamId, Map<String, Object> bizKey, Long asOfTso) {
         requireRead();
-        String pk = props.getTidb().getPkColumn();
-        StringBuilder sql = new StringBuilder("SELECT * FROM ").append(streamId);
+        String pk = props.getTidb().getPkColumn();StringBuilder sql = new StringBuilder("SELECT * FROM ").append(streamId);
         if (asOfTso != null) {
             // ★ 必须按位点回查:否则读到的是"未来值",会把未来状态混进历史批次(设计 §6.6)
             //   同样用服务端换算,避免时区错位

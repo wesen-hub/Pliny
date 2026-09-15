@@ -44,12 +44,21 @@ public class HttpSnapshotSource implements SnapshotSource {
     }
 
     /**
-     * 行数估算:平台快照接口暂不提供计数,返回 -1 → 切片策略退化为"按分区"(安全且可用)。
-     * 待平台补 count 接口后即可启用"区间×分区"。
+     * 行数估算:调平台 `GET /api/chg/{stream}/count?boundaryTso=`。
+     * 未知 / 失败一律返回 -1(切片据此退化,不猜)。
      */
     @Override
     public long estimateRows(String stream, long tso) {
-        return -1L;
+        String url = baseUrl + "/api/chg/" + stream + "/count?consumerId=" + consumerId + "&boundaryTso=" + tso;
+        try {
+            String body = get(url);
+            String v = FlatJson.string(body, "data");
+            if (v == null || v.isBlank()) return -1L;
+            return Long.parseLong(v.trim());
+        } catch (Exception e) {
+            LOG.warning(() -> "行数估算失败(返回 -1): " + e.getMessage());
+            return -1L;
+        }
     }
 
     @Override
@@ -58,7 +67,7 @@ public class HttpSnapshotSource implements SnapshotSource {
         String pageToken = null;
         int pages = 0;
         do {
-            String url = baseUrl + "/api/outlet/" + stream + "/snapshot?consumerId=" + consumerId
+            String url = baseUrl + "/api/chg/" + stream + "/snapshot?consumerId=" + consumerId
                     + "&boundaryTso=" + tso + "&limit=" + pageSize
                     + (pageToken == null ? "" : "&pageToken=" + pageToken);
             String body = get(url);

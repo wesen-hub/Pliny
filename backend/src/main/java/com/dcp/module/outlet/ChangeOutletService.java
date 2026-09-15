@@ -48,6 +48,16 @@ public class ChangeOutletService {
         return source.status(streamId);
     }
 
+    /** 估算快照行数(供 v2 批阶段切片/执行体选择);未知返回 -1。 */
+    public long estimateRows(String consumerId, String streamId, Long boundaryTso) {
+        Ctx ctx = context(consumerId);
+        permission.checkStream(ctx.consumer, ctx.contract, streamId);
+        StreamStatus st = source.status(streamId);
+        long t0 = boundaryTso == null ? st.getLatest() : boundaryTso;
+        validateBoundary(st, t0);
+        return source.estimateRows(streamId, t0);
+    }
+
     /* ==================================================================== 接口 ② snapshot */
 
     /**
