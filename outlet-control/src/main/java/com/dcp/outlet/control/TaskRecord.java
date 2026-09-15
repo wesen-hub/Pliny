@@ -19,6 +19,7 @@ public final class TaskRecord {
     private String contractRef;
     private String startPolicy = "snapshot";  // snapshot | latest
     private String desiredState = "running";
+    private String incrementalEngine = "unit"; // unit(默认: v2 消费单元) | external(Flink 等外部引擎)
     private FailureSpec failure = FailureSpec.defaults();
     private final Map<String, Object> params = new LinkedHashMap<>();   // 业务参数(控制面只透传)
     private String consumerGroup;
@@ -48,6 +49,8 @@ public final class TaskRecord {
     public TaskRecord startPolicy(String v) { this.startPolicy = v; return this; }
     public String desiredState() { return desiredState; }
     public TaskRecord desiredState(String v) { this.desiredState = v; return this; }
+    public String incrementalEngine() { return incrementalEngine; }
+    public TaskRecord incrementalEngine(String v) { this.incrementalEngine = v; return this; }
     public FailureSpec failure() { return failure; }
     public TaskRecord failure(FailureSpec v) { this.failure = v; return this; }
     public Map<String, Object> params() { return params; }

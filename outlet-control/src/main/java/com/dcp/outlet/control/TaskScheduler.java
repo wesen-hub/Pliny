@@ -23,15 +23,24 @@ public class TaskScheduler {
     private final LeaseManager leases;
     private final LatestTsoProvider latestTso;
     private final BatchRunner batchRunner;
+    private final ExternalIncrementalDispatcher externalDispatcher;
     private final LongSupplier clock;
     private final long leaseTtlMillis;
 
     public TaskScheduler(TaskStore tasks, UnitStore units, UnitDispatcher dispatcher,
                          StartOffsetService startOffsets, LeaseManager leases, LatestTsoProvider latestTso,
                          BatchRunner batchRunner, LongSupplier clock, long leaseTtlMillis) {
+        this(tasks, units, dispatcher, startOffsets, leases, latestTso, batchRunner, null, clock, leaseTtlMillis);
+    }
+
+    public TaskScheduler(TaskStore tasks, UnitStore units, UnitDispatcher dispatcher,
+                         StartOffsetService startOffsets, LeaseManager leases, LatestTsoProvider latestTso,
+                         BatchRunner batchRunner, ExternalIncrementalDispatcher externalDispatcher,
+                         LongSupplier clock, long leaseTtlMillis) {
         this.tasks = tasks; this.units = units; this.dispatcher = dispatcher;
         this.startOffsets = startOffsets; this.leases = leases; this.latestTso = latestTso;
-        this.batchRunner = batchRunner; this.clock = clock; this.leaseTtlMillis = leaseTtlMillis;
+        this.batchRunner = batchRunner; this.externalDispatcher = externalDispatcher;
+        this.clock = clock; this.leaseTtlMillis = leaseTtlMillis;
     }
 
     /** 任务创建后:决定"先批打底"还是"直接从最新起"。 */
@@ -58,12 +67,30 @@ public class TaskScheduler {
         handover(taskId, t0);                       // 批流交接
     }
 
-    /** 交接:算起点(每分区第一个 {@code commitTs > T0})→ 授租约 → 下发。 */
+    /** 交接:算起点(每分区第一个 {@code commitTs > T0})→ 授租约 → 下发(单元) 或 播给外部引擎。 */
     public void handover(String taskId, long t0) {
         TaskRecord t = tasks.byId(taskId);
         List<PlannedUnit> planned = units.byTask(taskId);
-        long now = clock.getAsLong();
 
+        // 方案 C:增量段 = 外部引擎(Flink)—— 算全部分区起点,一次性播种,不规划/下发 v2 单元
+        if ("external".equals(t.incrementalEngine()) && externalDispatcher != null) {
+            Map<Integer, Long> starts = new LinkedHashMap<>();
+            String topic = null, stream = null;
+            for (PlannedUnit pu : planned) {
+                topic = pu.topic();
+                stream = pu.stream();
+                for (int p : pu.partitions()) {
+                    StartOffset so = startOffsets.startOffset(pu.topic(), p, t.epoch(), t0);
+                    starts.put(p, so.offset());
+                }
+            }
+            externalDispatcher.dispatch(t, topic, stream, starts);
+            t.status(TaskStatus.RUNNING);
+            tasks.update(t);
+            return;
+        }
+
+        long now = clock.getAsLong();
         for (PlannedUnit pu : planned) {
             Map<Integer, Long> starts = new LinkedHashMap<>();
             for (int p : pu.partitions()) {
