@@ -70,6 +70,14 @@ public class OutletConfig {
     public HeartbeatStore heartbeatStore(DataSource ds) { return new JdbcHeartbeatStore(ds); }
 
     @Bean
+    public com.dcp.outlet.adapters.JdbcContractViewSource contractViewSource(DataSource ds) {
+        // 主体侧收窄端口:生产接入出口权限引擎(DataSecurityService);
+        // 骨架实现为"不额外收窄",但**契约白名单仍生效** —— 接入引擎后即为完整的「契约 ∩ 主体」
+        return new com.dcp.outlet.adapters.JdbcContractViewSource(
+                ds, com.dcp.outlet.adapters.JdbcContractViewSource.SubjectColumnPolicy.permissive());
+    }
+
+    @Bean
     public ProgressService progressService(PartitionReader reader, WatermarkStore watermarks) {
         return new ProgressService(reader, watermarks, System::currentTimeMillis);
     }

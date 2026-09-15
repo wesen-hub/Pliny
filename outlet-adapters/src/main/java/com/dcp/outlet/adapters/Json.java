@@ -61,6 +61,23 @@ public final class Json {
         sb.append('"');
     }
 
+    /** 解析**扁平**字符串对象 {k:v,k:v}(掩码规则用;嵌套结构不支持)。 */
+    public static java.util.Map<String, String> readStringMap(String json) {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (json == null) return out;
+        String body = json.trim();
+        if (body.startsWith("{")) body = body.substring(1, body.length() - 1);
+        if (body.isBlank()) return out;
+        for (String pair : body.split(",")) {
+            int i = pair.indexOf(':');
+            if (i < 0) continue;
+            String k = pair.substring(0, i).trim().replaceAll("^\"|\"$", "");
+            String v = pair.substring(i + 1).trim().replaceAll("^\"|\"$", "");
+            if (!k.isEmpty()) out.put(k, v);
+        }
+        return out;
+    }
+
     /** 仅解析字符串数组 / 字符串(够用即可)。 */
     public static List<String> readStringArray(String json) {
         if (json == null || json.isBlank()) return List.of();
