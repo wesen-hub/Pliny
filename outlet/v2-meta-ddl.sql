@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS consumer_task (
   contract_ref   VARCHAR(64)  NOT NULL,
   start_policy   VARCHAR(16)  NOT NULL DEFAULT 'snapshot',
   desired_state  VARCHAR(16)  NOT NULL DEFAULT 'running',
+  incremental_engine VARCHAR(16) NOT NULL DEFAULT 'unit' COMMENT 'unit(v2 消费单元) | external(Flink 等)',
   consumer_group VARCHAR(128) NOT NULL,
   epoch          INT          NOT NULL DEFAULT 1,
   start_tso      BIGINT       NULL COMMENT '批阶段产出 T0',

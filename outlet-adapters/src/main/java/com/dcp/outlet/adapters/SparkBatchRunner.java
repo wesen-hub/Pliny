@@ -14,6 +14,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.Map;
 import java.util.Optional;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 
 /**
  * 方案 C 的 Spark 批执行体:{@code BatchRunner} 实现 —— 把打标批阶段提交给 tagengine-executor。
@@ -67,13 +70,13 @@ public class SparkBatchRunner implements BatchRunner {
                 String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), catalog, namespace);
                 log.info("Spark 批阶段 task={} T0={} taskJson={}", taskId, d.tso(), json);
 
-                // TODO(提交):spark-submit --class com.dcp.tagjob.TagBatchJob <executorJar> --task-json <file>
-                // 未配 executorJar 时只落 task-json,不提交(与 Flink 适配器同策略)
+                // 提交:写 task-json → spark-submit → 等退出码
                 if (executorJar == null || executorJar.isBlank()) {
-                    log.warn("未配置 executorJar → 只落 task-json,不提交 Spark(任务置 BATCH_FAILED)");
+                    log.warn("未配置 outlet.spark.executor-jar → 只落 task-json,不提交 Spark(任务置 BATCH_FAILED)");
                     callback.done(d.tso(), false);
                 } else {
-                    callback.done(d.tso(), false);   // 提交逻辑待接(需执行器 jar + Spark master)
+                    boolean ok = submit(json);
+                    callback.done(d.tso(), ok);
                 }
             } catch (Throwable e) {
                 log.error("Spark 批阶段异常 task=" + taskId, e);
@@ -122,6 +125,23 @@ public class SparkBatchRunner implements BatchRunner {
             return OM.writeValueAsString(cfg);
         } catch (Exception e) {
             throw new IllegalStateException("task-json 序列化失败", e);
+        }
+    }
+
+    private boolean submit(String taskJson) {
+        try {
+            Path tmp = Files.createTempFile("dcp-tag-task-", ".json");
+            Files.writeString(tmp, taskJson, java.nio.charset.StandardCharsets.UTF_8);
+            List<String> cmd = List.of(sparkSubmitBin, "--class", "com.dcp.tagjob.TagBatchJob",
+                    executorJar, "--task-json", tmp.toString());
+            log.info("spark-submit: {}", String.join(" ", cmd));
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            int exit = p.waitFor();
+            log.info("spark-submit 退出码={} taskJson={}", exit, tmp);
+            return exit == 0;
+        } catch (Exception e) {
+            log.error("spark-submit 失败", e);
+            return false;
         }
     }
 

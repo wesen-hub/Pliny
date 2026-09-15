@@ -92,4 +92,131 @@ public final class Json {
         }
         return out;
     }
+
+    /**
+     * 解析完整(可嵌套)JSON → Map / List / String / Long / Double / Boolean / null。
+     * <p>用于 params 列回读(打标配置桥的 rules/tagIds 是嵌套结构,扁平 parser 读不出来)。
+     */
+    @SuppressWarnings("unchecked")
+    public static Object readValue(String json) {
+        if (json == null || json.isBlank()) return null;
+        P p = new P(json);
+        Object v = p.value();
+        p.ws();
+        return v;
+    }
+
+    public static Map<String, Object> readMap(String json) {
+        Object v = readValue(json);
+        return v instanceof Map ? (Map<String, Object>) v : new java.util.LinkedHashMap<>();
+    }
+
+    /** 递归下降解析器(字符串/数字/布尔/null/对象/数组)。 */
+    private static final class P {
+        private final String s;
+        private int i;
+
+        P(String s) { this.s = s; }
+
+        void ws() { while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++; }
+
+        Object value() {
+            ws();
+            if (i >= s.length()) return null;
+            char c = s.charAt(i);
+            return switch (c) {
+                case '{' -> object();
+                case '[' -> array();
+                case '"' -> string();
+                case 't' -> { expect("true"); yield Boolean.TRUE; }
+                case 'f' -> { expect("false"); yield Boolean.FALSE; }
+                case 'n' -> { expect("null"); yield null; }
+                default -> number();
+            };
+        }
+
+        private void expect(String lit) {
+            if (!s.startsWith(lit, i)) throw new IllegalStateException("JSON 语法错误@" + i);
+            i += lit.length();
+        }
+
+        private Map<String, Object> object() {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            i++;  // {
+            ws();
+            if (i < s.length() && s.charAt(i) == '}') { i++; return m; }
+            while (true) {
+                ws();
+                String k = (String) value();   // key 必须是字符串
+                ws();
+                if (i >= s.length() || s.charAt(i) != ':') throw new IllegalStateException("期待 ':' @" + i);
+                i++;
+                m.put(k, value());
+                ws();
+                if (i < s.length() && s.charAt(i) == ',') { i++; continue; }
+                if (i < s.length() && s.charAt(i) == '}') { i++; return m; }
+                throw new IllegalStateException("期待 ',' 或 '}' @" + i);
+            }
+        }
+
+        private List<Object> array() {
+            List<Object> l = new java.util.ArrayList<>();
+            i++;  // [
+            ws();
+            if (i < s.length() && s.charAt(i) == ']') { i++; return l; }
+            while (true) {
+                l.add(value());
+                ws();
+                if (i < s.length() && s.charAt(i) == ',') { i++; continue; }
+                if (i < s.length() && s.charAt(i) == ']') { i++; return l; }
+                throw new IllegalStateException("期待 ',' 或 ']' @" + i);
+            }
+        }
+
+        private String string() {
+            i++;  // "
+            StringBuilder sb = new StringBuilder();
+            while (i < s.length()) {
+                char c = s.charAt(i++);
+                if (c == '"') return sb.toString();
+                if (c == '\\' && i < s.length()) {
+                    char e = s.charAt(i++);
+                    switch (e) {
+                        case '"' -> sb.append('"');
+                        case '\\' -> sb.append('\\');
+                        case '/' -> sb.append('/');
+                        case 'n' -> sb.append('\n');
+                        case 'r' -> sb.append('\r');
+                        case 't' -> sb.append('\t');
+                        case 'b' -> sb.append('\b');
+                        case 'f' -> sb.append('\f');
+                        case 'u' -> {
+                            if (i + 4 <= s.length()) {
+                                sb.append((char) Integer.parseInt(s.substring(i, i + 4), 16));
+                                i += 4;
+                            }
+                        }
+                        default -> sb.append(e);
+                    }
+                } else {
+                    sb.append(c);
+                }
+            }
+            throw new IllegalStateException("未闭合字符串");
+        }
+
+        private Object number() {
+            int start = i;
+            while (i < s.length() && "-+.eE0123456789".indexOf(s.charAt(i)) >= 0) i++;
+            String t = s.substring(start, i);
+            try {
+                if (t.indexOf('.') >= 0 || t.indexOf('e') >= 0 || t.indexOf('E') >= 0) {
+                    return Double.parseDouble(t);
+                }
+                return Long.parseLong(t);
+            } catch (NumberFormatException e) {
+                return t;
+            }
+        }
+    }
 }

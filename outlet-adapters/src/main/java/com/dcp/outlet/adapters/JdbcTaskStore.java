@@ -12,6 +12,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.List;
+import java.util.Map;
 
 /** 任务存储 JDBC 实现(表 {@code consumer_task});{@code uk_group} 保证一任务一消费组。 */
 public class JdbcTaskStore implements TaskStore {
@@ -41,8 +42,8 @@ public class JdbcTaskStore implements TaskStore {
     @Override
     public void insert(TaskRecord t) {
         String sql = "INSERT INTO consumer_task(task_id,name,consumer_type,owner,streams,logic_id,logic_version,"
-                + "instances,contract_ref,start_policy,desired_state,consumer_group,epoch,start_tso,params,status) "
-                + "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "instances,contract_ref,start_policy,desired_state,consumer_group,epoch,start_tso,params,status,incremental_engine) "
+                + "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, t.taskId());
             ps.setString(2, t.name());
@@ -60,6 +61,7 @@ public class JdbcTaskStore implements TaskStore {
             if (t.startTso() == null) ps.setNull(14, Types.BIGINT); else ps.setLong(14, t.startTso());
             ps.setString(15, Json.write(t.params()));
             ps.setString(16, t.status().name());
+            ps.setString(17, t.incrementalEngine() == null ? "unit" : t.incrementalEngine());
             ps.executeUpdate();
         } catch (SQLException e) { throw new IllegalStateException("insert task failed", e); }
     }
@@ -85,7 +87,10 @@ public class JdbcTaskStore implements TaskStore {
                         .status(TaskStatus.valueOf(rs.getString("status")));
                 long tso = rs.getLong("start_tso");
                 if (!rs.wasNull()) t.startTso(tso);
+                t.incrementalEngine(rs.getString("incremental_engine"));
                 Json.readStringArray(rs.getString("streams")).forEach(t::stream);
+                Object p = Json.readValue(rs.getString("params"));
+                if (p instanceof Map<?, ?> pm) t.params().putAll((java.util.Map<String, Object>) pm);
                 return t;
             }
         } catch (SQLException e) { throw new IllegalStateException("task byId failed", e); }

@@ -40,13 +40,68 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
     public void dispatch(TaskRecord task, String topic, String stream, Map<Integer, Long> startOffsets) {
         String jobJson = buildJobJson(kafkaBootstrap, task, topic, stream, startOffsets);
         org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("outlet-flink");
-        log.info("Flink 增量段交接 task={} topic={} 起点分区={} jobJson={}",
-                task.taskId(), topic, startOffsets == null ? 0 : startOffsets.size(), jobJson);
-        // TODO(提交):上传 jar + 提交到 Flink REST,镜像后端 StreamJobService(ensureJar + submit)。
-        // 未配 outlet.flink.base-url 时只落 job-json。
+        log.info("Flink 增量段交接 task={} topic={} 起点分区={}",
+                task.taskId(), topic, startOffsets == null ? 0 : startOffsets.size());
         if (flinkBaseUrl == null || flinkBaseUrl.isBlank()) {
             log.warn("未配置 outlet.flink.base-url → 只落 job-json,不提交 Flink");
+            return;
         }
+        try {
+            String jarId = ensureJar(log);
+            String jobId = submit(jarId, jobJson);
+            log.info("Flink 作业已提交 task={} jobId={}", task.taskId(), jobId);
+        } catch (Exception e) {
+            log.error("Flink 作业提交失败 task=" + task.taskId(), e);
+        }
+    }
+
+    /** 上传 dcp-tagstream.jar → 返回 jar id(镜像后端 StreamJobService.ensureJar)。 */
+    private String ensureJar(org.slf4j.Logger log) throws Exception {
+        if (jarPath == null || jarPath.isBlank()) {
+            throw new IllegalStateException("未配置 outlet.flink.jar");
+        }
+        byte[] jar = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(jarPath));
+        String name = "dcp-tagstream.jar";
+        String boundary = "----dcp" + System.currentTimeMillis();
+        byte[] head = ("--" + boundary + "\r\nContent-Disposition: form-data; name=\"jarfile\"; filename=\""
+                + name + "\"\r\nContent-Type: application/java-archive\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        bos.write(head); bos.write(jar); bos.write(tail);
+        var req = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(flinkBaseUrl + "/v1/jars/upload"))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(bos.toByteArray()))
+                .build();
+        var resp = java.net.http.HttpClient.newHttpClient()
+                .send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 300) {
+            throw new IllegalStateException("jar 上传失败 http=" + resp.statusCode() + " " + resp.body());
+        }
+        JsonNode r = OM.readTree(resp.body());
+        String fn = r.path("filename").asText(null);
+        if (fn == null) throw new IllegalStateException("jar 上传响应无 filename: " + resp.body());
+        String jarId = fn.contains("/") ? fn.substring(fn.lastIndexOf('/') + 1) : fn;
+        return jarId;
+    }
+
+    /** 提交运行:POST /jars/{jarId}/run,programArgs 用 base64 传 job-json。 */
+    private String submit(String jarId, String jobJson) throws Exception {
+        String b64 = java.util.Base64.getEncoder().encodeToString(
+                jobJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String body = "{\"programArgs\":\"--job-json-b64 " + b64 + "\"}";
+        var req = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(flinkBaseUrl + "/v1/jars/" + jarId + "/run"))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        var resp = java.net.http.HttpClient.newHttpClient()
+                .send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 300) {
+            throw new IllegalStateException("Flink run 失败 http=" + resp.statusCode() + " " + resp.body());
+        }
+        JsonNode r = OM.readTree(resp.body());
+        return r.path("jobid").asText(null);
     }
 
     /** 组装 tagstream job-json(与 StreamConfig 同构)。公开以便离线自检。 */
