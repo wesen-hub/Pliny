@@ -24,6 +24,14 @@ public class TagService {
     private final JdbcTemplate metaJdbc;
     private final AssetCatalogService catalog;
 
+    /**
+     * 挂载资产数缓存:树结构**每次实时读**(新增标签立刻可见),但"哪些资产命中哪些标签"依赖整份资产目录,
+     * 算一次要 4N+1 次查询 → 按短 TTL 缓存。新增标签不在缓存里 → 自然取 0,无需失效;资产元数据最多旧 TTL。
+     */
+    private static final long ASSET_COUNT_TTL_MS = 30_000L;
+    private volatile Map<String, Integer> assetCountCache;
+    private volatile long assetCountAt;
+
     public TagService(JdbcTemplate jdbcTemplate, AssetCatalogService catalog) {
         this.metaJdbc = jdbcTemplate;
         this.catalog = catalog;
@@ -101,47 +109,73 @@ public class TagService {
             m.put("children", new ArrayList<>());
             nodeMap.put(((Number) t.get("id")).longValue(), m);
         }
-        // 组装层级 + path
+        // 组装层级:父节点缺失(孤儿——通常是父被删/被移动)时**挂到根并打 orphan 标记**,不再静默丢节点
         List<Map<String, Object>> roots = new ArrayList<>();
         for (Map<String, Object> nd : nodeMap.values()) {
             long pid = ((Number) nd.get("parent_id")).longValue();
-            if (pid == 0) {
-                roots.add(nd);
+            Map<String, Object> parent = pid == 0 ? null : nodeMap.get(pid);
+            if (parent != null) {
+                ((List<Map<String, Object>>) parent.get("children")).add(nd);
             } else {
-                Map<String, Object> parent = nodeMap.get(pid);
-                if (parent != null) {
-                    ((List<Map<String, Object>>) parent.get("children")).add(nd);
-                }
+                if (pid != 0) nd.put("orphan", true);   // 父不存在 → 挂根但标出来
+                roots.add(nd);
             }
         }
-        // 计算 path + 资产数
-        Map<String, Set<String>> assetPaths = assetTagPaths(catalog.assetsWithMeta());
+        // 计算 path + 资产数(资产侧走缓存,不再每节点重扫资产)
+        Map<String, Integer> counts = assetCountsCached(tags);
         for (Map<String, Object> nd : nodeMap.values()) {
             String path = buildPath(nodeMap, ((Number) nd.get("id")).longValue());
             nd.put("path", path);
             nd.put("level", path.split("/").length);
-            nd.put("assets", countAssets(assetPaths, path));
+            nd.put("assets", counts.getOrDefault(path, 0));
         }
         return roots;
     }
 
+    /** 单次查全表标签(路径/计数共用),避免同一请求里重复查 tag_dict */
+    private List<Map<String, Object>> loadTags() {
+        return metaJdbc.queryForList("SELECT id, parent_id, name FROM tag_dict ORDER BY sort, id");
+    }
+
+    /** 资产数(按 path)带短 TTL 缓存 */
+    private Map<String, Integer> assetCountsCached(List<Map<String, Object>> tags) {
+        long now = System.currentTimeMillis();
+        Map<String, Integer> c = assetCountCache;
+        if (c != null && now - assetCountAt < ASSET_COUNT_TTL_MS) return c;
+        synchronized (this) {
+            if (assetCountCache != null && System.currentTimeMillis() - assetCountAt < ASSET_COUNT_TTL_MS) {
+                return assetCountCache;
+            }
+            Map<String, Integer> fresh = countAssetsByPath(assetTagPaths(catalog.assetsWithMeta(), tags));
+            assetCountCache = fresh;
+            assetCountAt = System.currentTimeMillis();
+            return fresh;
+        }
+    }
+
     private String buildPath(Map<Long, Map<String, Object>> nodeMap, long id) {
+        return buildPath(nodeMap, id, new HashSet<>());
+    }
+
+    /** 父链求路径;guard 防父链成环时无限递归(脏数据兜底) */
+    private String buildPath(Map<Long, Map<String, Object>> nodeMap, long id, Set<Long> guard) {
         Map<String, Object> nd = nodeMap.get(id);
-        if (nd == null) return "";
+        if (nd == null || !guard.add(id)) return "";
         long pid = ((Number) nd.get("parent_id")).longValue();
         String name = String.valueOf(nd.get("tag"));
         if (pid == 0) return name;
-        String parent = buildPath(nodeMap, pid);
+        String parent = buildPath(nodeMap, pid, guard);
         return parent.isEmpty() ? name : parent + "/" + name;
     }
 
-    /** 每个资产 → 标签 path 集合(手动 tags + 系统标签命中), 统一前缀匹配实现父子聚合 */
-    private Map<String, Set<String>> assetTagPaths(List<Map<String, Object>> assets) {
+    /** 每个资产 → 标签 path 集合(手动 tags + 系统标签命中), 统一前缀匹配实现父子聚合。
+     *  tags 由调用方传入(同一请求只查一次 tag_dict)。 */
+    private Map<String, Set<String>> assetTagPaths(List<Map<String, Object>> assets,
+                                                   List<Map<String, Object>> tagsIn) {
         Map<String, Set<String>> map = new HashMap<>();
         // 全部标签 path(含层级)
         Map<Long, Map<String, Object>> tagMap = new LinkedHashMap<>();
-        List<Map<String, Object>> tags = metaJdbc.queryForList(
-                "SELECT id, parent_id, name FROM tag_dict ORDER BY sort, id");
+        List<Map<String, Object>> tags = tagsIn;
         for (Map<String, Object> t : tags) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", t.get("id"));
@@ -201,17 +235,34 @@ public class TagService {
         return false;
     }
 
-    /** 某 path 的资产数(含子孙继承: 资产命中的 path 以 tagPath 开头即计入) */
-    private int countAssets(Map<String, Set<String>> assetPaths, String tagPath) {
-        return (int) assetPaths.values().stream()
-                .filter(paths -> paths.stream().anyMatch(p -> p.equals(tagPath) || p.startsWith(tagPath + "/")))
-                .count();
+    /**
+     * 每个标签 path 的资产数(含子孙继承)。
+     * <p>做法:遍历一次资产的命中 path,对**它自身及其所有祖先 path** 各登记一次该资产(去重),
+     * 这样 countAssets 从"每节点重扫全部资产"(O(节点×资产×路径))降为**单次遍历**(O(资产×路径×深度))。
+     */
+    private Map<String, Integer> countAssetsByPath(Map<String, Set<String>> assetPaths) {
+        Map<String, Set<String>> hit = new HashMap<>();
+        for (Map.Entry<String, Set<String>> e : assetPaths.entrySet()) {
+            String table = e.getKey();
+            for (String p : e.getValue()) {
+                String cur = p;
+                Set<String> guard = new HashSet<>();
+                while (cur != null && !cur.isEmpty() && guard.add(cur)) {
+                    hit.computeIfAbsent(cur, k -> new HashSet<>()).add(table);
+                    int i = cur.lastIndexOf('/');
+                    cur = i < 0 ? null : cur.substring(0, i);
+                }
+            }
+        }
+        Map<String, Integer> out = new HashMap<>();
+        hit.forEach((k, v) -> out.put(k, v.size()));
+        return out;
     }
 
     /** 某标签(含子孙)下的资产列表 */
     public List<Map<String, Object>> assetsOfTag(String path) {
         List<Map<String, Object>> all = catalog.assetsWithMeta();
-        Map<String, Set<String>> assetPaths = assetTagPaths(all);
+        Map<String, Set<String>> assetPaths = assetTagPaths(all, loadTags());
         return all.stream().filter(a -> assetPaths.getOrDefault(String.valueOf(a.get("table")), Set.of()).stream()
                 .anyMatch(p -> p.equals(path) || p.startsWith(path + "/"))).toList();
     }
@@ -263,7 +314,7 @@ public class TagService {
      */
     public List<Map<String, Object>> subset(List<String> include, String op, List<String> exclude) {
         List<Map<String, Object>> all = catalog.assetsWithMeta();
-        Map<String, Set<String>> assetPaths = assetTagPaths(all);
+        Map<String, Set<String>> assetPaths = assetTagPaths(all, loadTags());
         List<String> excludes = exclude == null ? List.of() : exclude;
         boolean and = !"OR".equalsIgnoreCase(op);
         return all.stream().filter(a -> {

@@ -264,11 +264,26 @@ public class AssetCatalogService {
         }
     }
 
+    /** 一次取回全部资产元数据(避免 assetsWithMeta 逐资产 N+1) */
+    private Map<String, Map<String, Object>> metaAll() {
+        Map<String, Map<String, Object>> out = new HashMap<>();
+        try {
+            for (Map<String, Object> r : metaJdbc.queryForList("SELECT * FROM asset_meta")) {
+                Object k = r.get("table_name");
+                if (k != null) out.put(String.valueOf(k), r);
+            }
+        } catch (Exception e) {
+            log.warn("asset_meta 批量读取失败(降级为空): {}", e.getMessage());
+        }
+        return out;
+    }
+
     /** 资产列表增强: 合并可维护元数据(展示名/域/分层/密级/负责人/标签) */
     public List<Map<String, Object>> assetsWithMeta() {
         List<Map<String, Object>> assets = assetService.list();
+        Map<String, Map<String, Object>> metas = metaAll();          // 一次查全表,不再逐资产查
         for (Map<String, Object> a : assets) {
-            Map<String, Object> meta = metaOf(String.valueOf(a.get("table")));
+            Map<String, Object> meta = metas.getOrDefault(String.valueOf(a.get("table")), Map.of());
             a.put("displayName", meta.getOrDefault("display_name", ""));
             a.put("description", meta.getOrDefault("description", ""));
             a.put("domain", meta.getOrDefault("domain", ""));

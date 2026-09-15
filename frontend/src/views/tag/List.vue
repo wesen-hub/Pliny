@@ -13,6 +13,7 @@
           <template #default="{ row }">
             <span v-if="row.level === 1" class="root-tag">{{ row.tag }}</span>
             <template v-else><span class="path-sep">/</span>{{ row.tag }}</template>
+            <el-tag v-if="row.orphan" size="small" type="danger" effect="plain" style="margin-left:6px">父节点缺失</el-tag>
             <span class="path-sub">{{ row.path }}</span>
           </template>
         </el-table-column>
@@ -31,9 +32,10 @@
         <el-table-column label="状态" width="80">
           <template #default="{ row }"><el-tag size="small" :type="row.status === '启用' ? 'success' : 'warning'" effect="plain">{{ row.status }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="250">
           <template #default="{ row }">
             <el-link type="primary" underline="never" @click="openDlg(row)">＋ 子标签</el-link>
+            <el-link type="primary" underline="never" style="margin-left:8px" @click="openSibling(row)">＋ 同级</el-link>
             <el-link type="primary" underline="never" style="margin-left:8px" @click="openEdit(row)">编辑</el-link>
             <el-link type="danger" underline="never" style="margin-left:8px" @click="remove(row)">删除</el-link>
           </template>
@@ -117,6 +119,19 @@ function openDlg(parent) {
     id: null, parentId: parent ? parent.id : 0,
     name: '', category: parent ? parent.category : '自定义标签',
     granularity: parent ? parent.granularity : '表级', source: ''
+  }
+}
+
+/** 新建**同级**标签:挂到当前节点的父节点下(一级标签的"同级"就是另一个一级标签) */
+function openSibling(row) {
+  const parentId = row.parent_id || 0
+  const parentPath = parentId === 0 ? '' : row.path.split('/').slice(0, -1).join('/')
+  dlg.value = {
+    visible: true,
+    title: parentId === 0 ? '新建一级标签(同级)' : `新建同级标签(挂到: ${parentPath})`,
+    id: null, parentId,
+    name: '', category: row.category || '自定义标签',
+    granularity: row.granularity || '表级', source: ''
   }
 }
 function openEdit(row) {
