@@ -38,24 +38,35 @@ public class IndexerRunner implements AutoCloseable {
     private final AnchorIndexer indexer;
     private final int epoch;
     private final boolean fromBeginning;
+    private final String groupId;
     private final Stats stats = new Stats();
     private final AtomicBoolean running = new AtomicBoolean();
     private KafkaConsumer<byte[], byte[]> consumer;
 
     public IndexerRunner(String bootstrap, String topicPrefix, AnchorIndexer indexer,
                          int epoch, boolean fromBeginning) {
+        this(bootstrap, topicPrefix, indexer, epoch, fromBeginning, "dcp-outlet-indexer");
+    }
+
+    /**
+     * @param groupId 消费组。常驻场景用固定值(位点可续);**要"每次从最新/最早重读"必须换唯一 group**
+     *                —— 否则已提交的位点会让 {@code auto.offset.reset} 失效
+     */
+    public IndexerRunner(String bootstrap, String topicPrefix, AnchorIndexer indexer,
+                         int epoch, boolean fromBeginning, String groupId) {
         this.bootstrap = bootstrap;
         this.topicPattern = Pattern.compile(Pattern.quote(topicPrefix) + ".*");
         this.indexer = indexer;
         this.epoch = epoch;
         this.fromBeginning = fromBeginning;
+        this.groupId = groupId;
     }
 
     private KafkaConsumer<byte[], byte[]> consumer() {
         if (consumer == null) {
             Properties p = new Properties();
             p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
-            p.put(ConsumerConfig.GROUP_ID_CONFIG, "dcp-outlet-indexer");
+            p.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
             p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
             p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
             p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");

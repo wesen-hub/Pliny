@@ -34,7 +34,8 @@ public final class FoundationCheck {
         AnchorIndexer indexer = new AnchorIndexer(anchors, watermarks,
                 new AnchorIndexPolicy(5, 1000L, 7L * 24 * 3600 * 1000, 500),
                 new MonotonicityGuard(), () -> System.currentTimeMillis());
-        IndexerRunner runner = new IndexerRunner(BOOTSTRAP, "dcp.cdc.target_db.", indexer, EPOCH, false);
+        IndexerRunner runner = new IndexerRunner(BOOTSTRAP, "dcp.cdc.target_db.", indexer, EPOCH, false,
+                "foundation-indexer-" + System.nanoTime());   // 唯一 group:确保从 latest 起
         runner.startAsync();
         Thread.sleep(2000);                       // 等订阅生效
         System.out.println("  索引器已常驻启动(实时模式),开始写入新 DML…");
@@ -54,26 +55,32 @@ public final class FoundationCheck {
         check("锚点已落 MySQL", anchorRows > 0, true);
         check("水位已落 MySQL", watermarks.latest(TOPIC, 0, EPOCH) != null, true);
 
-        // ② + ③ 起点计算 + 真消费源:用"锚点里的真实 commitTs"作 T0
+        // ② + ③ 起点计算 + 真消费源
+        // 注意:`partition='table'` 时**一个表的事件只落一个分区**,所以必须选"有锚点的那个分区"
         KafkaPartitionReader reader = new KafkaPartitionReader(BOOTSTRAP);
+        int dataPartition = -1;
         long t0 = 1L;
-        outer:
         for (int p = 0; p < 3; p++) {
             List<Anchor> list = anchors.list(TOPIC, p, EPOCH);
-            if (list.size() >= 3) { t0 = list.get(list.size() / 2).commitTs(); break outer; }
+            if (list.size() >= 3) {
+                dataPartition = p;
+                t0 = list.get(list.size() / 2).commitTs();
+                break;
+            }
         }
-        System.out.println("  T0 = " + t0 + "(取自锚点,真实 commitTs)");
-        check("锚点数量足以选 T0", t0 > 1L, true);
+        check("找到承载数据的分区", dataPartition >= 0, true);
+        System.out.println("  承载数据的分区 = p" + dataPartition + " · T0 = " + t0);
 
         StartOffsetService svc = new StartOffsetService(anchors, reader,
                 new AnchorIndexPolicy(5, 1000L, 7L * 24 * 3600 * 1000, 500), null, 200_000);
-        StartOffset so = svc.startOffset(TOPIC, 0, EPOCH, t0);
+        StartOffset so = svc.startOffset(TOPIC, dataPartition, EPOCH, t0);
         System.out.println("  起点: " + so);
         check("走锚点快路径", so.source() == StartOffset.Source.ANCHOR, true);
+        check("短扫长度有界(≤ 采样间隔+事务)12", so.scannedRows() <= 12, true);
 
         try (RecordSource source = new KafkaRecordSource(BOOTSTRAP, "foundation-check-" + System.nanoTime(),
-                TOPIC, List.of(0))) {
-            source.seek(0, so.offset());
+                TOPIC, List.of(dataPartition))) {
+            source.seek(dataPartition, so.offset());
             long firstDmlTs = -1L;
             long firstDmlOffset = -1L;
             long deadline = System.currentTimeMillis() + 10_000;
@@ -88,7 +95,7 @@ public final class FoundationCheck {
             if (firstDmlTs > 0) {
                 check("起点之后第一条 DML 的 commitTs > T0(半开语义)", firstDmlTs > t0, true);
             }
-            source.commitSync(0, so.offset() + 1);
+            source.commitSync(dataPartition, so.offset() + 1);
             check("位点提交无异常", true, true);
         }
         reader.close();
