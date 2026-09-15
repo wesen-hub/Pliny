@@ -64,6 +64,12 @@ outlet:
   kafka:  { bootstrap: 127.0.0.1:19092, topic-prefix: "dcp.cdc." }
   start-offset: { max-scan-rows: 200000 }
   worker: { url: http://127.0.0.1:8096 }        # CreateUnit 下发目标
+  # 批阶段(snapshot)T0 三适配器:
+  ticdc:   { base-url: http://127.0.0.1:18300, changefeed-id: chg-target-db-v4 }   # R1 changefeed 起点
+  tidb:    { jdbc-url: jdbc:mysql://127.0.0.1:14000/mysql, username: root, password: root123 }  # R2 GC safe point
+  snapshot: { base-url: http://127.0.0.1:8081, consumer-id: "" }                    # 快照源(平台 API)
+  logic:   { repo: ./logic-repo }                                                  # 批/增量同一份 logic
+  epoch: 1                                                                          # 水位/锚点 epoch(与索引器一致)
 ```
 
 DB 密码**只从环境变量注入**(`OUTLET_META_PASSWORD`),不落盘;其余项同样可用 `OUTLET_*` 覆盖。
@@ -72,12 +78,20 @@ DB 密码**只从环境变量注入**(`OUTLET_META_PASSWORD`),不落盘;其余�
 
 **已本地真起(8095)**且 bean 图完整(启动实测);数据类接口需注入元数据库密码后才能验。
 
+**批阶段(`startPolicy=snapshot`)已接线**(T0 三适配器 → `SchedulerBatchRunner`):
+
+| 适配器 | 来源 | 对应规则 |
+|---|---|---|
+| `TiCdcChangefeedStartTs` | TiCDC OpenAPI v2 `start_ts`(缓存) | R1 `T0 ≥ changefeed.start_ts` |
+| `TiDbGcSafePoint` | TiDB `mysql.tidb.tikv_gc_safe_point`(时间 → TSO) | R2 `T0 ≥ GC safe point` |
+| `WatermarkStoreLatestTs` | `chg_watermark_latest` 水位表 | R3 `T0 ≤ latest` |
+
 **未接线项(已知,已用明确拒绝代替静默放行)**:
 
 | 项 | 现状 |
 |---|---|
-| 批阶段(`startPolicy=snapshot`) | `NotWiredBatchRunner` 直接把任务置 `BATCH_FAILED`。要真接线需三个生产适配器:changefeed `start_ts`(TiCDC API)、TiDB `@@tidb_gc_safe_point`、分区最新 TSO(水位表侧已具备) |
 | 主体侧行规则(「契约 ∩ 主体」的行级交集) | 列级已有 `SubjectColumnPolicy` 端口(现为 permissive);行级尚无端口 —— **契约行条件当前生效,主体行规则未叠加** |
+| 批/增量身份一致性 | 快照源 `consumer-id` 现为**服务级配置**(非按任务),须与任务契约的 consumer 对齐;多 consumer 混布时需把 consumerId 按任务透传 |
 | 容器化 | Dockerfile + compose 片段待补 |
 
 启动方式(仓库根目录;`<cp>` 由 `mvn dependency:build-classpath` 产出):

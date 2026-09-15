@@ -22,6 +22,20 @@ outlet:
   # 计算面服务地址(CreateUnit 下发目标);可多实例时改为网关/负载均衡地址
   worker:
     url: ${OUTLET_WORKER_URL:http://127.0.0.1:8096}
+  # 批阶段 T0 三适配器
+  ticdc:                                     # R1:changefeed start_ts(TiCDC OpenAPI v2)
+    base-url: ${OUTLET_TICDC_BASE_URL:http://127.0.0.1:18300}
+    changefeed-id: ${OUTLET_TICDC_CHANGEFEED_ID:chg-target-db-v4}
+  tidb:                                      # R2:TiDB GC safe point(只读)
+    jdbc-url: ${OUTLET_TIDB_JDBC_URL:jdbc:mysql://127.0.0.1:14000/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${OUTLET_TIDB_USERNAME:root}
+    password: ${OUTLET_TIDB_PASSWORD:root123}
+  snapshot:                                  # 快照源(平台既有快照 API,AS OF T0)
+    base-url: ${OUTLET_SNAPSHOT_BASE_URL:http://127.0.0.1:8081}
+    consumer-id: ${OUTLET_SNAPSHOT_CONSUMER_ID:}
+  logic:
+    repo: ${OUTLET_LOGIC_REPO:./logic-repo}   # <repo>/<logicId>/<version>.jar
+  epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)
 
 logging:
   level:

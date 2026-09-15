@@ -2,12 +2,19 @@ package com.dcp.outlet.service.config;
 
 import com.dcp.outlet.adapters.*;
 import com.dcp.outlet.control.*;
+import com.dcp.outlet.sdk.InMemoryLogicRegistry;
+import com.dcp.outlet.sdk.LogicLoader;
+import com.dcp.outlet.sdk.SdkLogger;
+import com.dcp.outlet.worker.ClasspathLogicLoader;
+import com.dcp.outlet.worker.CompositeLogicLoader;
 import com.dcp.outlet.worker.DeadLetterSink;
+import com.dcp.outlet.worker.SpiLogicLoader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
+import java.nio.file.Path;
 
 /**
  * 装配:元数据库(two datasources 由 Spring 提供)→ 适配层 → 内核。
@@ -128,16 +135,76 @@ public class OutletConfig {
         return new HttpUnitDispatcher(workerUrl);
     }
 
+    /* ------------------------------------------------ 批阶段(snapshot):T0 三适配器 + 真运行器 */
+
+    /** TiDB 只读入口(查 GC safe point;与元库是两个不同实例)。 */
+    @Bean
+    public DataSource tidbDataSource(@Value("${outlet.tidb.jdbc-url}") String url,
+                                     @Value("${outlet.tidb.username}") String user,
+                                     @Value("${outlet.tidb.password}") String password) {
+        return new DriverManagerDataSource(url, user, password);
+    }
+
+    /** R1:changefeed 起始 TSO(TiCDC OpenAPI v2)。 */
+    @Bean
+    public T0Selector.ChangefeedStartTs changefeedStartTs(
+            @Value("${outlet.ticdc.base-url}") String baseUrl,
+            @Value("${outlet.ticdc.changefeed-id}") String changefeedId) {
+        return new TiCdcChangefeedStartTs(baseUrl, changefeedId);
+    }
+
+    /** R2:TiDB GC safe point。 */
+    @Bean
+    public T0Selector.GcSafePoint gcSafePoint(DataSource tidbDataSource) {
+        return new TiDbGcSafePoint(tidbDataSource);
+    }
+
+    /** R3:分区最新 TSO(水位表)。 */
+    @Bean
+    public T0Selector.LatestTs t0LatestTs(WatermarkStore watermarkStore,
+                                          @Value("${outlet.epoch:1}") int epoch) {
+        return new WatermarkStoreLatestTs(watermarkStore, epoch);
+    }
+
+    /** 批边界 T0 三规则。 */
+    @Bean
+    public T0Selector t0Selector(T0Selector.ChangefeedStartTs changefeedStartTs,
+                                 T0Selector.GcSafePoint gcSafePoint,
+                                 T0Selector.LatestTs t0LatestTs) {
+        return new T0Selector(changefeedStartTs, gcSafePoint, t0LatestTs);
+    }
+
+    /** 快照源:平台既有快照 API(AS OF T0)。 */
+    @Bean
+    public SnapshotSource snapshotSource(@Value("${outlet.snapshot.base-url}") String baseUrl,
+                                         @Value("${outlet.snapshot.consumer-id:}") String consumerId) {
+        return new HttpSnapshotSource(baseUrl, consumerId);
+    }
+
+    /** 逻辑加载:与计算面同构(jar 优先 + SPI + classpath),批/增量用同一份 logic。 */
+    @Bean
+    public LogicLoader logicLoader(@Value("${outlet.logic.repo}") String repoRoot) {
+        return new CompositeLogicLoader(
+                new JarLogicLoader(new FileLogicRepository(Path.of(repoRoot))),
+                new SpiLogicLoader(),
+                new ClasspathLogicLoader(new InMemoryLogicRegistry()));
+    }
+
+    /** SDK 日志门面(批阶段)。 */
+    @Bean
+    public SdkLogger sdkLogger() { return new Slf4jSdkLogger("outlet-batch"); }
+
     /**
-     * 批阶段:目前是**拒统占位**。
-     *
-     * <p>要真接线需要三个生产适配器:changefeed start_ts(TiCDC API)、
-     * TiDB GC safe point({@code SELECT @@tidb_gc_safe_point})、分区最新 TSO(水位表已具备),
-     * 再组装 {@code SchedulerBatchRunner}(快照源走平台快照 API)。接线前 snapshot 任务会被判失败,
-     * 而**不会带着错 T0 开跑**。
+     * 批阶段:真实接线 —— T0 三规则用生产适配器(changefeed start_ts / GC safe point / 水位表),
+     * 快照源走平台快照 API,logic 与增量同一份;失败落到 BATCH_FAILED(人工重做批)。
      */
     @Bean
-    public BatchRunner batchRunner() { return new NotWiredBatchRunner(); }
+    public BatchRunner batchRunner(TaskStore taskStore, StreamRegistry streamRegistry,
+                                   SnapshotSource snapshotSource, T0Selector t0Selector,
+                                   LogicLoader logicLoader, SdkLogger sdkLogger) {
+        return new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource, t0Selector,
+                logicLoader, sdkLogger);
+    }
 
     /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */
     @Bean
