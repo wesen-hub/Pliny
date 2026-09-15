@@ -1,5 +1,17 @@
 # tagengine-executor —— 打标引擎 P0 批执行器(独立 Spark 工程)
 
+## 业务流程框架图(打标批执行器)
+
+```mermaid
+flowchart LR
+  P["平台发布 task-json<br/>(tag_task/tag_rule)"] --> J["Spark 作业<br/>tagengine-executor"] --> KIE["动态 Fact + DRL<br/>KieModule 编译"]
+  KIE --> EV["按分区 StatefulKieSession 求值"] --> W[("tag_fact<br/>(当前值覆盖 + Iceberg 留史)")]
+```
+
+**与 v2 的关系**:批形态的既有实现。v2 的**批阶段**提供同一类能力
+(同一 logic 以 `mode=SNAPSHOT` 打底),两者可并存:平台侧规则/标签仍由 tagengine 管理。
+
+
 与 `agent/` 平级的独立 Maven shade 工程(非 Spring), 实现打标引擎批执行(设计文档
 `~/Desktop/数据采集平台V3文档/数据采集平台V3-打标引擎设计-2026-09-08.md` §12 细化)。
 P0 仅批; 流/在线执行器 P1。

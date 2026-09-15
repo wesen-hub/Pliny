@@ -1,5 +1,18 @@
 # dcp-lakesync —— 湖表同步作业(Spark)
 
+## 业务流程框架图(湖同步作业)
+
+```mermaid
+flowchart LR
+  SRC["源(库/表)"] --> SP["Spark 作业<br/>LakeSyncJob"] --> LAKE[("湖表")]
+  CFG["LakeSyncJobConfig"] --> SP
+```
+
+**与 v2 的关系**:既有形态是"独立 Spark 作业"。v2 之后可改写为
+**一个 logic(`MIRROR` 语义)+ 一份任务配置**,从而复用统一起点/租约/提交/幂等/监控;
+湖特有的小文件合并、schema 演进、删除语义由 logic 自行吸收。
+
+
 把源表同步到湖表的 **Spark 作业**(独立 maven 工程,与 backend 平级)。
 
 | 类 | 作用 |

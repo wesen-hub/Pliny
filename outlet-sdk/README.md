@@ -1,5 +1,20 @@
 # dcp-outlet-sdk —— 增量消费通道 v2 消费逻辑编程接口
 
+## 业务流程框架图(你在整条链路里的位置)
+
+```mermaid
+flowchart LR
+  A["逻辑作者<br/>实现 ConsumerLogic"] --> B["打包 jar<br/>(只依赖 dcp-outlet-sdk)"]
+  B --> C["发布/注册<br/>logicId@version"]
+  C --> D["计算面加载<br/>(classpath / SPI / jar)"]
+  D --> E["平台注入上下文<br/>init → process×N → close"]
+  E --> F["你的 process() 里<br/>只写业务:幂等写入 + 失败抛出"]
+  G["平台负责(你不用管)<br/>topic 派生·起点·租约·提交·重试·死信·指标"] -.-> E
+```
+
+**一句话**:本模块是**业务与平台之间唯一的契约面** —— 你实现一个接口,平台负责把它跑起来。
+
+
 零第三方依赖。**业务逻辑工程只依赖本模块**,不依赖平台后端。
 
 ## 一分钟上手

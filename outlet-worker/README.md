@@ -1,5 +1,27 @@
 # dcp-outlet-worker —— 计算面内核(单元运行器)
 
+## 业务流程框架图(单元内循环)
+
+```mermaid
+flowchart TB
+  C["收到 CreateUnit<br/>起点+partitions+logicRef+租约"] --> L["加载 logic(jar/SPI/classpath)"]
+  L --> I["logic.init(ctx) 建连接池/规则缓存"]
+  I --> P["消费源 assign + seek(起点)"]
+  P --> LOOP
+  subgraph LOOP["单元循环(单线程串行)"]
+    direction LR
+    A1["poll"] --> A2["解码"] --> A3["水位推进<br/>(不进业务)"] --> A4["契约裁剪<br/>列→行条件→脱敏"]
+    A4 --> A5["logic.process()"] --> A6["commitSync"]
+  end
+  A5 -.->|"抛异常"| R["不提交 → 退避重试 N 次"]
+  R -.->|"仍失败"| DLQ["死信 + 告警"]
+  LOOP -.->|"每轮"| HB["续租(失败即自停)+ 心跳"]
+  STOP["收到 StopUnit"] --> CL["停 poll → logic.close() → 关源 → STOPPED"]
+```
+
+**边界**:本模块**不知道 topic 从哪来、起点怎么算** —— 那些是控制面的事;它只负责"把给到手的活干对"。
+
+
 **消费单元真正跑起来的地方**。一个单元 = 1 个消费源 + 1 个线程 + 1 个 logic 实例 + 1 份租约;
 本模块承载 1..N 个单元(**可跨任务混布**),对外只依赖端口。
 

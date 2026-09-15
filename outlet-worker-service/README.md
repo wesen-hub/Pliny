@@ -1,5 +1,30 @@
 # dcp-outlet-worker-service —— 计算面独立服务
 
+## 业务流程框架图(计算面服务)
+
+```mermaid
+sequenceDiagram
+  participant C as 控制面服务
+  participant W as 计算面服务
+  participant K as Kafka
+  participant R as 逻辑仓库
+
+  C->>W: POST /units?unitId&topic&partitions&startOffset.*&logicId&...
+  W->>R: 拉 jar + 校验 sha256
+  W->>W: 建单元(UnitRunner.start,幂等)
+  W->>K: assign + seek(起点)
+  loop 单元循环
+    W->>K: poll → 契约裁剪 → process() → commitSync
+    W->>C: 心跳(offset/tso)+ 续约
+  end
+  C->>W: DELETE /units/{id}(改配置/换代/停机)
+  W->>W: 停止 poll → close() → STOPPED
+  Note over W: 续约失败 → 立即自停(防双消费)
+```
+
+**边界**:计算面**不做任何调度决策**;它只执行控制面下发的单元级指令,并把状态报回去。
+
+
 承载消费单元的进程(Spring Boot 3.3)。**1..N 个单元 / 实例,可跨任务混布**;
 与控制面通过 HTTP 交互(收指令、报心跳、续租约)。
 

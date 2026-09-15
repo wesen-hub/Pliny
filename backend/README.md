@@ -1,5 +1,23 @@
 # backend —— 平台主后端(data-collect-platform)
 
+## 业务流程框架图(平台主干,与 v2 的接点)
+
+```mermaid
+flowchart LR
+  DS["数据源管理"] --> ING["采集/接入<br/>(agent + CDC)"] --> MODEL["建模"] --> ASSET["资产目录/血缘"]
+  ASSET --> SUB["数据订阅(datasub)"]
+  ASSET --> TAG["打标引擎(tagengine)"]
+  ASSET --> OUT["变更流出口(outlet)"]
+  OUT -->|"快照 API(boundaryTso)"| V2C["v2 控制面"]
+  OUT -->|"契约 + 权限引擎"| V2C
+  TAG -.->|"规则/标签定义(规则源)"| V2C
+  V2C --> V2W["v2 计算面"]
+  V2W --> TARGET["目标端(库/ES/湖)"]
+```
+
+**与 v2 的接点只有三处**:快照 API、契约与权限引擎、规则源。**不改造主干架构。**
+
+
 数据采集平台的主后端(Spring Boot + MyBatis-Plus)。**v2 消费通道复用它的出口能力**,但不并入它:
 v2 有独立的控制面/计算面服务(`outlet-service` / `outlet-worker-service`)。
 

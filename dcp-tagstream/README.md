@@ -1,5 +1,18 @@
 # dcp-tagstream —— 流式打标作业(Flink)
 
+## 业务流程框架图(流式打标作业)
+
+```mermaid
+flowchart LR
+  K[("Kafka 变更流")] --> F["Flink 作业<br/>StreamTagJob"] --> E["规则求值<br/>StreamEvaluator(KieSession)"]
+  R["规则(DRL 生成<br/>DrlGenerator/FactSourceGen)"] --> E
+  E --> S["标签汇(StreamSinks)"]
+```
+
+**与 v2 的关系**:规则/标签定义仍来自平台打标引擎(`tagengine`);消费侧可迁到 v2 ——
+同一份 logic 求值,复用 v2 的**起点/租约/提交/幂等/监控**,不必各自维护位点与重投。
+
+
 变更流上的**流式打标作业**(Flink),用动态 DRL 规则对事件求值并写标签。
 
 | 类 | 作用 |

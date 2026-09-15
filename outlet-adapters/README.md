@@ -1,5 +1,33 @@
 # dcp-outlet-adapters —— 生产适配层
 
+## 业务流程框架图(内核 ↔ 真实世界)
+
+```mermaid
+flowchart LR
+  subgraph K["内核(零依赖)"]
+    K1["AnchorStore / WatermarkStore / PartitionReader"]
+    K2["TaskStore / UnitStore / HeartbeatStore / DeadLetterSink"]
+    K3["LogicRepository / ContractProvider / SnapshotSource"]
+  end
+  subgraph A["outlet-adapters"]
+    A1["Jdbc*Store ←→ MySQL"]
+    A2["Kafka* / IndexerRunner ←→ Kafka"]
+    A3["HttpSnapshotSource ←→ 平台快照 API"]
+    A4["HttpUnitDispatcher / HttpControlPlaneClient ←→ 计算面·控制面"]
+    A5["JarLogicLoader ←→ 逻辑仓库"]
+    A6["接线(同进程):UnitDispatcherAdapter 等"]
+  end
+  K1 --> A1
+  K1 --> A2
+  K3 --> A3
+  K3 --> A5
+  K2 --> A1
+  A4 --> CTRL["控制面/计算面进程"]
+```
+
+**边界**:只有本模块知道"MySQL/Kafka/HTTP 长什么样";内核只认接口,因此**可离线自检**。
+
+
 把零依赖的内核接到**真实中间件**:元数据库(MySQL)、Kafka、平台快照 API、逻辑仓库。
 
 | 域 | 类 |
