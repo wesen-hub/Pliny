@@ -38,7 +38,7 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
 
     @Override
     public void dispatch(TaskRecord task, String topic, String stream, Map<Integer, Long> startOffsets) {
-        String jobJson = buildJobJson(task, topic, stream, startOffsets);
+        String jobJson = buildJobJson(kafkaBootstrap, task, topic, stream, startOffsets);
         org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("outlet-flink");
         log.info("Flink 增量段交接 task={} topic={} 起点分区={} jobJson={}",
                 task.taskId(), topic, startOffsets == null ? 0 : startOffsets.size(), jobJson);
@@ -50,7 +50,8 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
     }
 
     /** 组装 tagstream job-json(与 StreamConfig 同构)。公开以便离线自检。 */
-    public static String buildJobJson(TaskRecord task, String topic, String stream, Map<Integer, Long> startOffsets) {
+    public static String buildJobJson(String kafkaBootstrap, TaskRecord task, String topic, String stream,
+                                      Map<Integer, Long> startOffsets) {
         Map<String, Object> p = task.params();
         ObjectNode cfg = OM.createObjectNode();
         cfg.put("taskId", task.taskId());
@@ -68,6 +69,7 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
         }
 
         ObjectNode kafka = cfg.putObject("kafka");
+        kafka.put("bootstrapServers", kafkaBootstrap);
         kafka.put("topic", topic);
         kafka.put("groupId", "dcp-tagstream-t" + task.taskId());
         ObjectNode offs = kafka.putObject("partitionStartOffsets");
