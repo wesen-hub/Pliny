@@ -189,3 +189,34 @@ docker compose up -d --build   # 5 容器: mysql + demo-db + seatunnel + backend
 - **端口被占**：修改 compose 中 `ports` 后 `docker compose up -d`；
 - **想换 Maven 源**：修改 `backend/settings-docker.xml`；
 - **演示数据源连不上**：种子数据里的数据源指向容器 `demo-db:3306`（容器内网），删除重建时请用主机 IP。
+
+---
+
+## 后端模块地图(v2 增量消费通道)
+
+```
+平台既有                           v2 增量消费通道(本次新增)
+├── backend          平台主后端     ├── outlet-sdk            逻辑编程接口 + TestKit(零依赖)
+│   └── outlet/*     出口/契约/权限 ├── outlet-control        控制面内核(锚点/起点/规划/租约/批阶段/巡检)
+├── agent            采集 Agent     ├── outlet-worker         计算面内核(单元运行器/裁剪)
+├── dcp-lakesync     湖同步(Spark) ├── outlet-integration    接线层(同进程适配)
+├── dcp-tagstream    打标(Flink)   ├── outlet-adapters       生产适配(JDBC/Kafka/HTTP/仓库)
+├── tagengine-executor 打标批(Spark)├── outlet-service        控制面服务(REST,独立部署)
+└── frontend         Vue3 控制台    └── outlet-worker-service 计算面服务(HTTP,独立部署)
+```
+
+| 模块 | 一句话 | 依赖 |
+|---|---|---|
+| `outlet-sdk` | 逻辑作者**唯一**要依赖的:实现 `ConsumerLogic` + 打 jar | 无 |
+| `outlet-control` | 决策层:索引/起点/规划/租约/校验/交接/批阶段/巡检/进度 | sdk |
+| `outlet-worker` | 执行层:一个单元怎么跑(提交/重试/死信/停机) | sdk |
+| `outlet-integration` | 同进程部署时把两侧接起来(可被 HTTP 方案替换) | control, worker |
+| `outlet-adapters` | 真实中间件适配:MySQL/Kafka/平台快照 API/逻辑仓库 | control, worker |
+| `outlet-service` | 控制面服务:上述能力的 REST 出口 + 定时巡检 | control, adapters |
+| `outlet-worker-service` | 计算面服务:收 `CreateUnit`、报心跳、续租约 | worker, adapters |
+
+**构建顺序**(Maven 依赖方向):`outlet-sdk → outlet-control → {outlet-worker} → outlet-integration → outlet-adapters → {outlet-service, outlet-worker-service}`
+
+**表结构**:`outlet/v2-meta-ddl.sql`(锚点/水位/流登记/任务/单元/单元分区/逻辑/死信)。
+
+**文档**:`~/Desktop/数据采集平台V3文档/` 下《增量消费通道详细设计-v2》《v2 编程指南》《v2 实现进度》。
