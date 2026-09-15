@@ -91,6 +91,7 @@ public final class SelfCheck {
         testLeaseLostStopsPolling();
         testStartOffsetInjected();
         testDuplicateCreateUnitIsIdempotent();
+        testRowConditionUsesRawRow();
 
         System.out.println();
         System.out.println("==================================================");
@@ -271,6 +272,33 @@ public final class SelfCheck {
 
         check("T11 只处理 1 批(未重复启动)", logic.processCount(), 1);
         check("T11 init 只调用一次", logic.initCount(), 1);
+    }
+
+    // ---------- 12. 行条件用"原始行"判定(条件列不在列白名单内也不能被误丢) ----------
+    private static void testRowConditionUsesRawRow() throws Exception {
+        // 契约:白名单只有 u_id;行条件引用 status(不在白名单里)
+        ContractView view = new ContractView() {
+            @Override public java.util.Set<String> columnWhitelist(String stream) {
+                return java.util.Set.of("u_id");
+            }
+            @Override public int maxLevel() { return -1; }
+            @Override public Map<String, String> maskRules() { return Map.of(); }
+            @Override public String rowCondition() { return "status = OK"; }
+        };
+        ContractFilter filter = new DefaultContractFilter(
+                (cond, row) -> "OK".equals(String.valueOf(row.get("status"))),   // 极简行条件求值
+                (col, v, rule, lvl) -> v, view);
+
+        ScriptedLogic logic = new ScriptedLogic(0);
+        Harness h = new Harness(logic, 3, filter, FailurePolicy.defaults(), 10);
+        h.decoder.put(10, event(10, 1000, Map.of("u_id", "u-1", "status", "OK")));
+        h.decoder.put(11, event(11, 1001, Map.of("u_id", "u-2", "status", "BLOCKED")));
+        h.source.script(List.of(raw(10), raw(11)));
+        h.start();
+        h.awaitExit(5000);
+
+        check("T12 行内事件保留(条件列不在白名单)", logic.received().size(), 1);
+        check("T12 保留事件已按白名单裁列", logic.columnsOfFirstRecord(), "u_id");
     }
 
     private static void check(String what, Object actual, Object expected) {

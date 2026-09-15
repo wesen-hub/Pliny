@@ -43,14 +43,16 @@ public class DefaultContractFilter implements ContractFilter {
         for (DecodedMessage e : events) {
             if (e.kind() != DecodedMessage.Kind.EVENT) continue;
 
-            Map<String, Object> after = project(e.after(), whitelist, masks, maxLevel);
-            Map<String, Object> before = project(e.before(), whitelist, masks, maxLevel);
-
-            Map<String, Object> judge = (after != null && !after.isEmpty()) ? after : before;
+            // ★ 行条件必须用**原始行**判定:条件里引用的列(如 status)不一定在列白名单内,
+            //    若先裁列再判条件,会因缺列导致条件恒不成立 → 正确行被误丢(与平台引擎语义保持一致)
+            Map<String, Object> rawJudge = (e.after() != null && !e.after().isEmpty()) ? e.after() : e.before();
             if (rowCondition != null && !rowCondition.isBlank()
-                    && rowEvaluator != null && !rowEvaluator.test(rowCondition, judge)) {
+                    && rowEvaluator != null && !rowEvaluator.test(rowCondition, rawJudge)) {
                 continue;                                  // 不满足数据范围 → 不进逻辑
             }
+
+            Map<String, Object> after = project(e.after(), whitelist, masks, maxLevel);
+            Map<String, Object> before = project(e.before(), whitelist, masks, maxLevel);
 
             out.add(new RecordImpl(e.op(), e.key(), before, after, e.tso(), e.partition(),
                     e.offset(), stream, Mode.INCREMENTAL));
