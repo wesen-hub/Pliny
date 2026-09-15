@@ -1,5 +1,6 @@
 package com.dcp.module.tagengine.online;
 
+import com.dcp.module.tagengine.TagPaths;
 import com.dcp.module.tagengine.online.kie.AssetPlan;
 import com.dcp.module.tagengine.online.kie.BuildPlan;
 import com.dcp.module.tagengine.online.kie.DrlGenerator;
@@ -159,6 +160,28 @@ public class OnlineTagService {
     private final Map<String, Long> ttlCache = new ConcurrentHashMap<>();
     private volatile long ttlCacheAt = 0L;
 
+    /** tagPath -> tag_dict_id 缓存(60s 过期; 供 tag_notify 双写) */
+    private final Map<String, Long> tagIdCache = new ConcurrentHashMap<>();
+    private volatile long tagIdCacheAt = 0L;
+
+    /** 标签路径 → 节点 id(双写 tag_notify.tag_dict_id 用);失败沿用旧值,不阻断审计写 */
+    private Map<String, Long> tagIds() {
+        if (!tagIdCache.isEmpty() && System.currentTimeMillis() - tagIdCacheAt < 60_000L) return tagIdCache;
+        synchronized (tagIdCache) {
+            if (!tagIdCache.isEmpty() && System.currentTimeMillis() - tagIdCacheAt < 60_000L) return tagIdCache;
+            try {
+                Map<String, Long> fresh = TagPaths.pathToId(
+                        metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
+                tagIdCache.clear();
+                tagIdCache.putAll(fresh);
+                tagIdCacheAt = System.currentTimeMillis();
+            } catch (Exception e) {
+                log.warn("[online] 标签 id 缓存刷新失败(沿用旧值): {}", e.getMessage());
+            }
+            return tagIdCache;
+        }
+    }
+
     private void refreshTtlCacheIfStale() {
         long now = System.currentTimeMillis();
         if (now - ttlCacheAt < 60_000L && !ttlCache.isEmpty()) return;
@@ -206,15 +229,16 @@ public class OnlineTagService {
         return maxDays > 0 ? maxDays * 86_400L : DEFAULT_TTL_SECONDS;
     }
 
-    /** 标签变更审计(订阅消费端底座): 每 entity+tag+task 保留最新一次 */
+    /** 标签变更审计(订阅消费端底座): 每 entity+tag+task 保留最新一次;路径与 id 双写 */
     private void notifyTags(String entity, List<String[]> tags, long taskId) {
         try {
+            Map<String, Long> ids = tagIds();
             for (String[] t : tags) {
                 String val = (t[1] == null || t[1].isEmpty()) ? null : t[1];
-                metaJdbc.update("INSERT INTO tag_notify(entity,tag_path,tag_value,task_id,task_mode)"
-                                + " VALUES(?,?,?,?,'online')"
-                                + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), task_mode='online', occur_ts=CURRENT_TIMESTAMP(3)",
-                        entity, t[0], val, taskId);
+                metaJdbc.update("INSERT INTO tag_notify(entity,tag_path,tag_dict_id,tag_value,task_id,task_mode)"
+                                + " VALUES(?,?,?,?,?,'online')"
+                                + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), tag_dict_id=VALUES(tag_dict_id), task_mode='online', occur_ts=CURRENT_TIMESTAMP(3)",
+                        entity, t[0], ids.get(t[0]), val, taskId);
             }
         } catch (Exception e) {
             log.warn("[online] 变更审计写入失败(entity={}): {}", entity, e.getMessage());

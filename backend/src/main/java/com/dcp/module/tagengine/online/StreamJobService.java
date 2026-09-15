@@ -1,5 +1,6 @@
 package com.dcp.module.tagengine.online;
 
+import com.dcp.module.tagengine.TagPaths;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -218,6 +219,9 @@ public class StreamJobService {
         }
         ArrayNode assetArr = cfg.putArray("rules");
         for (JsonNode a : snap.path("assets")) assetArr.add(a);
+        // id 化双写:路径 → tag_dict_id(执行器写 tag_fact_view / tag_notify 时顺带写 id)
+        cfg.set("tagIds", OM.valueToTree(
+                TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"))));
         // 窗口派生(P1.2①): 任务 derived 中 func=sum/count/avg/max/min 且带 field 的项 → 流窗口滚动聚合
         ArrayNode derArr = cfg.putArray("derived");
         if (task.get("derived_json") != null) {

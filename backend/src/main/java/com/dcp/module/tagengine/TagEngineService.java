@@ -167,7 +167,8 @@ public class TagEngineService {
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_subscription ("
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "name VARCHAR(128) NOT NULL COMMENT '订阅名',"
-                + "tag_path VARCHAR(512) NOT NULL COMMENT '订阅标签路径(须注册表路径)',"
+                + "tag_path VARCHAR(512) NOT NULL COMMENT '订阅标签路径(须 tag_dict 节点路径)',"
+                + "tag_dict_id BIGINT NULL COMMENT '标签节点 id(与 tag_path 双写, 以 id 为准)',"
                 + "tag_value VARCHAR(128) NULL COMMENT 'NULL/空=任意值(命中即订阅); 非空=精确值',"
                 + "status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=暂停',"
                 + "create_time DATETIME DEFAULT CURRENT_TIMESTAMP,"
@@ -181,11 +182,16 @@ public class TagEngineService {
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
                 + "entity VARCHAR(128) NOT NULL COMMENT '实体键值',"
                 + "tag_path VARCHAR(512) NOT NULL,"
+                + "tag_dict_id BIGINT NULL COMMENT '标签节点 id(与 tag_path 双写, 以 id 为准)',"
                 + "tag_value VARCHAR(128) NULL,"
                 + "task_id BIGINT NOT NULL,"
                 + "task_mode VARCHAR(16) NOT NULL COMMENT 'batch|stream|online',"
                 + "occur_ts DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '变更发生时间',"
                 + "PRIMARY KEY (entity, tag_path, task_id))");
+        /* id 化双写:已存在的表补列(幂等);tag_dict 加 ttl_days(在线层 Redis 过期的新家) */
+        try { metaJdbc.execute("ALTER TABLE tag_notify ADD COLUMN tag_dict_id BIGINT NULL"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN tag_dict_id BIGINT NULL"); } catch (DataAccessException ignored) { }
+        try { metaJdbc.execute("ALTER TABLE tag_dict ADD COLUMN ttl_days INT NULL COMMENT '在线层 Redis 过期(天); 空=默认 3600s'"); } catch (DataAccessException ignored) { }
         log.info("[tagengine] schema ensured: tag_rule / tag_task / tag_run / tag_subscription / tag_notify");
     }
 
@@ -869,6 +875,9 @@ public class TagEngineService {
         payload.set("derived", (JsonNode) task.get("derived"));
         payload.set("bindings", snap.get("bindings"));
         payload.set("rules", snap.get("assets"));   // 执行器契约键名 rules(资产快照自含 def)
+        // id 化双写:路径 → tag_dict_id;执行器写 tag_fact_view / tag_notify 时顺带写 id
+        payload.set("tagIds", OM.valueToTree(
+                TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"))));
         // 标签服务投影(查询面 tag_fact_view): 平台注入 JDBC(与 stream factView 同源默认; 生产可 DCP_TAG_FACT_VIEW_URL 覆盖)
         payload.set("tagFactView", OM.createObjectNode()
                 .put("enabled", true)

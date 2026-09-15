@@ -1,6 +1,7 @@
 package com.dcp.module.tagengine.online;
 
 import com.dcp.common.ApiResponse;
+import com.dcp.module.tagengine.TagPaths;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,6 +58,7 @@ public class TagSubscriptionController {
                     + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                     + "name VARCHAR(128) NOT NULL,"
                     + "tag_path VARCHAR(512) NOT NULL,"
+                    + "tag_dict_id BIGINT NULL COMMENT '标签节点 id(与 tag_path 双写, 以 id 为准)',"
                     + "tag_value VARCHAR(128) NULL,"
                     + "owner VARCHAR(64) NULL COMMENT '订阅属主(创建用户); 投递=属主实时权限快照',"
                     + "channel VARCHAR(16) NOT NULL DEFAULT '站内' COMMENT '站内|站内+webhook',"
@@ -69,30 +71,14 @@ public class TagSubscriptionController {
                     + "UNIQUE KEY uk_sub (tag_path, tag_value))");
         } catch (DataAccessException ignored) {
         }
+        try { metaJdbc.execute("ALTER TABLE tag_subscription ADD COLUMN tag_dict_id BIGINT NULL"); } catch (DataAccessException ignored) { }
     }
 
-    /** 注册表路径集合(校验订阅 tagPath 必须已注册) */
+    /** 可订阅的标签路径集合 = **tag_dict 全部节点路径**
+     *  (原为"已注册"路径;去注册表后:节点存在即可订阅, 标签树就是唯一真相源) */
     private Set<String> registeredPaths() {
-        Map<Long, String> name = new HashMap<>();
-        Map<Long, Long> parent = new HashMap<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
-            long id = ((Number) r.get("id")).longValue();
-            name.put(id, String.valueOf(r.get("name")));
-            parent.put(id, ((Number) r.get("parent_id")).longValue());
-        }
-        Set<String> paths = new LinkedHashSet<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT tag_dict_id FROM tag_registry")) {
-            long id = ((Number) r.get("tag_dict_id")).longValue();
-            List<String> chain = new ArrayList<>();
-            Long cur = id;
-            Set<Long> guard = new HashSet<>();
-            while (cur != null && cur != 0 && guard.add(cur) && name.containsKey(cur)) {
-                chain.add(0, name.get(cur));
-                cur = parent.get(cur);
-            }
-            paths.add(String.join("/", chain));
-        }
-        return paths;
+        return new LinkedHashSet<>(TagPaths.pathToId(
+                metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")).keySet());
     }
 
     @GetMapping("/subs")
@@ -124,7 +110,7 @@ public class TagSubscriptionController {
         String path = s(body.get("tagPath")).trim();
         if (name.isEmpty()) throw new IllegalArgumentException("订阅名必填");
         if (!registeredPaths().contains(path)) {
-            throw new IllegalArgumentException("订阅标签未注册: " + path + " —— 标签须先在注册表注册并被任务认领");
+            throw new IllegalArgumentException("订阅标签不存在于标签树: " + path + " —— 请在标签树中先建好该节点");
         }
         String val = s(body.get("tagValue")).trim();
         if (security.tagLevel(path) < 2) {
@@ -136,18 +122,21 @@ public class TagSubscriptionController {
         String webhook = s(body.get("webhookUrl"));
         String freq = s(body.getOrDefault("freq", "real-time"));
         KeyHolder kh = new GeneratedKeyHolder();
+        final String fPath = path;
         metaJdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO tag_subscription(name,tag_path,tag_value,owner,channel,webhook_url,freq)"
-                            + " VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO tag_subscription(name,tag_path,tag_dict_id,tag_value,owner,channel,webhook_url,freq)"
+                            + " VALUES(?,?,?,?,?,?,?,?)",
                     Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, name);
-            ps.setString(2, path);
-            ps.setString(3, val.isEmpty() ? null : val);
-            ps.setString(4, owner);
-            ps.setString(5, channel);
-            ps.setString(6, webhook.isEmpty() ? null : webhook);
-            ps.setString(7, freq);
+            ps.setString(2, fPath);
+            Long tid = TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")).get(fPath);
+            if (tid == null) ps.setNull(3, java.sql.Types.BIGINT); else ps.setLong(3, tid);
+            ps.setString(4, val.isEmpty() ? null : val);
+            ps.setString(5, owner);
+            ps.setString(6, channel);
+            ps.setString(7, webhook.isEmpty() ? null : webhook);
+            ps.setString(8, freq);
             return ps;
         }, kh);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -165,15 +154,17 @@ public class TagSubscriptionController {
         String name = body.containsKey("name") ? s(body.get("name")).trim() : null;
         String path = body.containsKey("tagPath") ? s(body.get("tagPath")).trim() : null;
         if (path != null && !registeredPaths().contains(path)) {
-            throw new IllegalArgumentException("订阅标签未注册: " + path);
+            throw new IllegalArgumentException("订阅标签不存在于标签树: " + path);
         }
         String val = body.containsKey("tagValue") ? s(body.get("tagValue")).trim() : null;
         Integer status = body.get("status") instanceof Number n ? n.intValue()
                 : body.containsKey("status") ? Integer.parseInt(s(body.get("status"))) : null;
         if (name != null) metaJdbc.update("UPDATE tag_subscription SET name=? WHERE id=?", name, id);
         if (path != null || val != null) {
-            metaJdbc.update("UPDATE tag_subscription SET tag_path=COALESCE(?,tag_path), tag_value=? WHERE id=?",
-                    path, (val == null || val.isEmpty()) ? null : val, id);
+            Long tid = path != null
+                    ? TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")).get(path) : null;
+            metaJdbc.update("UPDATE tag_subscription SET tag_path=COALESCE(?,tag_path), tag_dict_id=COALESCE(?,tag_dict_id), tag_value=? WHERE id=?",
+                    path, tid, (val == null || val.isEmpty()) ? null : val, id);
         }
         if (status != null) metaJdbc.update("UPDATE tag_subscription SET status=? WHERE id=?", status, id);
         Map<String, Object> out = new LinkedHashMap<>();

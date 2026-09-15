@@ -43,6 +43,12 @@ public class StreamConfig implements java.io.Serializable {
     public OnlineRef online = new OnlineRef();
     public FactViewRef factView = new FactViewRef();
 
+    /**
+     * 标签路径 → tag_dict 节点 id(平台下发):用于双写 `tag_fact_view` / `tag_notify` 的 `tag_dict_id`。
+     * <p>存 id 而非路径 —— 标签改名/移动时规则与结果不再失配。
+     */
+    public java.util.Map<String, Long> tagIds = new java.util.LinkedHashMap<>();
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BindingRef implements java.io.Serializable { private static final long serialVersionUID = 1L;
         public String kind;      // rule | flow

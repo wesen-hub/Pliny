@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 任务执行配置(task-json, 平台侧落盘)——字段与后端对齐(设计文档 2026-09-08 §12; 后端 TagEngineService.tag_task)。
@@ -165,6 +167,12 @@ public class TaskConfig {
     }
 
     public ViewRef tagFactView = new ViewRef();
+
+    /**
+     * 标签路径 → tag_dict 节点 id(平台下发):用于 tag_fact_view / tag_notify 的 `tag_dict_id` 双写。
+     * <p>存 id 而非路径 —— 标签改名/移动时规则与结果不再失配。
+     */
+    public Map<String, Long> tagIds = new LinkedHashMap<>();
 
     private static boolean notBlank(String s) {
         return s != null && !s.isBlank();

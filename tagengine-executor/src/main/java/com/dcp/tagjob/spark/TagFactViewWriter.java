@@ -50,15 +50,18 @@ public final class TagFactViewWriter {
                 }
             }
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO `" + v.table + "`(task_id, entity, tag, value, run_ts) VALUES(?,?,?,?,?)")) {
+                    "INSERT INTO `" + v.table + "`(task_id, entity, tag, tag_dict_id, value, run_ts) VALUES(?,?,?,?,?,?)")) {
                 for (Row r : data) {
                     ps.setLong(1, taskId);
                     ps.setString(2, r.getString(0));
-                    ps.setString(3, r.getString(1));
+                    String tagPath = r.getString(1);
+                    ps.setString(3, tagPath);
+                    Long tid = cfg.tagIds == null ? null : cfg.tagIds.get(tagPath);
+                    if (tid == null) ps.setNull(4, java.sql.Types.BIGINT); else ps.setLong(4, tid);
                     Object val = r.get(2);
-                    ps.setString(4, val == null ? null : String.valueOf(val));
+                    ps.setString(5, val == null ? null : String.valueOf(val));
                     Object ts = r.get(3);
-                    ps.setTimestamp(5, ts instanceof java.sql.Timestamp t ? t
+                    ps.setTimestamp(6, ts instanceof java.sql.Timestamp t ? t
                             : ts instanceof java.time.LocalDateTime ldt ? java.sql.Timestamp.valueOf(ldt)
                             : new java.sql.Timestamp(System.currentTimeMillis()));
                     ps.addBatch();
@@ -67,15 +70,18 @@ public final class TagFactViewWriter {
             }
             // P1.2④: 变更审计(与投影同轮; 失败仅记日志, 不阻断投影)
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO tag_notify(entity, tag_path, tag_value, task_id, task_mode)"
-                            + " VALUES(?,?,?,?,'batch')"
-                            + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), task_mode='batch', occur_ts=CURRENT_TIMESTAMP(3)")) {
+                    "INSERT INTO tag_notify(entity, tag_path, tag_dict_id, tag_value, task_id, task_mode)"
+                            + " VALUES(?,?,?,?,?,'batch')"
+                            + " ON DUPLICATE KEY UPDATE tag_value=VALUES(tag_value), tag_dict_id=VALUES(tag_dict_id), task_mode='batch', occur_ts=CURRENT_TIMESTAMP(3)")) {
                 for (Row r : data) {
                     ps.setString(1, r.getString(0));
-                    ps.setString(2, r.getString(1));
+                    String tagPath = r.getString(1);
+                    ps.setString(2, tagPath);
+                    Long tid = cfg.tagIds == null ? null : cfg.tagIds.get(tagPath);
+                    if (tid == null) ps.setNull(3, java.sql.Types.BIGINT); else ps.setLong(3, tid);
                     Object val = r.get(2);
-                    ps.setString(3, val == null ? null : String.valueOf(val));
-                    ps.setLong(4, taskId);
+                    ps.setString(4, val == null ? null : String.valueOf(val));
+                    ps.setLong(5, taskId);
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -97,16 +103,29 @@ public final class TagFactViewWriter {
                     + "task_id BIGINT NOT NULL,"
                     + "entity VARCHAR(191) NOT NULL,"
                     + "tag VARCHAR(191) NOT NULL,"
+                    + "tag_dict_id BIGINT NULL,"
                     + "value VARCHAR(255) NULL,"
                     + "run_ts DATETIME NULL,"
                     + "PRIMARY KEY (task_id, entity, tag))");
             // P1.2④: 标签变更审计(订阅消费端); 与 backend/stream 同一 tag_notify 契约
             st.execute("CREATE TABLE IF NOT EXISTS tag_notify ("
                     + "entity VARCHAR(128) NOT NULL, tag_path VARCHAR(512) NOT NULL,"
+                    + "tag_dict_id BIGINT NULL,"
                     + "tag_value VARCHAR(128) NULL, task_id BIGINT NOT NULL,"
                     + "task_mode VARCHAR(16) NOT NULL,"
                     + "occur_ts DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),"
                     + "PRIMARY KEY (entity, tag_path, task_id))");
+        }
+        // 已存在的表补列(幂等; 不支持 ADD COLUMN IF NOT EXISTS 的方言靠异常忽略)
+        addColumnIfMissing(conn, table, "tag_dict_id", "BIGINT NULL");
+        addColumnIfMissing(conn, "tag_notify", "tag_dict_id", "BIGINT NULL");
+    }
+
+    private static void addColumnIfMissing(Connection conn, String table, String col, String type) {
+        try (Statement st = conn.createStatement()) {
+            st.execute("ALTER TABLE `" + table + "` ADD COLUMN " + col + " " + type);
+        } catch (Exception ignored) {
+            // 列已存在
         }
     }
 
