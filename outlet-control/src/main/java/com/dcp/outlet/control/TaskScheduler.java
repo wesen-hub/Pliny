@@ -73,7 +73,14 @@ public class TaskScheduler {
         List<PlannedUnit> planned = units.byTask(taskId);
 
         // 方案 C:增量段 = 外部引擎(Flink)—— 算全部分区起点,一次性播种,不规划/下发 v2 单元
-        if ("external".equals(t.incrementalEngine()) && externalDispatcher != null) {
+        if ("external".equals(t.incrementalEngine())) {
+            if (externalDispatcher == null) {
+                // 未接线:不能静默回退成 v2 单元(语义变了,Flink 侧的消费会变成 v2 worker 在吃),
+                // fail-closed 置 BATCH_FAILED(巡检会告警,人工介入接线)
+                t.status(TaskStatus.BATCH_FAILED);
+                tasks.update(t);
+                return;
+            }
             Map<Integer, Long> starts = new LinkedHashMap<>();
             String topic = null, stream = null;
             for (PlannedUnit pu : planned) {

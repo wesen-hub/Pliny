@@ -64,6 +64,12 @@ public class Supervisor {
                     "批阶段失败:需人工触发重做批(换新 T0)", now));
         }
 
+        // 外部引擎任务(方案 C:增量段=Flink)不巡检 v2 单元 —— 单元从未下发,
+        // 若按常规巡检会持续误报 UNIT_MISSING/TASK_NOT_RUNNING;进度由 Kafka 消费组读取(另查)
+        if ("external".equals(t.incrementalEngine())) {
+            return fire(out);
+        }
+
         List<PlannedUnit> planned = units.byTask(taskId);
         List<UnitStatusStore.UnitStatus> actual = statuses.byTask(taskId);
         boolean wantRunning = "running".equals(t.desiredState()) && t.status() == TaskStatus.RUNNING;

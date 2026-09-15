@@ -113,13 +113,10 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
         cfg.put("taskVer", task.epoch());
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
 
-        // datasetFields:params 里已是 {name, kind}(v2TaskParams 已回填类型);直接透传
+        // datasetFields:params 已回填 {name, kind}(v2TaskParams);JsonNode / Map / List 统一转
         Object dsRaw = p.get("datasetFields");
-        if (dsRaw instanceof JsonNode n) {
-            cfg.set("datasetFields", n);
-        } else {
-            cfg.putArray("datasetFields");
-        }
+        if (dsRaw != null) cfg.set("datasetFields", OM.valueToTree(dsRaw));
+        else cfg.putArray("datasetFields");
 
         ObjectNode kafka = cfg.putObject("kafka");
         kafka.put("bootstrapServers", kafkaBootstrap);
@@ -141,7 +138,8 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
     }
 
     private static void passthrough(ObjectNode cfg, Map<String, Object> p, String key) {
-        if (p.get(key) instanceof JsonNode n) cfg.set(key, n);
+        Object v = p.get(key);
+        if (v != null) cfg.set(key, OM.valueToTree(v));   // JsonNode / Map / List / 标量统一转
     }
 
     private static String str(Object v, String def) {

@@ -104,10 +104,11 @@ public class SparkBatchRunner implements BatchRunner {
         iceberg.put("table", str(p.get("dataset"), stream));
 
         // datasetFields:params 里是 {name, kind}(S/L/D/B)→ 执行器 TaskConfig 契约为 {name, type}
+        // 兼容两种形态:DB 读回是 Map/List,内存直传是 JsonNode —— 统一 valueToTree
         ArrayNode ds = cfg.putArray("datasetFields");
-        Object dsRaw = p.get("datasetFields");
-        if (dsRaw instanceof JsonNode n && n.isArray()) {
-            for (JsonNode f : n) {
+        JsonNode dsNode = p.get("datasetFields") == null ? null : OM.valueToTree(p.get("datasetFields"));
+        if (dsNode != null && dsNode.isArray()) {
+            for (JsonNode f : dsNode) {
                 String nm, kind = "S";
                 if (f.isTextual()) { nm = f.asText(); }
                 else { nm = f.path("name").asText(""); kind = f.path("kind").asText("S"); }
@@ -146,7 +147,8 @@ public class SparkBatchRunner implements BatchRunner {
     }
 
     private static void passthrough(ObjectNode cfg, Map<String, Object> p, String key) {
-        if (p.get(key) instanceof JsonNode n) cfg.set(key, n);
+        Object v = p.get(key);
+        if (v != null) cfg.set(key, OM.valueToTree(v));   // JsonNode / Map / List / 标量统一转
     }
 
     /** kind(S/L/D/B)→ 执行器 type(Spark TaskConfig 契约为 long/double/boolean/string) */
