@@ -62,6 +62,7 @@ public class TasksController {
                 .logic(req.logicId(), req.logicVersion()).instances(req.instances())
                 .contractRef(req.contractRef()).startPolicy(req.startPolicy() == null ? "snapshot" : req.startPolicy())
                 .desiredState(req.desiredState() == null ? "running" : req.desiredState())
+                .incrementalEngine(req.incrementalEngine() == null ? "unit" : req.incrementalEngine())
                 .params(req.params());
         req.streams().forEach(t::stream);
         TaskRecord created = kernel.create(t);
@@ -149,6 +150,6 @@ public class TasksController {
     public record CreateTaskRequest(String taskId, String name, String consumerType, String owner,
                                     List<String> streams, String logicId, String logicVersion,
                                     int instances, String contractRef, String startPolicy,
-                                    String desiredState, Map<String, Object> params) {
+                                    String desiredState, String incrementalEngine, Map<String, Object> params) {
     }
 }

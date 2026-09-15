@@ -24,9 +24,11 @@ import java.util.Map;
 public class TagTaskController {
 
     private final TagEngineService service;
+    private final TagV2Deployer v2Deployer;
 
-    public TagTaskController(TagEngineService service) {
+    public TagTaskController(TagEngineService service, TagV2Deployer v2Deployer) {
         this.service = service;
+        this.v2Deployer = v2Deployer;
     }
 
     @GetMapping
@@ -90,6 +92,19 @@ public class TagTaskController {
             return ApiResponse.ok(service.publishTask(id));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
+        }
+    }
+
+    /** 把已发布的打标任务登记成 v2 消费底座任务(方案 C 入口;需先 publish)。 */
+    @PostMapping("/{id}/deploy-v2")
+    @PreAuthorize("@perm.has('tag:rule:publish')")
+    public ApiResponse<Map<String, Object>> deployV2(@PathVariable long id) {
+        try {
+            return ApiResponse.ok(v2Deployer.deploy(id));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(400, e.getMessage());
+        } catch (Exception e) {
+            return ApiResponse.error(500, "登记 v2 任务失败: " + e.getMessage());
         }
     }
 
