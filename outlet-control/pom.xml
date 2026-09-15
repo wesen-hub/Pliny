@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-outlet-control</artifactId>
+    <version>2.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>dcp-outlet-control</name>
+    <description>增量消费通道 v2 控制面核心:流登记 / 锚点索引 / 起点计算 / 单元编排(核心零依赖)</description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <!--
+      核心算法模块刻意零第三方依赖:便于单测与复用。
+      生产适配(元数据库 / Kafka Admin / HTTP 接口)在后续增量中叠加,不污染本模块。
+    -->
+</project>
