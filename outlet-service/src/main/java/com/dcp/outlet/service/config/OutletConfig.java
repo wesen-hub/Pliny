@@ -67,6 +67,9 @@ public class OutletConfig {
     public UnitStatusStore unitStatusStore(DataSource ds) { return new JdbcUnitStatusStore(ds); }
 
     @Bean
+    public HeartbeatStore heartbeatStore(DataSource ds) { return new JdbcHeartbeatStore(ds); }
+
+    @Bean
     public ProgressService progressService(PartitionReader reader, WatermarkStore watermarks) {
         return new ProgressService(reader, watermarks, System::currentTimeMillis);
     }
