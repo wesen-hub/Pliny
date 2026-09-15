@@ -20,6 +20,7 @@ public class EsSyncExampleLogic implements ConsumerLogic {
     private final List<String> applied = new ArrayList<>();
 
     private String idField;
+    private boolean closed;
 
     @Override
     public void init(LogicInitContext ctx) {                    // ① 单元启动一次
@@ -49,7 +50,8 @@ public class EsSyncExampleLogic implements ConsumerLogic {
 
     @Override
     public void close() {                                        // ③ 停机一次
-        sink.clear();
+        // 真实实现:es.close() 关客户端、flush 缓冲;**不销毁目标端数据**
+        closed = true;
     }
 
     private String docId(ChangeRecord r) {
@@ -64,4 +66,6 @@ public class EsSyncExampleLogic implements ConsumerLogic {
     public int docCount() { return sink.size(); }
 
     public List<String> applied() { return applied; }
+
+    public boolean closed() { return closed; }
 }
