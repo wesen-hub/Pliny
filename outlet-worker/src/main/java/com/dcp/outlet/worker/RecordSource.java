@@ -7,7 +7,7 @@ import java.util.List;
  *
  * <p>刻意**不把 KafkaConsumer 暴露给上层** —— 便于用内存桩验证语义(空批/异常/重投/停机)。
  */
-public interface RecordSource {
+public interface RecordSource extends AutoCloseable {
 
     /** 拉取一批消息;超时无数据返回空列表。 */
     List<RawMessage> poll(long timeoutMillis);
@@ -21,5 +21,6 @@ public interface RecordSource {
     /** 唤醒阻塞中的 poll(用于优雅停机)。 */
     void wakeup();
 
+    @Override
     void close();
 }
