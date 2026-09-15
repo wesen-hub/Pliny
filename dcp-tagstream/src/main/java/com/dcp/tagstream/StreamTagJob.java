@@ -64,12 +64,21 @@ public final class StreamTagJob {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);   // dev 单 TM 4 slot; 事件量小, 保序
 
+        // 起点:v2 播种了每分区 offset 就按它起步;否则 latest
+        OffsetsInitializer starting = OffsetsInitializer.latest();
+        if (cfg.kafka.partitionStartOffsets != null && !cfg.kafka.partitionStartOffsets.isEmpty()) {
+            java.util.Map<org.apache.kafka.common.TopicPartition, Long> m = new java.util.HashMap<>();
+            cfg.kafka.partitionStartOffsets.forEach((p, off) ->
+                    m.put(new org.apache.kafka.common.TopicPartition(cfg.kafka.topic, p), off));
+            starting = OffsetsInitializer.offsets(m);
+        }
+
         KafkaSource<String> source = KafkaSource.<String>builder()
                 .setBootstrapServers(cfg.kafka.bootstrapServers)
                 .setTopics(cfg.kafka.topic)
                 .setGroupId(cfg.kafka.groupId == null || cfg.kafka.groupId.isBlank()
                         ? "dcp-tagstream-t" + cfg.taskId : cfg.kafka.groupId)
-                .setStartingOffsets(OffsetsInitializer.latest())
+                .setStartingOffsets(starting)
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 

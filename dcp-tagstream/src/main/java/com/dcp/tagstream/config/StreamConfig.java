@@ -70,6 +70,8 @@ public class StreamConfig implements java.io.Serializable {
         public String bootstrapServers = "kafka:9092";
         public String topic;
         public String groupId;
+        /** 每分区起始 offset(方案 C:v2 播种的起点;null/空 = 从 latest 起) */
+        public java.util.Map<Integer, Long> partitionStartOffsets;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
