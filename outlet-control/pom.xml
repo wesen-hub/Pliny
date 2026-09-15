@@ -16,6 +16,20 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals><goal>test-jar</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
     <!--
       核心算法模块刻意零第三方依赖:便于单测与复用。
       生产适配(元数据库 / Kafka Admin / HTTP 接口)在后续增量中叠加,不污染本模块。

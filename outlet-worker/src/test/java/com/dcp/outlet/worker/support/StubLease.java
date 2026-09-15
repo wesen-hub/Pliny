@@ -15,5 +15,5 @@ public class StubLease implements LeaseGuard {
     public int calls() { return calls.get(); }
 
     @Override
-    public boolean renew() { return calls.incrementAndGet() <= successTimes; }
+    public boolean renew(String unitId) { return calls.incrementAndGet() <= successTimes; }
 }

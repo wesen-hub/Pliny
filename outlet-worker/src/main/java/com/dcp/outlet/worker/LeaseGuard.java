@@ -6,5 +6,5 @@ package com.dcp.outlet.worker;
 public interface LeaseGuard {
 
     /** @return true = 续约成功(或仍有效);false = 已失效,单元必须停止消费 */
-    boolean renew();
+    boolean renew(String unitId);
 }

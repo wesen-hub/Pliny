@@ -154,7 +154,7 @@ public class UnitRunner {
                     cmd.taskId(), cmd.topic(), cmd.partitions(), cmd.logic());
 
             while (rt.running()) {
-                if (!leaseGuard.renew()) {                         // ④ 续租失败 → 自停(防双消费)
+                if (!leaseGuard.renew(cmd.unitId())) {                         // ④ 续租失败 → 自停(防双消费)
                     u.state = State.LEASE_LOST;
                     u.lastError = "lease lost";
                     log.warn("lease lost, unit stops consuming");
