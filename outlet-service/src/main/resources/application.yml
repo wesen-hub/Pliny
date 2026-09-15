@@ -36,6 +36,8 @@ outlet:
   logic:
     repo: ${OUTLET_LOGIC_REPO:./logic-repo}   # <repo>/<logicId>/<version>.jar
   epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)
+  batch:
+    executor: ${OUTLET_BATCH_EXECUTOR:local}  # local | container | spark | auto(按行数:≥100万→spark;否则 container)
 
 logging:
   level:

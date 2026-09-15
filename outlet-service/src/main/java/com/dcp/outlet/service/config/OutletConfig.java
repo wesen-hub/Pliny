@@ -195,15 +195,28 @@ public class OutletConfig {
     public SdkLogger sdkLogger() { return new Slf4jSdkLogger("outlet-batch"); }
 
     /**
-     * 批阶段:真实接线 —— T0 三规则用生产适配器(changefeed start_ts / GC safe point / 水位表),
-     * 快照源走平台快照 API,logic 与增量同一份;失败落到 BATCH_FAILED(人工重做批)。
+     * 批阶段:执行体选择(设计 §4.3.1)+ 委派。
+     * - local = 进程内(SchedulerBatchRunner,开发期)
+     * - container / spark = 尚未接线(占位,等任务模型桥 + 执行器快照源)
+     * - 选择由 outlet.batch.executor + 估算行数决定(BatchExecutorPolicy)
      */
     @Bean
     public BatchRunner batchRunner(TaskStore taskStore, StreamRegistry streamRegistry,
                                    SnapshotSource snapshotSource, T0Selector t0Selector,
-                                   LogicLoader logicLoader, SdkLogger sdkLogger) {
-        return new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource, t0Selector,
-                logicLoader, sdkLogger);
+                                   LogicLoader logicLoader, SdkLogger sdkLogger,
+                                   @Value("${outlet.batch.executor:local}") String executorMode) {
+        BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
+                t0Selector, logicLoader, sdkLogger);
+        BatchRunner container = (taskId, callback) -> {
+            sdkLogger.error("批容器执行体尚未接线(需任务模型桥 + 执行器快照源);任务 {} 置 BATCH_FAILED", taskId);
+            callback.done(0L, false);
+        };
+        BatchRunner spark = (taskId, callback) -> {
+            sdkLogger.error("Spark 执行体尚未接线(需任务模型桥 + 执行器快照源);任务 {} 置 BATCH_FAILED", taskId);
+            callback.done(0L, false);
+        };
+        return new SelectingBatchRunner(local, container, spark, t0Selector, streamRegistry,
+                taskStore, snapshotSource, executorMode, sdkLogger);
     }
 
     /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */
