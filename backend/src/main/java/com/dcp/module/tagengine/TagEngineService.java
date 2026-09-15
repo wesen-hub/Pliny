@@ -809,6 +809,7 @@ public class TagEngineService {
             }
         }
         int newVer = ((Number) exist.get("ver")).intValue() + 1;
+        freezeTagIds(snap);                              // 固化动作标签节点 id(改名/移动不失配)
         checkPublishTags(id, ordered, str(exist.get("mode")));
         metaJdbc.update("UPDATE tag_task SET status='published', ver=?, snapshot_json=? WHERE id=?",
                 newVer, jstr(snap), id);
@@ -875,9 +876,8 @@ public class TagEngineService {
         payload.set("derived", (JsonNode) task.get("derived"));
         payload.set("bindings", snap.get("bindings"));
         payload.set("rules", snap.get("assets"));   // 执行器契约键名 rules(资产快照自含 def)
-        // id 化双写:路径 → tag_dict_id;执行器写 tag_fact_view / tag_notify 时顺带写 id
-        payload.set("tagIds", OM.valueToTree(
-                TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"))));
+        // id 化双写:优先用**发布时固化的** 路径→id(标签改名/移动后仍指向同一节点), 实时树兼底
+        payload.set("tagIds", OM.valueToTree(tagIdsFromSnapshot(snap)));
         // 标签服务投影(查询面 tag_fact_view): 平台注入 JDBC(与 stream factView 同源默认; 生产可 DCP_TAG_FACT_VIEW_URL 覆盖)
         payload.set("tagFactView", OM.createObjectNode()
                 .put("enabled", true)
@@ -1275,21 +1275,18 @@ public class TagEngineService {
     }
 
     private void checkPublishTags(long taskId, List<Map<String, Object>> ordered, String mode) {
-        java.util.Map<String, String[]> reg = registryMetaAll();
-        java.util.Set<String> registered = reg.keySet();
-        java.util.List<String[]> myActs = new java.util.ArrayList<>();
+        /* 去注册表后:标签树是唯一真相源 —— 动作标签路径必须存在于 tag_dict(节点存在即可打标) */
+        java.util.Set<String> known = TagPaths.pathToId(
+                metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")).keySet();
         java.util.Set<String> myTags = new java.util.LinkedHashSet<>();
         for (Map<String, Object> r : ordered) {
             if ("flow".equals(r.get("kind"))) continue;   // 流不直接产标签(引用规则已展开收录)
-            for (String[] a : collectActionsOf(r)) {
-                myActs.add(a);
-                myTags.add(a[0]);
-            }
+            for (String[] a : collectActionsOf(r)) myTags.add(a[0]);
         }
-        java.util.List<String> unreg = myTags.stream().filter(t -> !registered.contains(t)).toList();
-        if (!unreg.isEmpty()) {
-            throw new IllegalArgumentException("以下动作标签未注册(tag 路径须与注册表 tagPath 精确一致): "
-                    + String.join("、", unreg) + " —— 请先在 标签注册表 V2 注册, 或在规则里改选已注册标签路径");
+        java.util.List<String> unknown = myTags.stream().filter(t -> !known.contains(t)).toList();
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("以下动作标签不在标签树中: "
+                    + String.join("、", unknown) + " —— 请先在标签树中建好该节点(节点存在即可打标), 或在规则里改选已有标签");
         }
         java.util.Map<String, String> claimed = claimedTagsBy(taskId, mode);
         java.util.List<String> conflict = myTags.stream().filter(claimed::containsKey).toList();
@@ -1299,24 +1296,27 @@ public class TagEngineService {
             throw new IllegalArgumentException("同标签跨任务冲突(§11⑧, 标签由首次发布任务认领): "
                     + String.join("、", who) + " —— 同一标签只能由一个任务产出; 如需多规则协同请用决策表/规则流编排在同一任务内");
         }
-        /* §4 发布前兼容校验(P1.2⑥): online=仅 instant 标签; 值型标签(非 boolean)动作必须带值 */
-        java.util.List<String> errs = new java.util.ArrayList<>();
-        for (String[] a : myActs) {
-            String tag = a[0];
-            String[] m = reg.get(tag);
-            String timing = m == null ? "" : m[0];
-            String vt = m == null ? "" : m[1];
-            if ("online".equals(mode) && !"instant".equals(timing)) {
-                errs.add("在线任务只允许产出 instant(即时)标签: 「" + tag + "」注册 timing="
-                        + (timing.isEmpty() ? "?" : timing) + " —— 注册表声明改 instant, 或改用批/流模式产出");
-            }
-            if ("visual".equals(a[2]) && !"boolean".equals(vt) && a[1].isEmpty()) {
-                errs.add("值型标签打标动作必须带值: 「" + tag + "」(valueType=" + vt + ") —— 请在动作里填档位/数值");
-            }
-        }
-        if (!errs.isEmpty()) {
-            throw new IllegalArgumentException("发布校验未通过(§4 模式兼容):\n- " + String.join("\n- ", errs));
-        }
+    }
+
+    /** 取当前标签树的 路径→id(发布/执行时各取一次) */
+    private Map<String, Long> liveTagPaths() {
+        return TagPaths.pathToId(metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict"));
+    }
+
+    /**
+     * 发布时**固化动作标签的节点 id** 到快照(`actions[].tagId` / `table.tagId`)。
+     * <p>存 id 而非路径 —— 标签日后改名/移动时,已发布任务仍指向同一节点。实现见 {@link TagPaths#freezeIds}。
+     */
+    private void freezeTagIds(JsonNode snap) {
+        TagPaths.freezeIds(snap, liveTagPaths());
+    }
+
+    /**
+     * 执行器用的 `路径→id`:优先取快照里固化的 tagId(发布时冻结,改名不受影响),
+     * 再用实时标签树补齐(drl 手写路径 / 旧快照)。实现见 {@link TagPaths#idsFromSnapshot}。
+     */
+    private Map<String, Long> tagIdsFromSnapshot(JsonNode snap) {
+        return TagPaths.idsFromSnapshot(snap, liveTagPaths());
     }
 
     /* ---------- ⑥ 标签认领/定位查询(§13: 标签由首次发布任务认领; 实体×标签当前值在认领任务的 tag_fact 湖表) ---------- */
@@ -1366,14 +1366,7 @@ public class TagEngineService {
         lake.put("query", "SELECT entity, tag, value FROM " + cat + "." + ns + ".tag_fact"
                 + " WHERE tag = '" + tagPath.replace("'", "\\'") + "'");
         m.put("tagFact", lake);
-        for (Map<String, Object> reg : registryRowsWithPath()) {
-            if (tagPath.equals(reg.get("tagPath"))) {
-                m.put("valueType", reg.get("valueType"));
-                m.put("timing", reg.get("timing"));
-                m.put("domain", reg.get("domain"));
-                break;
-            }
-        }
+        m.put("tagDictId", liveTagPaths().get(tagPath));   // 标签节点 id(去注册表后:类型/值域不再声明)
         return m;
     }
 

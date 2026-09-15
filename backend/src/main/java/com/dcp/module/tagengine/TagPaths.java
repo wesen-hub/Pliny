@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 /**
  * 标签路径工具:`tag_dict`(邻接表 id/parent_id/name)→ `path → id` 映射。
  *
@@ -46,6 +49,58 @@ public final class TagPaths {
             }
             out.put(String.join("/", chain), id);
         }
+        return out;
+    }
+
+    /**
+     * 把动作标签的**节点 id 固化进发布快照**:`visual.actions[].tagId` / `table.tagId`。
+     *
+     * <p>发布即冻结 —— 标签日后改名/移动时,已发布任务仍指向同一节点(路径会变,id 不会)。
+     * <p>DRL 手写模式的标签路径在源码里,不做改写(执行时由运行时 tagIds 兼底)。
+     */
+    public static void freezeIds(JsonNode snap, Map<String, Long> pathToId) {
+        if (snap == null || pathToId == null) return;
+        for (JsonNode a : snap.path("assets")) {
+            JsonNode def = a.path("def");
+            String mode = def.path("mode").asText("visual");
+            if ("visual".equals(mode)) {
+                for (JsonNode ac : def.path("visual").path("actions")) {
+                    if ("tag".equals(ac.path("type").asText()) && ac instanceof ObjectNode on) {
+                        Long id = pathToId.get(ac.path("tag").asText(""));
+                        if (id != null) on.put("tagId", id);
+                    }
+                }
+            } else if ("table".equals(mode)) {
+                JsonNode t = def.path("table");
+                if (t instanceof ObjectNode on) {
+                    Long id = pathToId.get(t.path("tag").asText(""));
+                    if (id != null) on.put("tagId", id);
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行器用的 `路径→id`:优先取快照里固化的 `tagId`(发布时冻结),再用实时标签树补齐
+     * (drl 手写路径 / 旧快照)。快照优先 —— 这样标签改名后执行仍落到同一节点。
+     */
+    public static Map<String, Long> idsFromSnapshot(JsonNode snap, Map<String, Long> live) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        if (snap != null) {
+            for (JsonNode a : snap.path("assets")) {
+                JsonNode def = a.path("def");
+                String mode = def.path("mode").asText("visual");
+                if ("visual".equals(mode)) {
+                    for (JsonNode ac : def.path("visual").path("actions")) {
+                        if (ac.hasNonNull("tagId")) out.put(ac.path("tag").asText(""), ac.path("tagId").asLong());
+                    }
+                } else if ("table".equals(mode)) {
+                    JsonNode t = def.path("table");
+                    if (t.hasNonNull("tagId")) out.put(t.path("tag").asText(""), t.path("tagId").asLong());
+                }
+            }
+        }
+        if (live != null) live.forEach(out::putIfAbsent);
         return out;
     }
 }
