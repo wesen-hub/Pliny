@@ -822,6 +822,37 @@ public class TagEngineService {
         return out;
     }
 
+    /**
+     * 生成 v2 消费底座任务所需的 params(打标配置桥)。
+     *
+     * <p>打标任务发布后,把「实体键 / 字段域 / 派生 / 规则快照 / 标签 id」打包成一个 JSON,
+     * 作为 v2 任务({@code consumer_task})的 {@code params}。打标 logic(Spark 批 / Flink 流)
+     * 在 {@code init(ctx)} 里取 {@code ctx.params()} 编译规则 —— 这就是"打标任务 → v2 任务"的桥。
+     *
+     * <pre>params = {
+     *   entityKey: "customer_id",
+     *   dataset: "customer_wide",
+     *   datasetFields: [...],   // 字段域
+     *   derived: [...],          // 派生字段
+     *   bindings: [...],         // 发布快照的绑定序
+     *   rules: [...],            // 发布快照 assets(含 def + 固化的 tagId)
+     *   tagIds: {"路径": id}      // 路径→节点 id(写 tag_fact/tag_fact_view/tag_notify 用)
+     * }</pre>
+     */
+    public Map<String, Object> v2TaskParams(long taskId) {
+        Map<String, Object> task = getTask(taskId);
+        JsonNode snap = (JsonNode) task.get("snapshot");
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("entityKey", str(task.get("entityKey")));
+        p.put("dataset", str(task.get("dataset")));
+        p.put("datasetFields", task.get("datasetFields"));
+        p.put("derived", task.get("derived"));
+        p.put("bindings", snap == null ? null : snap.get("bindings"));
+        p.put("rules", snap == null ? null : snap.get("assets"));
+        p.put("tagIds", liveTagPaths());
+        return p;
+    }
+
     /** datasetFields: 前端存字符串数组, 执行器契约需 {name} 对象 → 包装 */
     private static JsonNode wrapFields(JsonNode raw) {
         ArrayNode out = OM.createArrayNode();
