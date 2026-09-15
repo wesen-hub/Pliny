@@ -34,7 +34,6 @@
         <el-sub-menu index="govern">
           <template #title><el-icon><Management /></el-icon><span>数据管控</span></template>
           <el-menu-item index="/tag">标签管理</el-menu-item>
-          <el-menu-item v-if="userStore.hasPerm('tag:registry:page')" index="/tagengine2/tag">标签注册表 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:rule:page')" index="/tagengine2/rule">规则库 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:task:page')" index="/tagengine2/task">打标任务 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:sub:page')" index="/tagengine2/subs">标签订阅 V2</el-menu-item>

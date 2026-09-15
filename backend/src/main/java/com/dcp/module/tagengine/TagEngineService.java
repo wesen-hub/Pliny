@@ -1230,31 +1230,6 @@ public class TagEngineService {
         return out;
     }
 
-    /** 注册表元数据: tagPath -> {timing, valueType}(发布前兼容校验用) */
-    private java.util.Map<String, String[]> registryMetaAll() {
-        java.util.Map<Long, String> name = new java.util.HashMap<>();
-        java.util.Map<Long, Long> parent = new java.util.HashMap<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
-            long id = ((Number) r.get("id")).longValue();
-            name.put(id, String.valueOf(r.get("name")));
-            parent.put(id, ((Number) r.get("parent_id")).longValue());
-        }
-        java.util.Map<String, String[]> meta = new java.util.LinkedHashMap<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT tag_dict_id,timing,value_type FROM tag_registry ORDER BY id")) {
-            long id = ((Number) r.get("tag_dict_id")).longValue();
-            java.util.List<String> chain = new java.util.ArrayList<>();
-            Long cur = id;
-            java.util.Set<Long> guard = new java.util.HashSet<>();
-            while (cur != null && cur != 0 && guard.add(cur) && name.containsKey(cur)) {
-                chain.add(0, name.get(cur));
-                cur = parent.get(cur);
-            }
-            meta.put(String.join("/", chain), new String[]{
-                    String.valueOf(r.get("timing")), String.valueOf(r.get("value_type"))});
-        }
-        return meta;
-    }
-
     /** 已发布任务快照中的动作标签 → 认领任务名(冲突拦截用; 排除自身) */
     private java.util.Map<String, String> claimedTagsBy(long excludeTaskId, String mode) {
         java.util.Map<String, String> claim = new java.util.LinkedHashMap<>();
@@ -1368,36 +1343,6 @@ public class TagEngineService {
         m.put("tagFact", lake);
         m.put("tagDictId", liveTagPaths().get(tagPath));   // 标签节点 id(去注册表后:类型/值域不再声明)
         return m;
-    }
-
-    private List<Map<String, Object>> registryRowsWithPath() {
-        Map<Long, String> name = new java.util.HashMap<>();
-        Map<Long, Long> parent = new java.util.HashMap<>();
-        for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
-            long id = ((Number) r.get("id")).longValue();
-            name.put(id, String.valueOf(r.get("name")));
-            parent.put(id, ((Number) r.get("parent_id")).longValue());
-        }
-        List<Map<String, Object>> out = new java.util.ArrayList<>();
-        List<Map<String, Object>> regs = metaJdbc.queryForList(
-                "SELECT id,tag_dict_id,value_type,timing,domain_json FROM tag_registry ORDER BY id");
-        for (Map<String, Object> r : regs) {
-            long id = ((Number) r.get("tag_dict_id")).longValue();
-            List<String> chain = new java.util.ArrayList<>();
-            Long cur = id;
-            Set<Long> guard = new java.util.HashSet<>();
-            while (cur != null && cur != 0 && guard.add(cur) && name.containsKey(cur)) {
-                chain.add(0, name.get(cur));
-                cur = parent.get(cur);
-            }
-            Map<String, Object> m = new java.util.LinkedHashMap<>();
-            m.put("tagPath", String.join("/", chain));
-            m.put("valueType", r.get("value_type"));
-            m.put("timing", r.get("timing"));
-            m.put("domain", jnodeSafe((String) r.get("domain_json")));
-            out.add(m);
-        }
-        return out;
     }
 
     private static JsonNode jnodeSafe(String s) {

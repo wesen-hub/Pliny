@@ -10,12 +10,6 @@ export const rulesApi = {
   copy: (id) => request.post(`/tagengine/rules/${id}/copy`)
 }
 
-export const registryApi = {
-  list: () => request.get('/tagengine/registry'),
-  create: (body) => request.post('/tagengine/registry', body),
-  update: (id, body) => request.put(`/tagengine/registry/${id}`, body),
-  remove: (id) => request.delete(`/tagengine/registry/${id}`)
-}
 export const claimsApi = {
   list: () => request.get('/tagengine/claims'),
   get: (path) => request.get('/tagengine/claims/x', { params: { path } })

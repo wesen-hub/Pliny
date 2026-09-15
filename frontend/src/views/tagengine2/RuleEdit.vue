@@ -139,7 +139,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { rulesApi, registryApi } from '../../api/tagengine.js'
+import { rulesApi, tagTreeApi } from '../../api/tagengine.js'
 import { metaBool, domainOf, sumRule, depNamesOf } from './mockLib.js'
 
 const route = useRoute()
@@ -155,8 +155,9 @@ const f = ref({ id: undefined, name: '', descr: '', kind: 'rule', status: 1, def
 const tagPaths = ref([])
 onMounted(async () => {
   try {
-    const regs = await registryApi.list()
-    tagPaths.value = (regs || []).map((r) => r.tagPath).filter(Boolean)
+    // 去注册表后:可选标签 = **标签树的全部节点路径**(节点存在即可打标)
+    const nodes = await tagTreeApi.flatten()
+    tagPaths.value = (nodes || []).map((n) => n.path).filter(Boolean)
   } catch (e) { /* 已提示 */ }
   if (!isEdit.value) return
   try {

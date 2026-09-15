@@ -110,7 +110,7 @@ public class OnlineTagService {
         // Redis 置位: hash tag→value; 每标签独立字段, 整 key TTL
         // P1.2⑥ instant 标签 TTL 由注册声明推导(未显式传 ttlSeconds 时): 命中标签注册 ttl_days 最大者
         String key = KEY_PREFIX + entity;
-        long effTtl = ttlSeconds != null ? ttlSeconds : registryTtlSeconds(collector.tags());
+        long effTtl = ttlSeconds != null ? ttlSeconds : ttlSecondsOfTags(collector.tags());
         if (collector.tags().isEmpty()) {
             // 无命中: 不清旧值(在线层保留最近状态), 仅 touch TTL
             redis.expire(key, effTtl, TimeUnit.SECONDS);
@@ -156,7 +156,7 @@ public class OnlineTagService {
 
     /* ---------- P1.2: instant TTL 注册推导 + 变更审计 ---------- */
 
-    /** tagPath -> ttlDays 缓存(60s 过期; 仅 instant 行, 在线层只产 instant) */
+    /** tagPath -> ttlDays 缓存(60s 过期; 来源 **tag_dict.ttl_days** —— 去注册表后 TTL 挂在标签节点上) */
     private final Map<String, Long> ttlCache = new ConcurrentHashMap<>();
     private volatile long ttlCacheAt = 0L;
 
@@ -189,27 +189,27 @@ public class OnlineTagService {
             if (now - ttlCacheAt < 60_000L && !ttlCache.isEmpty()) return;
             Map<String, Long> fresh = new HashMap<>();
             try {
-                List<Map<String, Object>> regs = metaJdbc.queryForList(
-                        "SELECT tr.tag_dict_id, tr.timing, tr.ttl_days FROM tag_registry tr WHERE tr.timing='instant' AND tr.ttl_days IS NOT NULL");
                 Map<Long, String> name = new HashMap<>();
                 Map<Long, Long> parent = new HashMap<>();
-                for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name FROM tag_dict")) {
-                    name.put(((Number) r.get("id")).longValue(), String.valueOf(r.get("name")));
-                    parent.put(((Number) r.get("id")).longValue(), ((Number) r.get("parent_id")).longValue());
+                Map<Long, Long> ttlById = new HashMap<>();
+                for (Map<String, Object> r : metaJdbc.queryForList("SELECT id,parent_id,name,ttl_days FROM tag_dict")) {
+                    long id = ((Number) r.get("id")).longValue();
+                    name.put(id, String.valueOf(r.get("name")));
+                    parent.put(id, ((Number) r.get("parent_id")).longValue());
+                    if (r.get("ttl_days") != null) ttlById.put(id, ((Number) r.get("ttl_days")).longValue());
                 }
-                for (Map<String, Object> r : regs) {
-                    long id = ((Number) r.get("tag_dict_id")).longValue();
+                for (Map.Entry<Long, Long> e : ttlById.entrySet()) {
                     List<String> chain = new ArrayList<>();
-                    Long cur = id;
+                    Long cur = e.getKey();
                     Set<Long> guard = new java.util.HashSet<>();
                     while (cur != null && cur != 0 && guard.add(cur) && name.containsKey(cur)) {
                         chain.add(0, name.get(cur));
                         cur = parent.get(cur);
                     }
-                    fresh.put(String.join("/", chain), ((Number) r.get("ttl_days")).longValue());
+                    fresh.put(String.join("/", chain), e.getValue());
                 }
             } catch (Exception e) {
-                log.warn("[online] 注册 TTL 缓存刷新失败(用默认): {}", e.getMessage());
+                log.warn("[online] 标签 TTL 缓存刷新失败(用默认): {}", e.getMessage());
             }
             ttlCache.clear();
             ttlCache.putAll(fresh);
@@ -217,8 +217,8 @@ public class OnlineTagService {
         }
     }
 
-    /** 命中标签注册 ttl 最大者(秒); 无 instant 注册/异常 → DEFAULT */
-    private long registryTtlSeconds(List<String[]> tags) {
+    /** 命中标签声明的最小 TTL 最大者(秒); 无声明/异常 → DEFAULT */
+    private long ttlSecondsOfTags(List<String[]> tags) {
         if (tags == null || tags.isEmpty()) return DEFAULT_TTL_SECONDS;
         refreshTtlCacheIfStale();
         long maxDays = 0;

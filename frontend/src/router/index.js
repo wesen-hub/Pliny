@@ -43,8 +43,7 @@ const routes = [
       { path: 'asset/:id', name: 'asset-detail', component: () => import('../views/asset/Detail.vue'), meta: { title: '资产详情', active: 'asset-catalog' } },
       // ---------- 标签管理 ----------
       { path: 'tag', name: 'tag', component: () => import('../views/tag/List.vue'), meta: { title: '标签管理' } },
-      // ---------- 打标引擎 V2(注册表+规则库+任务, 页面设计稿 mock; 规则库与任务分离, 单元/流两级资产) ----------
-      { path: 'tagengine2/tag', name: 'tagengine2-tag', component: () => import('../views/tagengine2/Registry.vue'), meta: { title: '标签注册表(V2)', active: '/tagengine2/tag' } },
+      // ---------- 打标引擎 V2(规则库+任务, 页面设计稿 mock; 规则库与任务分离, 单元/流两级资产) ----------
       { path: 'tagengine2/rule', name: 'tagengine2-rule-lib', component: () => import('../views/tagengine2/RuleLibrary.vue'), meta: { title: '规则库(V2)', active: '/tagengine2/rule' } },
       { path: 'tagengine2/rule/edit', name: 'tagengine2-rule-edit', component: () => import('../views/tagengine2/RuleEdit.vue'), meta: { title: '规则编辑(V2)', active: '/tagengine2/rule' } },
       { path: 'tagengine2/rule/flow', name: 'tagengine2-rule-flow', component: () => import('../views/tagengine2/RuleFlowEdit.vue'), meta: { title: '规则流编辑(V2)', active: '/tagengine2/rule' } },
