@@ -47,6 +47,9 @@ public class TagEngineService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.dcp.module.tagengine.perm.DataSecurityService security;   // 数据权限(行规则执行 F2)
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dcp.module.tagengine.TagDatasetService datasetService;    // 字段类型探测(打标配置桥回填 kind)
+
     @Value("${dcp.tagengine.runner-mode:simulate}")
     private String runnerMode;          // simulate(演练: 生成 task-json/命令不下发) | spark(真实 spark-submit)
     @Value("${dcp.tagengine.executor-jar:}")
@@ -842,15 +845,45 @@ public class TagEngineService {
     public Map<String, Object> v2TaskParams(long taskId) {
         Map<String, Object> task = getTask(taskId);
         JsonNode snap = (JsonNode) task.get("snapshot");
+        String dataset = str(task.get("dataset"));
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("entityKey", str(task.get("entityKey")));
-        p.put("dataset", str(task.get("dataset")));
-        p.put("datasetFields", task.get("datasetFields"));
+        p.put("dataset", dataset);
+        p.put("datasetFields", fieldsWithKind((JsonNode) task.get("datasetFields"), dataset));
         p.put("derived", task.get("derived"));
         p.put("bindings", snap == null ? null : snap.get("bindings"));
         p.put("rules", snap == null ? null : snap.get("assets"));
         p.put("tagIds", liveTagPaths());
         return p;
+    }
+
+    /** datasetFields 字符串数组 → {name, kind}(kind 由平台字段探测回填;探测失败退回 'S') */
+    private JsonNode fieldsWithKind(JsonNode dsFields, String dataset) {
+        Map<String, String> kinds = new LinkedHashMap<>();
+        if (datasetService != null) {
+            try {
+                Object f = datasetService.fieldsOf(dataset).get("fields");
+                if (f instanceof List<?> list) {
+                    for (Object o : list) {
+                        if (o instanceof Map<?, ?> m) {
+                            Object k = m.get("kind");
+                            kinds.put(String.valueOf(m.get("name")), k == null ? "S" : String.valueOf(k));
+                        }
+                    }
+                }
+            } catch (Exception ignore) {
+                // 探测失败 → 退全 S
+            }
+        }
+        ArrayNode out = OM.createArrayNode();
+        if (dsFields != null && dsFields.isArray()) {
+            for (JsonNode f : dsFields) {
+                String nm = f.isTextual() ? f.asText() : f.path("name").asText("");
+                if (nm.isBlank()) continue;
+                out.addObject().put("name", nm).put("kind", kinds.getOrDefault(nm, "S"));
+            }
+        }
+        return out;
     }
 
     /** datasetFields: 前端存字符串数组, 执行器契约需 {name} 对象 → 包装 */

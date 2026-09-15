@@ -38,6 +38,14 @@ outlet:
   epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)
   batch:
     executor: ${OUTLET_BATCH_EXECUTOR:local}  # local | container | spark | auto(按行数:≥100万→spark;否则 container)
+  spark:                                     # 批阶段 Spark 执行体(tagengine-executor)
+    submit-bin: ${OUTLET_SPARK_SUBMIT_BIN:spark-submit}
+    executor-jar: ${OUTLET_SPARK_EXECUTOR_JAR:}     # 执行器 jar 绝对路径(容器/Spark 节点可见);空=不提交
+    catalog: ${OUTLET_SPARK_CATALOG:demo}
+    namespace: ${OUTLET_SPARK_NAMESPACE:dcp}
+  flink:                                     # 方案 C:增量段交给 Flink(dcp-tagstream)
+    base-url: ${OUTLET_FLINK_BASE_URL:}             # Flink REST;空=只落 job-json 不提交
+    jar: ${OUTLET_FLINK_JAR:}                        # dcp-tagstream.jar 绝对路径
 
 logging:
   level:

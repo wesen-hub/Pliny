@@ -100,13 +100,16 @@ public class SparkBatchRunner implements BatchRunner {
         iceberg.put("namespace", namespace);
         iceberg.put("table", str(p.get("dataset"), stream));
 
-        // datasetFields:字符串数组 → {name, type}(type 暂 string,真实类型由执行器/平台探测回填)
+        // datasetFields:params 里是 {name, kind}(S/L/D/B)→ 执行器 TaskConfig 契约为 {name, type}
         ArrayNode ds = cfg.putArray("datasetFields");
         Object dsRaw = p.get("datasetFields");
         if (dsRaw instanceof JsonNode n && n.isArray()) {
             for (JsonNode f : n) {
-                if (f.isTextual()) ds.addObject().put("name", f.asText()).put("type", "string");
-                else ds.add(f);
+                String nm, kind = "S";
+                if (f.isTextual()) { nm = f.asText(); }
+                else { nm = f.path("name").asText(""); kind = f.path("kind").asText("S"); }
+                if (nm.isBlank()) continue;
+                ds.addObject().put("name", nm).put("type", kindToType(kind));
             }
         }
 
@@ -124,6 +127,16 @@ public class SparkBatchRunner implements BatchRunner {
 
     private static void passthrough(ObjectNode cfg, Map<String, Object> p, String key) {
         if (p.get(key) instanceof JsonNode n) cfg.set(key, n);
+    }
+
+    /** kind(S/L/D/B)→ 执行器 type(Spark TaskConfig 契约为 long/double/boolean/string) */
+    private static String kindToType(String kind) {
+        return switch (kind == null ? "S" : kind) {
+            case "L" -> "long";
+            case "D" -> "double";
+            case "B" -> "boolean";
+            default -> "string";
+        };
     }
 
     private static String str(Object v, String def) {

@@ -204,28 +204,41 @@ public class OutletConfig {
     public BatchRunner batchRunner(TaskStore taskStore, StreamRegistry streamRegistry,
                                    SnapshotSource snapshotSource, T0Selector t0Selector,
                                    LogicLoader logicLoader, SdkLogger sdkLogger,
-                                   @Value("${outlet.batch.executor:local}") String executorMode) {
+                                   @Value("${outlet.batch.executor:local}") String executorMode,
+                                   @Value("${outlet.spark.submit-bin:spark-submit}") String sparkSubmitBin,
+                                   @Value("${outlet.spark.executor-jar:}") String executorJar,
+                                   @Value("${outlet.spark.catalog:demo}") String catalog,
+                                   @Value("${outlet.spark.namespace:dcp}") String namespace) {
         BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
                 t0Selector, logicLoader, sdkLogger);
+        BatchRunner spark = new SparkBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
+                sparkSubmitBin, executorJar, catalog, namespace);
+        // 批容器执行体需拉起独立容器,依赖镜像/编排,先保留占位(置 BATCH_FAILED)
         BatchRunner container = (taskId, callback) -> {
-            sdkLogger.error("批容器执行体尚未接线(需任务模型桥 + 执行器快照源);任务 {} 置 BATCH_FAILED", taskId);
-            callback.done(0L, false);
-        };
-        BatchRunner spark = (taskId, callback) -> {
-            sdkLogger.error("Spark 执行体尚未接线(需任务模型桥 + 执行器快照源);任务 {} 置 BATCH_FAILED", taskId);
+            sdkLogger.error("批容器执行体未实现(需容器镜像 + 编排);任务 {} 置 BATCH_FAILED", taskId);
             callback.done(0L, false);
         };
         return new SelectingBatchRunner(local, container, spark, t0Selector, streamRegistry,
                 taskStore, snapshotSource, executorMode, sdkLogger);
     }
 
+    /** 方案 C:增量段交给 Flink(dcp-tagstream)。 */
+    @Bean
+    public ExternalIncrementalDispatcher externalIncrementalDispatcher(
+            @Value("${outlet.kafka.bootstrap}") String kafkaBootstrap,
+            @Value("${outlet.flink.base-url:}") String flinkBaseUrl,
+            @Value("${outlet.flink.jar:}") String jarPath) {
+        return new FlinkIncrementalDispatcher(kafkaBootstrap, flinkBaseUrl, jarPath);
+    }
+
     /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */
     @Bean
     public TaskScheduler outletTaskScheduler(TaskStore tasks, UnitStore units, UnitDispatcher dispatcher,
                                             StartOffsetService startOffsets, LeaseManager leases,
-                                            LatestTsoProvider latestTso, BatchRunner batchRunner) {
+                                            LatestTsoProvider latestTso, BatchRunner batchRunner,
+                                            ExternalIncrementalDispatcher externalDispatcher) {
         return new TaskScheduler(tasks, units, dispatcher, startOffsets, leases, latestTso,
-                batchRunner, System::currentTimeMillis, 30_000L);
+                batchRunner, externalDispatcher, System::currentTimeMillis, 30_000L);
     }
 
     @Bean

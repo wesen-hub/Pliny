@@ -58,14 +58,12 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
         cfg.put("taskVer", task.epoch());
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
 
-        // datasetFields:params 里是字符串数组 → 包成 {name, kind}(kind 暂 S,数值类型需平台字段探测回填)
-        ArrayNode ds = cfg.putArray("datasetFields");
+        // datasetFields:params 里已是 {name, kind}(v2TaskParams 已回填类型);直接透传
         Object dsRaw = p.get("datasetFields");
-        if (dsRaw instanceof JsonNode n && n.isArray()) {
-            for (JsonNode f : n) {
-                if (f.isTextual()) ds.addObject().put("name", f.asText()).put("kind", "S");
-                else ds.add(f);
-            }
+        if (dsRaw instanceof JsonNode n) {
+            cfg.set("datasetFields", n);
+        } else {
+            cfg.putArray("datasetFields");
         }
 
         ObjectNode kafka = cfg.putObject("kafka");
