@@ -85,18 +85,30 @@ public class OutletRegistry {
         return memContracts.get(contractId);
     }
 
-    /** 取该消费方当前生效的契约(status=active 且未过期) */
+    /** 取该消费方当前生效的契约(status=active 且未过期);同一消费方多契约时按流覆盖匹配(未匹配到流再退回任一 active 契约) */
     public Contract activeContractOf(String consumerId) {
+        return activeContractOf(consumerId, null);
+    }
+
+    /** 按 (消费方, 流) 取生效契约: 优先找 streams 覆盖该流的 active 契约; 无流参数或未覆盖时退回首个 active 契约。 */
+    public Contract activeContractOf(String consumerId, String streamId) {
         if (useMapper()) {
             List<OutletContractEntity> list = contractMapper.selectList(
                     new QueryWrapper<OutletContractEntity>()
                             .eq("consumer_id", consumerId)
                             .eq("status", Contract.STATUS_ACTIVE));
-            return list.stream().map(this::toModel).filter(Contract::active).findFirst().orElse(null);
+            List<Contract> active = list.stream().map(this::toModel).filter(Contract::active).toList();
+            if (streamId != null) {
+                for (Contract c : active) if (c.covers(streamId)) return c;
+            }
+            return active.isEmpty() ? null : active.get(0);
         }
-        return memContracts.values().stream()
-                .filter(c -> c.getConsumerId().equals(consumerId) && c.active())
-                .findFirst().orElse(null);
+        List<Contract> active = memContracts.values().stream()
+                .filter(c -> c.getConsumerId().equals(consumerId) && c.active()).toList();
+        if (streamId != null) {
+            for (Contract c : active) if (c.covers(streamId)) return c;
+        }
+        return active.isEmpty() ? null : active.get(0);
     }
 
     /* ------------------------------------------------------------------ 实体 → 模型 */

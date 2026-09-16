@@ -25,3 +25,4 @@ demo-agent-dir/*
 # 杂项
 *.log
 nohup.out
+docker-compose.override.yml

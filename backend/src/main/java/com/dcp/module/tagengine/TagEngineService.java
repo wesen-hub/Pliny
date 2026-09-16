@@ -847,6 +847,7 @@ public class TagEngineService {
         JsonNode snap = (JsonNode) task.get("snapshot");
         String dataset = str(task.get("dataset"));
         Map<String, Object> p = new LinkedHashMap<>();
+        p.put("taskId", taskId);   // 平台数值任务 id(执行器 TaskConfig.taskId=long;v2 底座 taskId 是字符串,勿混用)
         p.put("entityKey", str(task.get("entityKey")));
         p.put("dataset", dataset);
         p.put("datasetFields", fieldsWithKind((JsonNode) task.get("datasetFields"), dataset));

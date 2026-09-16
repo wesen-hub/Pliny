@@ -43,14 +43,14 @@ public class ChangeOutletService {
     /* ============================================================== 接口 ① stream-status */
 
     public StreamStatus streamStatus(String consumerId, String streamId) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         return source.status(streamId);
     }
 
     /** 估算快照行数(供 v2 批阶段切片/执行体选择);未知返回 -1。 */
     public long estimateRows(String consumerId, String streamId, Long boundaryTso) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         StreamStatus st = source.status(streamId);
         long t0 = boundaryTso == null ? st.getLatest() : boundaryTso;
@@ -73,7 +73,7 @@ public class ChangeOutletService {
      * 边界不合法(§6.4.2)一律直接报错。
      */
     public SnapshotPage snapshot(String consumerId, String streamId, Long boundaryTso, String pageToken, int limit) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         quota.acquire(ctx.consumer);
         try {
@@ -141,7 +141,7 @@ public class ChangeOutletService {
      * @param afterPosition 不透明位点({@code v1.{epoch}.{tso}});为空则从 earliest 开始
      */
     public ChangeBatch changes(String consumerId, String streamId, String afterPosition, int limit) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         quota.acquire(ctx.consumer);
         try {
@@ -177,7 +177,7 @@ public class ChangeOutletService {
 
     /** 按主键回查(**仅兜底对账/补漏**;常规消费不回表 —— 设计 §6.3) */
     public Map<String, Object> keyLookup(String consumerId, String streamId, Map<String, Object> bizKey, Long asOfTso) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         quota.acquire(ctx.consumer);
         try {
@@ -199,7 +199,7 @@ public class ChangeOutletService {
     /* ============================================================== 接口 ⑤ position-at */
 
     public Map<String, Object> positionAt(String consumerId, String streamId, long timeMs) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         long tso = source.positionAt(streamId, timeMs);
         StreamStatus st = source.status(streamId);
@@ -218,7 +218,7 @@ public class ChangeOutletService {
      * <b>平台只把它记进 consumer_offset_seen 用于监控/审计,不作为交付依据</b>(决策 1)。
      */
     public Map<String, Object> commit(String consumerId, String streamId, String position) {
-        Ctx ctx = context(consumerId);
+        Ctx ctx = context(consumerId, streamId);
         permission.checkStream(ctx.consumer, ctx.contract, streamId);
         StreamStatus st = source.status(streamId);
         PositionKey pos = PositionKey.decode(position);
@@ -250,12 +250,13 @@ public class ChangeOutletService {
 
     private record Ctx(ConsumerAccount consumer, Contract contract) {}
 
-    private Ctx context(String consumerId) {
+    private Ctx context(String consumerId, String streamId) {
         ConsumerAccount consumer = registry.consumer(consumerId);
         if (consumer == null) {
             throw new BizException(OutletErrorCode.CONTRACT_FORBIDDEN, "消费方不存在:" + consumerId);
         }
-        Contract contract = registry.activeContractOf(consumerId);
+        // 同一消费方多契约(按流覆盖)时,按 (consumer, stream) 解析 —— 否则批段会拿到别的流的契约视图
+        Contract contract = registry.activeContractOf(consumerId, streamId);
         if (contract == null) {
             throw new BizException(OutletErrorCode.CONTRACT_FORBIDDEN, "无生效契约:" + consumerId);
         }

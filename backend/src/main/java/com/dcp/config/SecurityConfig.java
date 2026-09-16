@@ -65,6 +65,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/data-sub/*/export").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*/download").permitAll()
+                        // 变更流出口数据面: 机器消费方 PULL/提交(consumerId+契约在 ChangeOutletService 自校验,
+                        // 同 data-sub 模式; v2 批/增量执行体与出口消费者都不持用户 JWT)
+                        .requestMatchers("/api/chg/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
