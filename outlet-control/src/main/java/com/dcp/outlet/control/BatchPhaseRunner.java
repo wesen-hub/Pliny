@@ -53,18 +53,18 @@ public class BatchPhaseRunner {
         this(source, SlotPlanner.defaults(), 2, 200L);
     }
 
-    public Outcome run(String taskId, String consumerGroup, String stream, String topic, long t0, int partitions,
-                       String logicId, String logicVersion, ConsumerLogic logic, Map<String, Object> params,
-                       SdkLogger log) {
+    public Outcome run(String taskId, String consumerId, String consumerGroup, String stream, String topic,
+                       long t0, int partitions, String logicId, String logicVersion, ConsumerLogic logic,
+                       Map<String, Object> params, SdkLogger log) {
         long started = System.currentTimeMillis();
-        List<Slice> slices = planner.plan(stream, source.estimateRows(stream, t0), partitions);
+        List<Slice> slices = planner.plan(stream, source.estimateRows(consumerId, stream, t0), partitions);
         int rows = 0, processed = 0;
         int[] failed = {-1};
         String error = null;
         try {
             logic.init(new BatchInitContext(taskId, logicVersion, topic, params, log));
             for (Slice slice : slices) {
-                if (!processSlice(taskId, consumerGroup, stream, t0, logicId, logicVersion,
+                if (!processSlice(taskId, consumerId, consumerGroup, stream, t0, logicId, logicVersion,
                         logic, params, log, slice, failed)) {
                     error = "slice " + slice.index() + "/" + slice.total() + " 重试 " + sliceRetries + " 次仍失败";
                     return new Outcome(false, t0, processed, rows, System.currentTimeMillis() - started,
@@ -84,12 +84,12 @@ public class BatchPhaseRunner {
 
     private int sliceRows;      // 最近一片的行数(单线程运行,不做并发改造前够用)
 
-    private boolean processSlice(String taskId, String consumerGroup, String stream, long t0,
+    private boolean processSlice(String taskId, String consumerId, String consumerGroup, String stream, long t0,
                                  String logicId, String logicVersion, ConsumerLogic logic,
                                  Map<String, Object> params, SdkLogger log, Slice slice, int[] failed) {
         for (int attempt = 0; attempt <= sliceRetries; attempt++) {
             try {
-                List<ChangeRecord> records = source.readSlice(stream, t0, slice);
+                List<ChangeRecord> records = source.readSlice(consumerId, stream, t0, slice);
                 sliceRows = records.size();
                 if (records.isEmpty()) return true;                     // 空片:不必打扰逻辑
                 logic.process(new SnapshotBatch(stream, records, slice.index(), slice.total()),

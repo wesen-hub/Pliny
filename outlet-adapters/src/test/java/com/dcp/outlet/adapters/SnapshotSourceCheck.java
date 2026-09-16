@@ -20,10 +20,12 @@ public final class SnapshotSourceCheck {
 
     public static void main(String[] args) throws Exception {
         AtomicInteger requests = new AtomicInteger();
+        List<String> queries = Collections.synchronizedList(new ArrayList<>());
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/outlet/" + STREAM + "/snapshot", ex -> {
+        server.createContext("/api/chg/" + STREAM + "/snapshot", ex -> {
             requests.incrementAndGet();
             String q = ex.getRequestURI().getQuery() == null ? "" : ex.getRequestURI().getQuery();
+            queries.add(q);
             String body = q.contains("pageToken=p2")
                     ? "{\"rows\":[{\"id\":\"11\",\"v\":\"c\"},{\"id\":\"12\",\"v\":\"d\"}]}"
                     : "{\"rows\":[{\"id\":\"1\",\"v\":\"a\"},{\"id\":\"2\",\"v\":\"b\"}],\"nextPageToken\":\"p2\"}";
@@ -35,21 +37,31 @@ public final class SnapshotSourceCheck {
         server.start();
         String base = "http://127.0.0.1:" + server.getAddress().getPort();
 
-        // ① 分页读取
-        HttpSnapshotSource src = new HttpSnapshotSource(base, "c-es-001", 2, java.time.Duration.ofSeconds(3));
-        List<ChangeRecord> rows = src.readSlice(STREAM, 5000L, new Slice(STREAM, Slice.Kind.WHOLE, 0, 0, 0, 0, 1));
+        // ① 分页读取(身份 = 任务契约 consumer_id,每次调用传入)
+        HttpSnapshotSource src = new HttpSnapshotSource(base, 2, java.time.Duration.ofSeconds(3));
+        List<ChangeRecord> rows = src.readSlice("c-es-001", STREAM, 5000L,
+                new Slice(STREAM, Slice.Kind.WHOLE, 0, 0, 0, 0, 1));
         check("分页:累计行数", rows.size(), 4);
         check("分页:请求次数(2 页)", requests.get(), 2);
+        check("身份:请求 URL 携带 consumerId", queries.stream().allMatch(q -> q.contains("consumerId=c-es-001")), true);
         check("行 op=SNAPSHOT", rows.get(0).op().name(), "SNAPSHOT");
         check("行 tso=T0", rows.get(0).tso(), 5000L);
         check("行内容解析", rows.get(3).after().get("v"), "d");
-        check("行数估算未知 → -1(退化为按分区)", src.estimateRows(STREAM, 5000L), -1L);
+        check("行数估算未知 → -1(退化为按分区)", src.estimateRows("c-es-001", STREAM, 5000L), -1L);
+
+        // ①b 空身份 → 拒绝(fail-closed)
+        try {
+            src.readSlice("  ", STREAM, 5000L, new Slice(STREAM, Slice.Kind.WHOLE, 0, 0, 0, 0, 1));
+            check("空身份 → 拒绝(fail-closed)", "no-throw", "IllegalStateException");
+        } catch (IllegalStateException e) {
+            check("空身份 → 拒绝(fail-closed)", "IllegalStateException", "IllegalStateException");
+        }
 
         // ② 批阶段走"平台快照 API":同一 logic, mode=SNAPSHOT, 按分区切片
         SpyLogic spy = new SpyLogic();
         SlotPlanner planner = SlotPlanner.defaults();
         BatchPhaseRunner runner = new BatchPhaseRunner(src, planner, 1, 1L);
-        BatchPhaseRunner.Outcome o = runner.run("t1", "task-t1", STREAM,
+        BatchPhaseRunner.Outcome o = runner.run("t1", "c-es-001", "task-t1", STREAM,
                 "dcp.cdc.target_db.rt_sync_c", 5000L, 3, "es-sync", "1.0.0",
                 spy, Map.of("idField", "id"), Silent.LOG);
         check("批阶段:成功", o.ok, true);

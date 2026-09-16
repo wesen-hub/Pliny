@@ -30,9 +30,8 @@ outlet:
     jdbc-url: ${OUTLET_TIDB_JDBC_URL:jdbc:mysql://127.0.0.1:14000/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${OUTLET_TIDB_USERNAME:root}
     password: ${OUTLET_TIDB_PASSWORD:root123}
-  snapshot:                                  # 快照源(平台既有快照 API,AS OF T0)
+  snapshot:                                  # 快照源(平台既有快照 API,AS OF T0);身份 = 任务契约的 consumer_id(批/增量一致,不再配置服务级身份)
     base-url: ${OUTLET_SNAPSHOT_BASE_URL:http://127.0.0.1:8081}
-    consumer-id: ${OUTLET_SNAPSHOT_CONSUMER_ID:}
   logic:
     repo: ${OUTLET_LOGIC_REPO:./logic-repo}   # <repo>/<logicId>/<version>.jar
   epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)

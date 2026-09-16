@@ -27,14 +27,15 @@ public class JdbcContractLookup implements ContractLookup {
     @Override
     public Optional<ContractInfo> find(String contractRef) {
         if (contractRef == null || contractRef.isBlank()) return Optional.empty();
-        String sql = "SELECT contract_id, streams, status FROM contract WHERE contract_id=?";
+        String sql = "SELECT contract_id, consumer_id, streams, status FROM contract WHERE contract_id=?";
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, contractRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return Optional.empty();
                 Set<String> streams = new LinkedHashSet<>(Json.readStringArray(rs.getString("streams")));
                 boolean active = "active".equalsIgnoreCase(rs.getString("status"));
-                return Optional.of(new ContractInfo(rs.getString("contract_id"), active, streams));
+                return Optional.of(new ContractInfo(rs.getString("contract_id"), active, streams,
+                        rs.getString("consumer_id")));
             }
         } catch (SQLException e) {
             throw new IllegalStateException("契约查询失败:" + contractRef, e);

@@ -68,7 +68,12 @@ public class TagV2Deployer {
                         + "VALUES(?, ?, '打标引擎(增量=Flink/批=Spark,v2 不加载该 logic)')",
                 LOGIC_ID, LOGIC_VERSION);
 
+        // ②.5 平台消费方账号(批段读快照的平台身份:ChangeOutletService.context(consumerId) 要求账号存在且契约 active)
+        metaJdbc.update("INSERT IGNORE INTO consumer(consumer_id, name, consumer_type, owner, status, channel) "
+                        + "VALUES('tag-platform', '打标平台桥', 'tag', 'tag-platform', 'active', 'internal')");
+
         // ③ permissive 契约(白名单 = 任务字段域;外部引擎任务不拉契约视图,内容不强制)
+        // consumer_id='tag-platform' 与 ②.5 的账号一致 —— 批段读快照的身份 = 契约 consumer_id(批/增量一致性)
         try {
             ObjectNode whitelist = OM.createObjectNode();
             ArrayNode cols = whitelist.putArray(stream);

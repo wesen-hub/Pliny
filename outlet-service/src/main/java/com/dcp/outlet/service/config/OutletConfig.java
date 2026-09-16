@@ -176,9 +176,9 @@ public class OutletConfig {
 
     /** 快照源:平台既有快照 API(AS OF T0)。 */
     @Bean
-    public SnapshotSource snapshotSource(@Value("${outlet.snapshot.base-url}") String baseUrl,
-                                         @Value("${outlet.snapshot.consumer-id:}") String consumerId) {
-        return new HttpSnapshotSource(baseUrl, consumerId);
+    public SnapshotSource snapshotSource(@Value("${outlet.snapshot.base-url}") String baseUrl) {
+        // 身份不再从配置来:每次读快照由调用方传任务契约的 consumer_id(批/增量一致性,见 SnapshotSource 接口注释)
+        return new HttpSnapshotSource(baseUrl);
     }
 
     /** 逻辑加载:与计算面同构(jar 优先 + SPI + classpath),批/增量用同一份 logic。 */
@@ -204,22 +204,24 @@ public class OutletConfig {
     public BatchRunner batchRunner(TaskStore taskStore, StreamRegistry streamRegistry,
                                    SnapshotSource snapshotSource, T0Selector t0Selector,
                                    LogicLoader logicLoader, SdkLogger sdkLogger,
+                                   ContractLookup contracts,
                                    @Value("${outlet.batch.executor:local}") String executorMode,
                                    @Value("${outlet.spark.submit-bin:spark-submit}") String sparkSubmitBin,
                                    @Value("${outlet.spark.executor-jar:}") String executorJar,
                                    @Value("${outlet.spark.catalog:demo}") String catalog,
-                                   @Value("${outlet.spark.namespace:dcp}") String namespace) {
+                                   @Value("${outlet.spark.namespace:dcp}") String namespace,
+                                   @Value("${outlet.snapshot.base-url:http://127.0.0.1:8081}") String snapshotBaseUrl) {
         BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
-                t0Selector, logicLoader, sdkLogger);
+                t0Selector, logicLoader, contracts, sdkLogger);
         BatchRunner spark = new SparkBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
-                sparkSubmitBin, executorJar, catalog, namespace);
+                sparkSubmitBin, executorJar, catalog, namespace, snapshotBaseUrl, contracts);
         // 批容器执行体需拉起独立容器,依赖镜像/编排,先保留占位(置 BATCH_FAILED)
         BatchRunner container = (taskId, callback) -> {
             sdkLogger.error("批容器执行体未实现(需容器镜像 + 编排);任务 {} 置 BATCH_FAILED", taskId);
             callback.done(0L, false);
         };
         return new SelectingBatchRunner(local, container, spark, t0Selector, streamRegistry,
-                taskStore, snapshotSource, executorMode, sdkLogger);
+                taskStore, snapshotSource, contracts, executorMode, sdkLogger);
     }
 
     /** 方案 C:增量段交给 Flink(dcp-tagstream)。 */

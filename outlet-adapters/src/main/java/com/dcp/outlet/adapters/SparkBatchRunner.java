@@ -1,6 +1,8 @@
 package com.dcp.outlet.adapters;
 
 import com.dcp.outlet.control.BatchRunner;
+import com.dcp.outlet.control.ContractInfo;
+import com.dcp.outlet.control.ContractLookup;
 import com.dcp.outlet.control.StreamInfo;
 import com.dcp.outlet.control.StreamRegistry;
 import com.dcp.outlet.control.T0Selector;
@@ -39,9 +41,14 @@ public class SparkBatchRunner implements BatchRunner {
     private final String executorJar;
     private final String catalog;
     private final String namespace;
+    /** 平台快照 API 宿主(下发到 task-json 的 snapshot.baseUrl; 执行器读快照用) */
+    private final String snapshotBaseUrl;
+    /** 契约查询:任务 contractRef → consumer_id(批/增量身份一致性) */
+    private final ContractLookup contracts;
 
     public SparkBatchRunner(TaskStore tasks, StreamRegistry streams, T0Selector t0, SdkLogger log,
-                            String sparkSubmitBin, String executorJar, String catalog, String namespace) {
+                            String sparkSubmitBin, String executorJar, String catalog, String namespace,
+                            String snapshotBaseUrl, ContractLookup contracts) {
         this.tasks = tasks;
         this.streams = streams;
         this.t0 = t0;
@@ -50,6 +57,8 @@ public class SparkBatchRunner implements BatchRunner {
         this.executorJar = executorJar;
         this.catalog = catalog;
         this.namespace = namespace;
+        this.snapshotBaseUrl = snapshotBaseUrl;
+        this.contracts = contracts;
     }
 
     @Override
@@ -66,8 +75,17 @@ public class SparkBatchRunner implements BatchRunner {
                     callback.done(0L, false);
                     return;
                 }
+                java.util.Optional<String> identity = SchedulerBatchRunner.resolveConsumer(task, contracts);
+                if (identity.isEmpty()) {
+                    log.error("Spark 批阶段失败:任务契约身份不可用(contractRef={}) —— 契约缺失/未生效/无 consumer_id",
+                            task.contractRef());
+                    callback.done(0L, false);
+                    return;
+                }
+                String consumerId = identity.get();
                 T0Selector.Decision d = t0.select(si.get().topic(), 0, null);
-                String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), catalog, namespace);
+                String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), catalog, namespace,
+                        snapshotBaseUrl, consumerId);
                 log.info("Spark 批阶段 task={} T0={} taskJson={}", taskId, d.tso(), json);
 
                 // 提交:写 task-json → spark-submit → 等退出码
@@ -89,7 +107,8 @@ public class SparkBatchRunner implements BatchRunner {
 
     /** 组装 task-json(tagengine-executor 的 TaskConfig 契约)。公开以便离线自检。 */
     public static String buildTaskJson(TaskRecord task, String stream, String topic, long t0,
-                                       String catalog, String namespace) {
+                                       String catalog, String namespace, String snapshotBaseUrl,
+                                       String consumerId) {
         Map<String, Object> p = task.params();
         ObjectNode cfg = OM.createObjectNode();
         cfg.put("taskId", task.taskId());
@@ -102,6 +121,15 @@ public class SparkBatchRunner implements BatchRunner {
         iceberg.put("catalog", catalog);
         iceberg.put("namespace", namespace);
         iceberg.put("table", str(p.get("dataset"), stream));
+
+        // 快照源(方案 C): 执行器据此读平台快照 API(AS OF T0)而非读湖;baseUrl 空 → 执行器回读湖模式。
+        // consumerId = 任务契约身份(批/增量一致性), 由调用方解析 contractRef → consumer_id 后传入。
+        if (snapshotBaseUrl != null && !snapshotBaseUrl.isBlank()) {
+            ObjectNode snap = cfg.putObject("snapshot");
+            snap.put("baseUrl", snapshotBaseUrl);
+            snap.put("consumerId", consumerId == null ? "" : consumerId);
+            snap.put("pageSize", 1000);
+        }
 
         // datasetFields:params 里是 {name, kind}(S/L/D/B)→ 执行器 TaskConfig 契约为 {name, type}
         // 兼容两种形态:DB 读回是 Map/List,内存直传是 JsonNode —— 统一 valueToTree

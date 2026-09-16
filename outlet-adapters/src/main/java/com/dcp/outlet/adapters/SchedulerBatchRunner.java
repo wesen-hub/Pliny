@@ -21,6 +21,10 @@ import java.util.Optional;
  * </pre>
  *
  * <p>异步:在守护线程中执行,不阻塞建任务请求。
+ *
+ * <p><b>批/增量身份一致性</b>:批段读快照的 consumerId 必须 = 任务契约的 consumer_id
+ * (从 {@code contractRef → ContractInfo.consumerId} 解析),与增量段同一契约;
+ * 契约缺失/未生效/无 consumer_id → 直接 BATCH_FAILED(fail-closed,不静默用服务级身份)。
  */
 public class SchedulerBatchRunner implements BatchRunner {
 
@@ -29,12 +33,24 @@ public class SchedulerBatchRunner implements BatchRunner {
     private final SnapshotSource snapshotSource;
     private final T0Selector t0Selector;
     private final LogicLoader logicLoader;
+    private final ContractLookup contracts;
     private final SdkLogger log;
 
     public SchedulerBatchRunner(TaskStore tasks, StreamRegistry streams, SnapshotSource snapshotSource,
-                                T0Selector t0Selector, LogicLoader logicLoader, SdkLogger log) {
+                                T0Selector t0Selector, LogicLoader logicLoader, ContractLookup contracts,
+                                SdkLogger log) {
         this.tasks = tasks; this.streams = streams; this.snapshotSource = snapshotSource;
-        this.t0Selector = t0Selector; this.logicLoader = logicLoader; this.log = log;
+        this.t0Selector = t0Selector; this.logicLoader = logicLoader; this.contracts = contracts; this.log = log;
+    }
+
+    /** 批段身份解析:任务 contractRef → 契约 consumer_id;不可用返回 empty(fail-closed 依据) */
+    static java.util.Optional<String> resolveConsumer(TaskRecord task, ContractLookup contracts) {
+        String ref = task == null ? null : task.contractRef();
+        if (ref == null || ref.isBlank()) return java.util.Optional.empty();
+        return contracts.find(ref)
+                .filter(ContractInfo::active)
+                .map(ContractInfo::consumerId)
+                .filter(id -> id != null && !id.isBlank());
     }
 
     @Override
@@ -47,12 +63,21 @@ public class SchedulerBatchRunner implements BatchRunner {
                 Optional<StreamInfo> si = streams.get(stream);
                 if (si.isEmpty()) { log.error("批阶段失败:流未登记:" + stream); callback.done(0L, false); return; }
 
+                java.util.Optional<String> identity = resolveConsumer(task, contracts);
+                if (identity.isEmpty()) {
+                    log.error("批阶段失败:任务契约身份不可用(批/增量身份一致性要求,contractRef={}) —— 契约缺失/未生效/无 consumer_id",
+                            task.contractRef());
+                    callback.done(0L, false);
+                    return;
+                }
+                String consumerId = identity.get();
+
                 T0Selector.Decision d = t0Selector.select(si.get().topic(), 0, null);
-                log.info("批阶段开始 task={} {} ({})", taskId, d, d.detail());
+                log.info("批阶段开始 task={} consumer={} {} ({})", taskId, consumerId, d, d.detail());
 
                 ConsumerLogic logic = logicLoader.load(LogicRef.of(task.logicId(), task.logicVersion())).logic();
                 BatchPhaseRunner.Outcome o = new BatchPhaseRunner(snapshotSource).run(
-                        taskId, task.consumerGroup(), si.get().stream(), si.get().topic(), d.tso(),
+                        taskId, consumerId, task.consumerGroup(), si.get().stream(), si.get().topic(), d.tso(),
                         si.get().partitions(), task.logicId(), task.logicVersion(), logic, task.params(), log);
                 log.info("批阶段结束 task={} {}", taskId, o);
                 callback.done(d.tso(), o.ok);

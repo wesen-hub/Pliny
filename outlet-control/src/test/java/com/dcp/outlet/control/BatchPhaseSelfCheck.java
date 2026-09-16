@@ -13,16 +13,27 @@ public final class BatchPhaseSelfCheck {
     private static final String STREAM = "rt_sync_c";
     private static final String TOPIC = "dcp.cdc.target_db.rt_sync_c";
 
-    /** 内存快照源:按切片发数据;可指定某片前 N 次读抛异常。 */
+    /** 内存快照源:按切片发数据;可指定某片前 N 次读抛异常;记录收到的身份(验证批/增一致性透传)。 */
     private static final class MemSnapshot implements SnapshotSource {
         final long rows;
         final Map<Integer, Integer> failSliceTimes = new HashMap<>();
+        final List<String> seenConsumerIds = new ArrayList<>();
 
         MemSnapshot(long rows) { this.rows = rows; }
 
-        @Override public long estimateRows(String stream, long tso) { return rows; }
+        @Override public long estimateRows(String consumerId, String stream, long tso) {
+            if (consumerId == null || consumerId.isBlank()) {
+                throw new IllegalStateException("身份缺失(fail-closed)");
+            }
+            seenConsumerIds.add(consumerId);
+            return rows;
+        }
 
-        @Override public List<ChangeRecord> readSlice(String stream, long tso, Slice slice) {
+        @Override public List<ChangeRecord> readSlice(String consumerId, String stream, long tso, Slice slice) {
+            if (consumerId == null || consumerId.isBlank()) {
+                throw new IllegalStateException("身份缺失(fail-closed)");
+            }
+            seenConsumerIds.add(consumerId);
             Integer left = failSliceTimes.get(slice.index());
             if (left != null && left > 0) {
                 failSliceTimes.put(slice.index(), left - 1);
@@ -68,6 +79,7 @@ public final class BatchPhaseSelfCheck {
         testSliceRetryThenSuccess();
         testSliceFailureFailsBatch();
         testEmptySnapshot();
+        testBlankIdentityFailClosed();
 
         System.out.println();
         System.out.println("==================================================");
@@ -102,11 +114,19 @@ public final class BatchPhaseSelfCheck {
 
     private static BatchPhaseRunner.Outcome run(long rows, int partitions, SpyLogic spy,
                                                 Map<Integer, Integer> failTimes) {
+        return run(rows, partitions, spy, failTimes, "c-es-001");
+    }
+
+    private static BatchPhaseRunner.Outcome run(long rows, int partitions, SpyLogic spy,
+                                                Map<Integer, Integer> failTimes, String consumerId) {
         MemSnapshot src = new MemSnapshot(rows);
         if (failTimes != null) src.failSliceTimes.putAll(failTimes);
         BatchPhaseRunner runner = new BatchPhaseRunner(src, SlotPlanner.defaults(), 1, 1L);
-        return runner.run("t1", "task-t1", STREAM, TOPIC, 5000L, partitions, "es-sync", "1.0.0",
-                spy, Map.of("idField", "id"), Silent.LOG);
+        BatchPhaseRunner.Outcome r = runner.run("t1", consumerId, "task-t1", STREAM, TOPIC, 5000L, partitions,
+                "es-sync", "1.0.0", spy, Map.of("idField", "id"), Silent.LOG);
+        check("身份透传:快照源收到任务的契约身份",
+                src.seenConsumerIds.stream().allMatch(consumerId::equals), true);
+        return r;
     }
 
     private static void testSmallBatchSingleSlice() {
@@ -156,6 +176,18 @@ public final class BatchPhaseSelfCheck {
         check("片失败:记录失败片号", r.failedSlice, 2);
         check("片失败:错误信息可解释", r.error != null && r.error.contains("slice"), true);
         check("片失败:仍释放逻辑资源(close)", spy.close, 1);
+    }
+
+    private static void testBlankIdentityFailClosed() {
+        MemSnapshot src = new MemSnapshot(100);
+        BatchPhaseRunner runner = new BatchPhaseRunner(src, SlotPlanner.defaults(), 0, 0L);
+        try {
+            runner.run("t1", "  ", "task-t1", STREAM, TOPIC, 5000L, 3, "es-sync", "1.0.0",
+                    new SpyLogic(), Map.of(), Silent.LOG);
+            check("空身份 → 拒绝(fail-closed)", "no-throw", "IllegalStateException");
+        } catch (IllegalStateException e) {
+            check("空身份 → 拒绝(fail-closed)", "IllegalStateException", "IllegalStateException");
+        }
     }
 
     private static void testEmptySnapshot() {

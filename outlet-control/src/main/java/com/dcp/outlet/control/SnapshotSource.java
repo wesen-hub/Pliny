@@ -12,9 +12,18 @@ import java.util.List;
  */
 public interface SnapshotSource {
 
-    /** 估算行数(用于切片决策);未知返回 -1。 */
-    long estimateRows(String stream, long tso);
+    /**
+     * 估算行数(用于切片决策);未知返回 -1。
+     *
+     * @param consumerId 契约身份(contract.consumer_id)——批段与增量段用同一身份,保证视图一致;
+     *                   实现须拒绝空值(fail-closed),不得静默用服务级默认身份
+     */
+    long estimateRows(String consumerId, String stream, long tso);
 
-    /** 读一个切片;返回空列表表示该切片无数据。 */
-    List<ChangeRecord> readSlice(String stream, long tso, Slice slice);
+    /**
+     * 读一个切片;返回空列表表示该切片无数据。
+     *
+     * @param consumerId 契约身份(同上;空值实现须拒绝)
+     */
+    List<ChangeRecord> readSlice(String consumerId, String stream, long tso, Slice slice);
 }
