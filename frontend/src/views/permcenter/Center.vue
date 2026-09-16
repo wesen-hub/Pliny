@@ -26,6 +26,8 @@
 
       <!-- ==================== 资源授权 ==================== -->
       <el-tab-pane label="资源授权" name="resource">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+          title="本页是策略的批量快捷视图(按资源×主体直接定等级);完整能力(动作/行谓词/环境/义务/生命周期)在「策略编辑器」配置。两者写同一策略库。"/>
         <el-row :gutter="12">
           <el-col :span="5">
             <el-card shadow="never">
@@ -107,15 +109,29 @@
                 <el-option label="stream: customer_wide" value="customer_wide"/>
                 <el-option label="file: /data/out/**" value="/data/out/**"/>
               </el-select>
-              <div class="fl">动作(层级 + 通配;本项目启用子集)</div>
+              <div class="fl">动作(层级 + 通配;灰色 = 定义层已登记、本项目未启用)</div>
+              <div style="font-size:12px;margin:4px 0 2px"><b>read.*</b> <el-checkbox size="small" :model-value="pActs.includes('read.snapshot')&&pActs.includes('read.changes')" @change="v=>toggleReadAll(v)">全选</el-checkbox></div>
               <el-checkbox-group v-model="pActs" size="small">
                 <el-checkbox label="read.snapshot"/>
                 <el-checkbox label="read.changes"/>
                 <el-checkbox label="read.query"/>
                 <el-checkbox label="read.aggregate" disabled/>
+                <el-checkbox label="read.sample" disabled/>
+              </el-checkbox-group>
+              <div style="font-size:12px;margin:8px 0 2px"><b>export.* / download / subscribe.*</b></div>
+              <el-checkbox-group v-model="pActs" size="small">
                 <el-checkbox label="export.csv" disabled/>
+                <el-checkbox label="export.json" disabled/>
+                <el-checkbox label="export.file" disabled/>
                 <el-checkbox label="download"/>
                 <el-checkbox label="subscribe.pull" disabled/>
+                <el-checkbox label="subscribe.push" disabled/>
+              </el-checkbox-group>
+              <div style="font-size:12px;margin:8px 0 2px"><b>write.*</b>(定义层保留;本项目进侧不启用,D5)</div>
+              <el-checkbox-group size="small">
+                <el-checkbox label="write.insert" disabled/>
+                <el-checkbox label="write.update" disabled/>
+                <el-checkbox label="write.delete" disabled/>
               </el-checkbox-group>
               <div class="fl">列白名单(不勾 = 不可见;key 列单独标记)</div>
               <el-checkbox-group v-model="pCols" size="small">
@@ -130,13 +146,21 @@
           <el-col :span="8">
             <el-card shadow="never">
               <template #header>③ 约束(行/标签/密级/环境)</template>
-              <div class="fl">行谓词(点击变量插入;仅白名单函数)</div>
-              <el-input v-model="pRow" type="textarea" :rows="2" size="small" @input="renderStmt"/>
-              <div class="chips">
+              <div class="fl">行谓词(内联编辑 或 引用已定义的行规则——零件复用)</div>
+              <el-radio-group v-model="pRowMode" size="small" style="margin-bottom:6px">
+                <el-radio-button label="inline">内联编辑</el-radio-button>
+                <el-radio-button label="ref">引用行规则</el-radio-button>
+              </el-radio-group>
+              <el-input v-if="pRowMode==='inline'" v-model="pRow" type="textarea" :rows="2" size="small" @input="renderStmt"/>
+              <el-select v-else v-model="pRowRef" size="small" style="width:100%" @change="renderStmt">
+                <el-option v-for="r in rowRuleOptions" :key="r.id" :label="`#${r.id} ${r.name}`" :value="r.id"/>
+              </el-select>
+              <div v-if="pRowMode==='ref'" class="hint2">引用规则自带的 bind_scope 白名单将一并生效;规则变更会递增策略版本(收窄 &lt;1s)。</div>
+              <div class="chips" v-if="pRowMode==='inline'">
                 <span v-for="v in vars" :key="v" class="chip" @click="insVar(v)">${{'{'}}{{ v }}{{'}'}}</span>
               </div>
               <div class="fl">bind_scope 变量白名单(谓词用到的必须声明)</div>
-              <el-checkbox-group v-model="pBind" size="small">
+              <el-checkbox-group v-model="pBind" size="small" :disabled="pRowMode==='ref'">
                 <el-checkbox label="subject.region"/>
                 <el-checkbox label="subject.username"/>
                 <el-checkbox label="env.channel"/>
@@ -151,12 +175,18 @@
                 <el-option label="phone → MASK_PHONE" value="phone=MASK_PHONE"/>
                 <el-option label="无脱敏" value=""/>
               </el-select>
-              <div class="fl">环境约束(定义层全集,本项目启用三项)</div>
+              <div class="fl">环境约束(定义层全集;本项目启用前三项)</div>
               <el-select v-model="pEnvChannel" size="small" style="width:100%">
                 <el-option label="channel: api" value="api"/>
                 <el-option label="channel: internal" value="internal"/>
                 <el-option label="无通道约束" value=""/>
               </el-select>
+              <el-input v-model="pPurpose" size="small" placeholder="purpose 用途标注(合规审计,可空)" style="margin-top:6px"/>
+              <div style="margin-top:6px">
+                <el-switch v-model="pTwEnabled" size="small" active-text="timeWindow 时间窗"/>
+              </div>
+              <el-time-picker v-if="pTwEnabled" v-model="pTwRange" is-range size="small" style="width:100%;margin-top:6px" start-placeholder="开始" end-placeholder="结束"/>
+              <div class="hint2" style="margin-top:6px">ipRange / deviceType / authLevel —— 定义层已登记,本项目未启用。</div>
               <div class="fl">义务 obligations(默认必选 audit)</div>
               <el-checkbox-group v-model="pObl" size="small">
                 <el-checkbox label="audit" disabled checked/>
@@ -181,6 +211,14 @@
           <el-col :span="12">
             <el-card shadow="never" header="策略语句预览(引擎无关的抽象语义 —— 存入策略库的内容)">
               <pre class="stmt">{{ stmt }}</pre>
+            </el-card>
+            <el-card shadow="never" header="可下推性编译报告(发布预览;策略不声明引擎,本报告为 PDP 编译预览)" style="margin-top:12px">
+              <el-table :data="compileReport" size="small" border>
+                <el-table-column prop="engine" label="引擎" width="130"/>
+                <el-table-column prop="level" label="下推程度" width="110"><template #default="{row}"><el-tag :type="row.full?'success':'warning'" size="small">{{ row.full?'全下推':'部分下推' }}</el-tag></template></el-table-column>
+                <el-table-column prop="note" label="说明"/>
+              </el-table>
+              <div class="hint2" style="margin-top:6px">“部分下推”= 未下推成分自动降级为残留段(结果层过滤),正确性不变,性能可观测;执行层适配器可裁剪(见设计 §3.5)。</div>
             </el-card>
           </el-col>
         </el-row>
@@ -250,7 +288,9 @@
 
       <!-- ==================== 密级与脱敏 ==================== -->
       <el-tab-pane label="密级与脱敏" name="mask">
-        <el-card shadow="never" header="敏感级字典(0-3)">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+          title="本页是参考数据与运维页:敏感级字典为平台常量(L0-L3 固定,几乎不变);脱敏注册表由开发/运维登记实现,日常配置在策略编辑器中「选用」规则。"/>
+        <el-card shadow="never" header="敏感级字典(0-3)—— 平台常量">
           <el-table :data="levelDict" size="small" border>
             <el-table-column prop="lv" label="级" width="90"/>
             <el-table-column prop="name" label="名称" width="140"/>
@@ -258,6 +298,12 @@
           </el-table>
         </el-card>
         <el-card shadow="never" header="脱敏规则注册表(mask_rule;两端同源,版本不一致拒下发)">
+          <template #header>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span>脱敏规则注册表(mask_rule;两端同源,版本不一致拒下发)</span>
+              <el-button type="primary" size="small" @click="maskDialog=true">+ 注册新规则</el-button>
+            </div>
+          </template>
           <el-table :data="maskRules" size="small" border>
             <el-table-column prop="code" label="编码" width="140"/>
             <el-table-column prop="param" label="参数" width="140"/>
@@ -266,6 +312,18 @@
             <el-table-column label="计算面" width="110"><template #default="{row}"><el-tag :type="row.sync?'success':'warning'" size="small">{{ row.sync ? '已同步' : '待同步' }}</el-tag></template></el-table-column>
           </el-table>
         </el-card>
+        <el-dialog v-model="maskDialog" title="注册脱敏规则(运维操作)" width="420px">
+          <el-form label-width="90px" size="small">
+            <el-form-item label="规则编码"><el-input v-model="newMask.code" placeholder="如 MASK_EMAIL"/></el-form-item>
+            <el-form-item label="参数"><el-input v-model="newMask.param" placeholder="如 保留前2后4"/></el-form-item>
+            <el-form-item label="实现版本"><el-input v-model="newMask.ver" placeholder="v1"/></el-form-item>
+          </el-form>
+          <div class="hint2">注册后需在平台侧与计算面同步实现;两端版本不一致时,含该规则的策略下发会被拒(fail-closed)。</div>
+          <template #footer>
+            <el-button size="small" @click="maskDialog=false">取消</el-button>
+            <el-button type="primary" size="small" @click="registerMask">注册</el-button>
+          </template>
+        </el-dialog>
       </el-tab-pane>
 
       <!-- ==================== 有效权限预览 ==================== -->
@@ -378,12 +436,26 @@ const pSubj = ref('risk-role')
 const pPriority = ref(0)
 const pRes = ref('rt_sync_c')
 const pActs = ref(['read.snapshot', 'read.changes'])
+const toggleReadAll = v => {
+  const base = ['read.snapshot', 'read.changes']
+  pActs.value = v ? [...new Set([...pActs.value, ...base])] : pActs.value.filter(a => !base.includes(a))
+}
 const pCols = ref(['id (key)', 'v', 'seq'])
+const pRowMode = ref('inline')
+const pRowRef = ref(24)
+const rowRuleOptions = [
+  { id: 24, name: '仅本人订单(owner = ${subject.username})' },
+  { id: 17, name: '华东白名单(region IN 华东,华北)' },
+  { id: 9, name: '风控可见域(tag IN 业务域/风控/**)' },
+]
 const pRow = ref("status = 'paid' AND region = ${subject.region}")
 const pBind = ref(['subject.region'])
 const pTag = ref('prefix:业务域/风控')
 const pMask = ref('phone=MASK_PHONE')
 const pEnvChannel = ref('api')
+const pPurpose = ref('')
+const pTwEnabled = ref(false)
+const pTwRange = ref(null)
 const pObl = ref(['audit'])
 const pDraft = ref(false)
 const pWindow = ref(null)
@@ -391,19 +463,33 @@ const vars = ['subject.username', 'subject.region', 'env.channel', 'env.time']
 const insVar = v => { pRow.value += '${' + v + '}' }
 const stmtErr = ref('')
 const stmt = ref('')
+const compileReport = [
+  { engine: 'TiDB (SQL)', full: true, note: '列投影 + WHERE 参数化全下推' },
+  { engine: 'Trino/Iceberg', full: true, note: 'SQL 重写全下推' },
+  { engine: 'ES (DSL)', full: false, note: 'rowExpr 含 ${subject.region} → 退残留段(结果层过滤)' },
+  { engine: 'Spark 执行体', full: true, note: 'DataFrame filter + 列投影(Plan 注入)' },
+  { engine: 'Flink 执行体', full: true, note: '进程内求值(Plan 注入)' },
+]
 const renderStmt = () => {
   const used = [...pRow.value.matchAll(/\$\{([^}]+)\}/g)].map(m => m[1])
-  const miss = used.filter(v => !pBind.value.includes(v))
+  const miss = pRowMode.value === 'inline' ? used.filter(v => !pBind.value.includes(v)) : []
   stmtErr.value = miss.length ? '校验失败:谓词变量 ' + miss.join(', ') + ' 未在 bind_scope 声明 —— 策略拒绝发布(fail-closed)。' : ''
+  const rowPart = pRowMode.value === 'ref'
+    ? `ref:#${pRowRef.value} ${rowRuleOptions.find(r => r.id === pRowRef.value)?.name || ''}`
+    : (pRow.value || '(无)')
+  const envParts = []
+  if (pEnvChannel.value) envParts.push('channel=' + pEnvChannel.value)
+  if (pPurpose.value) envParts.push('purpose=' + pPurpose.value)
+  if (pTwEnabled.value) envParts.push('timeWindow=启用')
   stmt.value = `effect:   ${pEffect.value}
 subject:  ${pSubj.value}
 resource: ${pRes.value}
 actions:  ${pActs.value.join(', ')}
 columns:  ${pCols.value.map(c => c.split(' ')[0]).join(', ')}
-rowExpr:  ${pRow.value || '(无)'}
+rowExpr:  ${rowPart}
 mask:     ${pMask.value || '(无)'}
 tagScope: ${pTag.value}
-env:      channel=${pEnvChannel.value || '(无)'}
+env:      ${envParts.join(' · ') || '(无)'}
 obligations: ${pObl.value.join(', ')}
 priority: ${pPriority.value}
 lifecycle: ${pDraft.value ? 'draft' : 'active'}`
@@ -442,6 +528,14 @@ const showContract = r => {
 }
 
 /* ---------- 密级与脱敏 ---------- */
+const maskDialog = ref(false)
+const newMask = ref({ code: '', param: '', ver: 'v1' })
+const registerMask = () => {
+  if (!newMask.value.code) { ElMessage.warning('请填写规则编码'); return }
+  maskRules.push({ code: newMask.value.code, param: newMask.value.param || '—', ver: newMask.value.ver, sync: false })
+  maskDialog.value = false
+  ElMessage.success('已注册(原型):两端同步实现后可被策略选用;未同步前含该规则的策略拒下发')
+}
 const levelDict = [
   { lv: 'L0 HIDDEN', name: '不可见', desc: '显式授权才可见;未授权即隐藏' },
   { lv: 'L1 META', name: '元数据', desc: '可见结构,不可见数据' },
@@ -523,6 +617,7 @@ const audits = [
 .why { border-left: 3px solid #16a34a; padding: 8px 12px; margin: 8px 0; background: #f0fdf4; border-radius: 0 8px 8px 0; }
 .why-t { font-weight: 600; font-size: 12.5px; }
 .why-d { font-size: 12px; color: #64748b; margin-top: 2px; }
+.hint2 { font-size: 11.5px; color: #64748b; margin-top: 4px; line-height: 1.6; }
 :deep(.tag-l2) { background: #fef9c3; color: #a16207; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 :deep(.tag-l3) { background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 </style>
