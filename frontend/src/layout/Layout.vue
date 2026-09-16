@@ -45,7 +45,9 @@
             <el-menu-item index="/system/user">用户管理</el-menu-item>
             <el-menu-item index="/system/role-perm">角色权限</el-menu-item>
           </el-sub-menu>
+          <el-menu-item index="/perm-center"><el-icon><Key /></el-icon><span>策略中心</span></el-menu-item>
           <el-menu-item index="/system/audit"><el-icon><Document /></el-icon><span>审计日志</span></el-menu-item>
+          <el-menu-item index="/system/architecture"><el-icon><Connection /></el-icon><span>系统架构</span></el-menu-item>
         </template>
       </el-menu>
     </el-aside>
