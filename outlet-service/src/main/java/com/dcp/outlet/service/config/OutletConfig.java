@@ -9,9 +9,11 @@ import com.dcp.outlet.worker.ClasspathLogicLoader;
 import com.dcp.outlet.worker.CompositeLogicLoader;
 import com.dcp.outlet.worker.DeadLetterSink;
 import com.dcp.outlet.worker.SpiLogicLoader;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import javax.sql.DataSource;
 import java.nio.file.Path;
@@ -24,7 +26,9 @@ import java.nio.file.Path;
 @Configuration
 public class OutletConfig {
 
+    /** 元数据库(v2 元数据表主库)。@Primary: 装配期存在两个 DataSource(元库/TiDB 只读)时默认注入元库。 */
     @Bean
+    @Primary
     public DataSource outletDataSource(@Value("${outlet.meta.jdbc-url}") String url,
                                        @Value("${outlet.meta.username}") String user,
                                        @Value("${outlet.meta.password}") String password) {
@@ -153,10 +157,10 @@ public class OutletConfig {
         return new TiCdcChangefeedStartTs(baseUrl, changefeedId);
     }
 
-    /** R2:TiDB GC safe point。 */
+    /** R2:TiDB GC safe point。@Qualifier 强制绑定 TiDB 只读源(与元库同为 DataSource,类型注入会被 @Primary 元库抢走)。 */
     @Bean
-    public T0Selector.GcSafePoint gcSafePoint(DataSource tidbDataSource) {
-        return new TiDbGcSafePoint(tidbDataSource);
+    public T0Selector.GcSafePoint gcSafePoint(@Qualifier("tidbDataSource") DataSource tidbDs) {
+        return new TiDbGcSafePoint(tidbDs);
     }
 
     /** R3:分区最新 TSO(水位表)。 */
@@ -210,11 +214,14 @@ public class OutletConfig {
                                    @Value("${outlet.spark.executor-jar:}") String executorJar,
                                    @Value("${outlet.spark.catalog:demo}") String catalog,
                                    @Value("${outlet.spark.namespace:dcp}") String namespace,
-                                   @Value("${outlet.snapshot.base-url:http://127.0.0.1:8081}") String snapshotBaseUrl) {
+                                   @Value("${outlet.snapshot.base-url:http://127.0.0.1:8081}") String snapshotBaseUrl,
+                                   @Value("${outlet.spark.warehouse:}") String warehouse,
+                                   @Value("${outlet.spark.catalog-type:}") String catalogType) {
         BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
                 t0Selector, logicLoader, contracts, sdkLogger);
         BatchRunner spark = new SparkBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
-                sparkSubmitBin, executorJar, catalog, namespace, snapshotBaseUrl, contracts);
+                sparkSubmitBin, executorJar, catalog, namespace, snapshotBaseUrl, contracts,
+                warehouse, catalogType);
         // 批容器执行体需拉起独立容器,依赖镜像/编排,先保留占位(置 BATCH_FAILED)
         BatchRunner container = (taskId, callback) -> {
             sdkLogger.error("批容器执行体未实现(需容器镜像 + 编排);任务 {} 置 BATCH_FAILED", taskId);
@@ -229,8 +236,9 @@ public class OutletConfig {
     public ExternalIncrementalDispatcher externalIncrementalDispatcher(
             @Value("${outlet.kafka.bootstrap}") String kafkaBootstrap,
             @Value("${outlet.flink.base-url:}") String flinkBaseUrl,
-            @Value("${outlet.flink.jar:}") String jarPath) {
-        return new FlinkIncrementalDispatcher(kafkaBootstrap, flinkBaseUrl, jarPath);
+            @Value("${outlet.flink.jar:}") String jarPath,
+            @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap) {
+        return new FlinkIncrementalDispatcher(kafkaBootstrap, flinkBaseUrl, jarPath, flinkKafkaBootstrap);
     }
 
     /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */

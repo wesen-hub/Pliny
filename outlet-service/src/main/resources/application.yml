@@ -42,9 +42,12 @@ outlet:
     executor-jar: ${OUTLET_SPARK_EXECUTOR_JAR:}     # 执行器 jar 绝对路径(容器/Spark 节点可见);空=不提交
     catalog: ${OUTLET_SPARK_CATALOG:demo}
     namespace: ${OUTLET_SPARK_NAMESPACE:dcp}
+    warehouse: ${OUTLET_SPARK_WAREHOUSE:}            # 写湖目标(空 = 由 spark-submit 环境自备 catalog)
+    catalog-type: ${OUTLET_SPARK_CATALOG_TYPE:}      # hadoop | rest …(空 = 执行器缺省 hadoop)
   flink:                                     # 方案 C:增量段交给 Flink(dcp-tagstream)
     base-url: ${OUTLET_FLINK_BASE_URL:}             # Flink REST;空=只落 job-json 不提交
     jar: ${OUTLET_FLINK_JAR:}                        # dcp-tagstream.jar 绝对路径
+    kafka-bootstrap: ${OUTLET_FLINK_KAFKA_BOOTSTRAP:}  # 下发进 job-json 的 Kafka 地址(Flink 集群视角);空=同 outlet.kafka.bootstrap
 
 logging:
   level:

@@ -45,10 +45,14 @@ public class SparkBatchRunner implements BatchRunner {
     private final String snapshotBaseUrl;
     /** 契约查询:任务 contractRef → consumer_id(批/增量身份一致性) */
     private final ContractLookup contracts;
+    /** 执行器写湖目标(可空; 空则不写 warehouse/catalogType → 由 spark-submit 环境自备 catalog, 生产口径) */
+    private final String warehouse;
+    private final String catalogType;
 
     public SparkBatchRunner(TaskStore tasks, StreamRegistry streams, T0Selector t0, SdkLogger log,
                             String sparkSubmitBin, String executorJar, String catalog, String namespace,
-                            String snapshotBaseUrl, ContractLookup contracts) {
+                            String snapshotBaseUrl, ContractLookup contracts,
+                            String warehouse, String catalogType) {
         this.tasks = tasks;
         this.streams = streams;
         this.t0 = t0;
@@ -59,6 +63,8 @@ public class SparkBatchRunner implements BatchRunner {
         this.namespace = namespace;
         this.snapshotBaseUrl = snapshotBaseUrl;
         this.contracts = contracts;
+        this.warehouse = warehouse;
+        this.catalogType = catalogType;
     }
 
     @Override
@@ -85,7 +91,7 @@ public class SparkBatchRunner implements BatchRunner {
                 String consumerId = identity.get();
                 T0Selector.Decision d = t0.select(si.get().topic(), 0, null);
                 String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), catalog, namespace,
-                        snapshotBaseUrl, consumerId);
+                        snapshotBaseUrl, consumerId, warehouse, catalogType);
                 log.info("Spark 批阶段 task={} T0={} taskJson={}", taskId, d.tso(), json);
 
                 // 提交:写 task-json → spark-submit → 等退出码
@@ -108,10 +114,13 @@ public class SparkBatchRunner implements BatchRunner {
     /** 组装 task-json(tagengine-executor 的 TaskConfig 契约)。公开以便离线自检。 */
     public static String buildTaskJson(TaskRecord task, String stream, String topic, long t0,
                                        String catalog, String namespace, String snapshotBaseUrl,
-                                       String consumerId) {
+                                       String consumerId, String warehouse, String catalogType) {
         Map<String, Object> p = task.params();
         ObjectNode cfg = OM.createObjectNode();
-        cfg.put("taskId", task.taskId());
+        // 执行器 TaskConfig.taskId 是 long:优先取 params.taskId(平台数值任务 id);缺失才回退 v2 字符串 id
+        Object platformId = p.get("taskId");
+        if (platformId instanceof Number n) cfg.put("taskId", n.longValue());
+        else cfg.put("taskId", task.taskId());
         cfg.put("taskVer", task.epoch());
         cfg.put("dataset", str(p.get("dataset"), stream));
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
@@ -121,6 +130,16 @@ public class SparkBatchRunner implements BatchRunner {
         iceberg.put("catalog", catalog);
         iceberg.put("namespace", namespace);
         iceberg.put("table", str(p.get("dataset"), stream));
+        // 写湖目标(可空;空 = 由 spark-submit 环境自备 catalog;本地/联调场景下发展 warehouse)
+        if (warehouse != null && !warehouse.isBlank()) iceberg.put("warehouse", warehouse);
+        if (catalogType != null && !catalogType.isBlank()) iceberg.put("catalogType", catalogType);
+
+        // tag_fact 事实层写目标:与数据集同 catalog/namespace(快照源模式下读不碰湖,但写仍需落湖)
+        ObjectNode tagFact = cfg.putObject("tagFact");
+        tagFact.put("catalog", catalog);
+        tagFact.put("namespace", namespace);
+        tagFact.put("table", "tag_fact");
+        tagFact.put("partitionByTask", true);
 
         // 快照源(方案 C): 执行器据此读平台快照 API(AS OF T0)而非读湖;baseUrl 空 → 执行器回读湖模式。
         // consumerId = 任务契约身份(批/增量一致性), 由调用方解析 contractRef → consumer_id 后传入。

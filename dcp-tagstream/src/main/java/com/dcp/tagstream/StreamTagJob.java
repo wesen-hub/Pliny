@@ -42,19 +42,14 @@ public final class StreamTagJob {
             } else if (jobJson != null) {
                 cfg = OM.readValue(Files.readString(Paths.get(jobJson), StandardCharsets.UTF_8), StreamConfig.class);
             } else {
-                System.err.println("缺少 --job-json <file> 或 --job-json-b64 <base64>");
-                System.exit(2);
-                return;
+                throw new IllegalArgumentException("缺少 --job-json <file> 或 --job-json-b64 <base64>");
             }
         } catch (Exception e) {
-            System.err.println("job-json 解析失败: " + e.getMessage());
-            System.exit(2);
-            return;
+            // 不要 System.exit:session 模式下用户 main 跑在 JM 进程内,exit 会把整个集群打挂
+            throw new IllegalArgumentException("job-json 解析失败: " + e.getMessage(), e);
         }
         if (cfg.kafka.topic == null || cfg.kafka.topic.isBlank()) {
-            System.err.println("kafka.topic 必填");
-            System.exit(2);
-            return;
+            throw new IllegalArgumentException("kafka.topic 必填");
         }
         System.out.println("[tagstream] 启动 task=" + cfg.taskId + " v" + cfg.taskVer
                 + " entityKey=" + cfg.entityKey + " topic=" + cfg.kafka.topic

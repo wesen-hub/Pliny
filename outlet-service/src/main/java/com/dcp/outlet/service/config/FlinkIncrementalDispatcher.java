@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -17,9 +16,8 @@ import java.util.Map;
  * <p>控制面算好"每分区起点"后,由本适配器把任务 params(打标配置桥)+ 起点 组装成 tagstream job-json,
  * 再上传 jar 并提交到 Flink REST。
  *
- * <p>未配置 Flink 时只落 job-json(便于调试),不提交。
+ * <p>未配置 Flink 时只落 job-json(便于调试),不提交。装配见 OutletConfig.externalIncrementalDispatcher。
  */
-@Component
 public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher {
 
     private static final ObjectMapper OM = new ObjectMapper();
@@ -30,8 +28,11 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
 
     public FlinkIncrementalDispatcher(@Value("${outlet.kafka.bootstrap}") String kafkaBootstrap,
                                       @Value("${outlet.flink.base-url:}") String flinkBaseUrl,
-                                      @Value("${outlet.flink.jar:}") String jarPath) {
-        this.kafkaBootstrap = kafkaBootstrap;
+                                      @Value("${outlet.flink.jar:}") String jarPath,
+                                      @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap) {
+        // 下发给 Flink 作业的 Kafka 地址 = Flink 集群视角(容器内网/宿主可达地址);缺省回退控制面自身配置
+        this.kafkaBootstrap = (flinkKafkaBootstrap == null || flinkKafkaBootstrap.isBlank())
+                ? kafkaBootstrap : flinkKafkaBootstrap;
         this.flinkBaseUrl = flinkBaseUrl;
         this.jarPath = jarPath;
     }
@@ -109,7 +110,10 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
                                       Map<Integer, Long> startOffsets) {
         Map<String, Object> p = task.params();
         ObjectNode cfg = OM.createObjectNode();
-        cfg.put("taskId", task.taskId());
+        // StreamConfig.taskId 是 long:优先取 params.taskId(平台数值任务 id);缺失才回退 v2 字符串 id
+        Object platformId = p.get("taskId");
+        if (platformId instanceof Number n) cfg.put("taskId", n.longValue());
+        else cfg.put("taskId", task.taskId());
         cfg.put("taskVer", task.epoch());
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
 
