@@ -1,7 +1,7 @@
 package com.dcp.tagjob.spark;
 
 import com.dcp.tagjob.config.TaskConfig;
-import com.dcp.tagjob.plan.BuildPlan;
+import com.dcp.tag.kie.BuildPlan;
 import com.dcp.tagjob.util.Log;
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
@@ -41,7 +41,9 @@ public final class DatasetAssembly {
 
     /** 装配主流程; 结构/字段错误抛 IllegalArgumentException(中文明细) */
     public static Dataset<Row> assemble(SparkSession spark, TaskConfig cfg, List<String> warnings) {
-        Dataset<Row> df = readDataset(spark, cfg);
+        Dataset<Row> df = cfg.snapshot.enabled()
+                ? SnapshotInput.read(spark, cfg, warnings)
+                : readDataset(spark, cfg);
 
         // datasetFields 与真实 schema 交集: 声明缺失 → 任务失败(设计: 发布校验已做依赖域, 执行器按真实 schema 复查)
         Set<String> cols = new LinkedHashSet<>(Arrays.asList(df.columns()));

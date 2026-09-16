@@ -202,6 +202,7 @@ docker compose up -d --build   # 5 容器: mysql + demo-db + seatunnel + backend
 ├── dcp-lakesync     湖同步(Spark) ├── dcp-tagstream    打标(Flink)   ├── outlet-adapters       生产适配(JDBC/Kafka/HTTP/仓库)
 ├── tagengine-executor 打标批(Spark)├── outlet-service        控制面服务(REST,独立部署)
 └── frontend         Vue3 控制台    └── outlet-worker-service 计算面服务(HTTP,独立部署)
+共享: dcp-tag-kie(打标编译库; backend 在线 / dcp-tagstream 流 / tagengine-executor 批 三端共用)
 ```
 
 | 模块 | 一句话 | 依赖 |
@@ -214,6 +215,10 @@ docker compose up -d --build   # 5 容器: mysql + demo-db + seatunnel + backend
 | `outlet-worker-service` | 计算面服务:收 `CreateUnit`、报心跳、续租约 | worker, adapters |
 
 **构建顺序**(Maven 依赖方向):`outlet-sdk → outlet-control → outlet-worker → outlet-adapters → {outlet-service, outlet-worker-service}`
+
+**打标编译库(三端共用)**:`dcp-tag-kie`(com.dcp.tag.kie)—— DRL 生成/KieBase 编译/TagActions,
+backend(在线)、dcp-tagstream(流)、tagengine-executor(批)统一依赖它(不再各自拷贝)。
+三个工程构建前先 `mvn -f dcp-tag-kie/pom.xml install`;backend 容器构建另见 backend/Dockerfile(dist/ 预置 jar)。
 
 **表结构**:`outlet/v2-meta-ddl.sql`(锚点/水位/流登记/任务/单元/单元分区/逻辑/死信)。
 

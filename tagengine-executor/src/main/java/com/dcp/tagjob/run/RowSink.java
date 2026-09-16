@@ -1,5 +1,7 @@
 package com.dcp.tagjob.run;
 
+import com.dcp.tag.kie.TagActions;
+
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -9,7 +11,7 @@ import java.util.List;
  * 每行一个实例, fire 前经 TagActions.bindSink 绑定, 行处理完弃用(分区内不复用, 避免串行状态)。
  * 语义(设计文档 §3/§11①): 命中 = 该资产至少执行一条动作(tag 或 stop/halt 动作); 决策表/平铺只数动作。
  */
-public final class RowSink {
+public final class RowSink implements TagActions.Sink {
 
     /** 输出的一枚标签(写 tag_fact 的行) */
     public static final class TagEntry {
@@ -50,7 +52,8 @@ public final class RowSink {
     }
 
     /** TagActions.tag 入口 */
-    void tag(String path, String value) {
+    @Override
+    public void tag(String path, String value) {
         tags.add(new TagEntry(path, value));
         if (focused >= 0) {
             assetTags[focused]++;
@@ -61,7 +64,8 @@ public final class RowSink {
     }
 
     /** TagActions.halt 入口: 停止动作也算一次动作(该资产命中) */
-    void requestHalt() {
+    @Override
+    public void requestHalt() {
         haltRequested = true;
         if (focused >= 0) {
             assetActions[focused]++;

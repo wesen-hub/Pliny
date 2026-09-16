@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-tag-kie —— 打标编译库(Drools 动态 Fact + DRL 生成/编译),三端共用:
+    - backend(在线求值) / dcp-tagstream(流) / tagengine-executor(批)
+  收敛前这三处各有一份拷贝且已分叉(DrlGenerator/FactSourceGen/KieBaseFactory/AssetPlan/
+  BuildPlan/TagActions 各 3 份,md5 各不同);本模块是唯一实现,调用方只保留各自的规则快照类
+  (实现 RuleAsset 接口)。
+
+  依赖策略: drools(compile, 由调用方 shade 进单 jar; 版本与三端一致 8.44.1.Final)
+             jackson-databind(compile, 仅用于 JsonNode 形状解析)
+  本模块不 shade —— 它本身是库, 打进哪个调用方的 shade jar 由调用方决定。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-tag-kie</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>dcp-tag-kie</name>
+    <description>打标编译库:规则资产→DRL / 动态 Fact 源码 / KieBase 编译 / 动作实现(TagActions)</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <drools.version>8.44.1.Final</drools.version>
+        <jackson.version>2.17.2</jackson.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-engine</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-core</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-compiler</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-mvel</artifactId>
+            <version>${drools.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+    </dependencies>
+</project>

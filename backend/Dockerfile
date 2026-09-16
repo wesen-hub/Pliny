@@ -4,6 +4,11 @@ WORKDIR /app
 COPY settings-docker.xml /root/.m2/settings.xml
 COPY pom.xml .
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B -DskipTests dependency:go-offline || true
+# 内部库 dcp-tag-kie(未发布到远端仓库): 构建前 mvn -f ../dcp-tag-kie/pom.xml package 产出 dist/ 预置 jar,
+# 此处 install-file 进本地仓库(带 cache mount, 跨构建复用)
+COPY dist/dcp-tag-kie-1.0.0.jar /tmp/dcp-tag-kie-1.0.0.jar
+RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+    -Dfile=/tmp/dcp-tag-kie-1.0.0.jar -DgroupId=com.dcp -DartifactId=dcp-tag-kie -Dversion=1.0.0 -Dpackaging=jar
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B package -DskipTests
 

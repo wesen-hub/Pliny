@@ -1,8 +1,8 @@
 package com.dcp.tagjob.run;
 
-import com.dcp.tagjob.drl.KieBaseFactory;
-import com.dcp.tagjob.drl.KieBaseFactory.KieBuildResult;
-import com.dcp.tagjob.plan.BuildPlan;
+import com.dcp.tag.kie.BuildPlan;
+import com.dcp.tag.kie.KieBaseFactory;
+import com.dcp.tag.kie.KieBaseFactory.KieBuildResult;
 import com.dcp.tagjob.util.Log;
 import org.kie.api.KieBase;
 

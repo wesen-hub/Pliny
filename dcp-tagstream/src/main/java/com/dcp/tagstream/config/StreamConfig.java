@@ -92,11 +92,18 @@ public class StreamConfig implements java.io.Serializable {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class RuleRef implements java.io.Serializable { private static final long serialVersionUID = 1L;
+    public static class RuleRef implements java.io.Serializable, com.dcp.tag.kie.RuleAsset {
+        private static final long serialVersionUID = 1L;
         public long id;
         public String kind;      // rule | flow
         public String name;
         public int ver;
         public JsonNode def;
+
+        @Override public long id() { return id; }
+        @Override public String kind() { return kind; }
+        @Override public String name() { return name; }
+        @Override public int ver() { return ver; }
+        @Override public JsonNode def() { return def; }
     }
 }

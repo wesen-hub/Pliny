@@ -1,4 +1,4 @@
-package com.dcp.module.tagengine.online.kie;
+package com.dcp.tag.kie;
 
 import java.io.Serializable;
 import java.util.ArrayList;

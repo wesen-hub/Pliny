@@ -1,4 +1,4 @@
-package com.dcp.module.tagengine.online.kie;
+package com.dcp.tag.kie;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -8,14 +8,14 @@ import java.util.Map;
 
 /**
  * 资产(规则)定义 → DRL 文本生成(设计文档 §7/§12: 可视化=单 rule; 决策表=排他组 activation-group+salience;
- * DRL 手写=原样直跑)。
+ * DRL 手写=原样直跑)。三端共用唯一实现(backend 在线 / dcp-tagstream 流 / tagengine-executor 批)。
  *
- * <p>动作约定(用户 DRL 的 API, 同步写入模块 README):
+ * <p>动作约定(用户 DRL 的 API, 同步写入各调用方 README):
  * <pre>
- *   tag($f, "标签路径"[, "值"])  → 记入行级 TagSink(写 tag_fact 的行 + 命中计数)
+ *   tag($f, "标签路径"[, "值"])  → 记入行级 Sink(写 tag_fact 的行 + 命中计数)
  *   halt()                       → 停止当前资产组求值(置 halt 标志 + 尽力中断当前 fire)
  * </pre>
- * 实现: 包内 function 声明包装调用静态 {@code com.dcp.tagjob.run.TagActions}(ThreadLocal sink/session,
+ * 实现: 包内 function 声明包装调用静态 {@code com.dcp.tag.kie.TagActions}(ThreadLocal sink/session,
  * fire 前 bind、行处理完 clear)。每个资产生成独立包(dcp.tagjob.asset.a{id}_v{ver}), agenda 按包名过滤。
  */
 public final class DrlGenerator {
@@ -29,10 +29,10 @@ public final class DrlGenerator {
     }
 
     /** 规则资产 → DRL 文本; 结构/类型问题追加到 errors(带资产定位), 返回 null */
-    public static String genRuleDrl(OnlineRule rule, String factFqcn,
+    public static String genRuleDrl(RuleAsset rule, String factFqcn,
                                     Map<String, Character> fieldKinds, List<String> errors) {
-        String pkg = assetPackage(rule.id, rule.ver);
-        JsonNode def = rule.def;
+        String pkg = assetPackage(rule.id(), rule.ver());
+        JsonNode def = rule.def();
         String mode = def.path("mode").asText("");
         StringBuilder rules = new StringBuilder();
         if ("table".equals(mode)) {
@@ -58,6 +58,8 @@ public final class DrlGenerator {
         return header(pkg, factFqcn) + rules;
     }
 
+    /* ---------- 包头部: import + dialect + 动作函数声明 ---------- */
+
     private static String header(String pkg, String factFqcn) {
         return "package " + pkg + ";\n"
                 + "import " + factFqcn + ";\n"
@@ -65,20 +67,20 @@ public final class DrlGenerator {
                 + "\n"
                 // 注意: MVEL function 按名字生成类型, 不支持同名重载 → tag 固定三参, 布尔场景第三参传 null
                 + "function void tag(" + factFqcn + " $f, String path, String value) {\n"
-                + "    com.dcp.tagjob.run.TagActions.tag($f, path, value);\n"
+                + "    com.dcp.tag.kie.TagActions.tag($f, path, value);\n"
                 + "}\n"
                 + "function void halt() {\n"
-                + "    com.dcp.tagjob.run.TagActions.halt();\n"
+                + "    com.dcp.tag.kie.TagActions.halt();\n"
                 + "}\n"
                 + "\n";
     }
 
     /* ---------- 决策表: 每行一 rule + 兜底, 同 activation-group(资产品质隔离名) + salience 行序越高越优先 ---------- */
 
-    private static void genTable(OnlineRule rule, Map<String, Character> fieldKinds,
+    private static void genTable(RuleAsset rule, Map<String, Character> fieldKinds,
                                  StringBuilder out, List<String> errors) {
         String loc = locate(rule);
-        JsonNode t = rule.def.path("table");
+        JsonNode t = rule.def().path("table");
         String field = t.path("field").asText("");
         String tag = t.path("tag").asText("");
         if (field.isEmpty() || tag.isEmpty()) {
@@ -90,7 +92,7 @@ public final class DrlGenerator {
             return;
         }
         char kind = fieldKinds.get(field);
-        String group = "grp_a" + rule.id + "_v" + rule.ver;   // 排他组: 资产品质隔离(同一资产内互斥; 跨资产同 tag 冲突由发布校验/执行序兜底)
+        String group = "grp_a" + rule.id() + "_v" + rule.ver();   // 排他组: 资产品质隔离(同一资产内互斥; 跨资产同 tag 冲突由发布校验/执行序兜底)
         int n = 0;
         JsonNode rows = t.path("rows");
         if (rows.isArray()) {
@@ -106,7 +108,7 @@ public final class DrlGenerator {
                 }
                 // salience: 行序越靠前越高 → 排他组内先命中先执行, 兜底 salience 最低
                 int salience = (rows.size() - n) * 10 + 10;
-                rule(out, "a" + rule.id + "_v" + rule.ver + "_row" + n, salience, group, cond,
+                rule(out, "a" + rule.id() + "_v" + rule.ver() + "_row" + n, salience, group, cond,
                         "tag($f, " + lit(tag) + ", " + lit(val) + ");");
                 n++;
             }
@@ -117,16 +119,16 @@ public final class DrlGenerator {
             return;
         }
         // 兜底: 恒真(无条件) + 排他组最低 salience —— 行命中时组内高 salience 先行并撤销兜底; 未命中时兜底执行
-        rule(out, "a" + rule.id + "_v" + rule.ver + "_else", 0, group, "",
+        rule(out, "a" + rule.id() + "_v" + rule.ver() + "_else", 0, group, "",
                 "tag($f, " + lit(tag) + ", " + lit(elseVal) + ");");
     }
 
     /* ---------- 可视化: 单 rule(when 条件组) ---------- */
 
-    private static void genVisual(OnlineRule rule, Map<String, Character> fieldKinds,
+    private static void genVisual(RuleAsset rule, Map<String, Character> fieldKinds,
                                   StringBuilder out, List<String> errors) {
         String loc = locate(rule);
-        JsonNode v = rule.def.path("visual");
+        JsonNode v = rule.def().path("visual");
         JsonNode when = v.path("when");
         // 语义(设计 §3): 组内按 g.logic(AND/OR)合并, 组间全部满足(AND)。
         // 注: 前端"从可视化生成 DRL"mock 曾把组间拼成 ||, 与 UI 提示「组间: 全部满足」矛盾; 执行器以设计 §3+UI 提示为准。
@@ -180,7 +182,7 @@ public final class DrlGenerator {
             errors.add(loc + " 可视化规则缺 THEN 动作");
             return;
         }
-        rule(out, "a" + rule.id + "_v" + rule.ver + "_v", 0, null,
+        rule(out, "a" + rule.id() + "_v" + rule.ver() + "_v", 0, null,
                 whenExpr.isEmpty() ? "" : whenExpr, then.toString());
     }
 
@@ -330,7 +332,7 @@ public final class DrlGenerator {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private static String locate(OnlineRule rule) {
-        return "[规则 " + rule.kind + "#" + rule.id + "(" + rule.name + ") v" + rule.ver + "]";
+    private static String locate(RuleAsset rule) {
+        return "[规则 " + rule.kind() + "#" + rule.id() + "(" + rule.name() + ") v" + rule.ver() + "]";
     }
 }

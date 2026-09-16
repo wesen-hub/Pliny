@@ -1,9 +1,10 @@
-package com.dcp.module.tagengine.online.kie;
+package com.dcp.module.tagengine.online;
 
+import com.dcp.tag.kie.RuleAsset;
 import com.fasterxml.jackson.databind.JsonNode;
 
 /** 在线求值的最小资产模型(规则快照: 与后端 tag_rule.def_json / 发布快照 assets 对齐) */
-public class OnlineRule {
+public class OnlineRule implements RuleAsset {
     public long id;
     public String kind;          // rule | flow
     public String name;
@@ -19,4 +20,10 @@ public class OnlineRule {
         r.def = def;
         return r;
     }
+
+    @Override public long id() { return id; }
+    @Override public String kind() { return kind; }
+    @Override public String name() { return name; }
+    @Override public int ver() { return ver; }
+    @Override public JsonNode def() { return def; }
 }

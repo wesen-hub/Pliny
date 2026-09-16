@@ -2,8 +2,8 @@ package com.dcp.tagjob;
 
 import com.dcp.tagjob.config.CliOptions;
 import com.dcp.tagjob.config.TaskConfig;
-import com.dcp.tagjob.plan.AssetPlan;
-import com.dcp.tagjob.plan.BuildPlan;
+import com.dcp.tag.kie.AssetPlan;
+import com.dcp.tag.kie.BuildPlan;
 import com.dcp.tagjob.run.MatrixAccumulator;
 import com.dcp.tagjob.run.PartitionEvaluator;
 import com.dcp.tagjob.spark.DatasetAssembly;

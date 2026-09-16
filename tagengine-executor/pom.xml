@@ -78,6 +78,13 @@
             <version>${jackson.version}</version>
         </dependency>
 
+        <!-- 打标编译库(三端共用: DRL 生成/KieBase 编译/TagActions), 见 dcp-tag-kie/README -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-tag-kie</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+
         <!-- MySQL/TiDB JDBC: 标签服务投影写(projection sink); lakesync 同款版本 -->
         <dependency>
             <groupId>com.mysql</groupId>

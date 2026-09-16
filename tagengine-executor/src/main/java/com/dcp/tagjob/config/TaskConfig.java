@@ -1,5 +1,6 @@
 package com.dcp.tagjob.config;
 
+import com.dcp.tag.kie.RuleAsset;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -32,6 +33,10 @@ public class TaskConfig {
     public String dataset;
     /** 实体键字段(行级求值/事实层 entity 列取值) */
     public String entityKey;
+    /** 批阶段快照 T0(方案 C 控制面下发; 快照源模式用, 读湖模式忽略) */
+    public long t0 = -1;
+    /** 快照源(方案 C: 读平台快照 API 替换读湖, 见 spark/SnapshotInput); 不配 = 读湖模式 */
+    public SnapshotRef snapshot = new SnapshotRef();
     public IcebergRef iceberg = new IcebergRef();
     public List<FieldDef> datasetFields = new ArrayList<>();
     public List<DerivedDef> derived = new ArrayList<>();
@@ -106,12 +111,18 @@ public class TaskConfig {
 
     /** 资产定义快照(与后端 tag_rule.def_json 对齐): kind=rule 的 def{visual|table|drl}; kind=flow 的 steps[] */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class RuleSnapshot {
+    public static class RuleSnapshot implements RuleAsset {
         public long id;
         public String kind;
         public String name;
         public int ver;
         public JsonNode def;
+
+        @Override public long id() { return id; }
+        @Override public String kind() { return kind; }
+        @Override public String name() { return name; }
+        @Override public int ver() { return ver; }
+        @Override public JsonNode def() { return def; }
     }
 
     /** tag_fact 事实层写目标 */
@@ -148,6 +159,30 @@ public class TaskConfig {
     }
 
     public Incremental incremental = new Incremental();
+
+    /**
+     * 快照源配置(方案 C): 执行器从平台快照 API 分页拉 AS OF T0 的行, 替换读湖。
+     * <p>语义约束(见 {@code SnapshotInput.read}):
+     * <ul>
+     *   <li>需 task-json 顶层 {@code t0} &gt; 0;</li>
+     *   <li>与增量游标({@link Incremental})互斥 —— 批阶段快照一次性、不携带 _seq 增量列。</li>
+     * </ul>
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SnapshotRef {
+        /** 平台地址(快照 API 宿主, 如 http://backend:8081); 空 = 读湖模式 */
+        public String baseUrl;
+        /** 契约消费者身份(快照裁剪视角); 空 = 不带 consumerId 参数 */
+        public String consumerId;
+        /** 每页行数 */
+        public int pageSize = 1000;
+        /** 单页 HTTP 超时(秒) */
+        public int timeoutSeconds = 30;
+
+        public boolean enabled() {
+            return baseUrl != null && !baseUrl.isBlank();
+        }
+    }
 
     /**
      * 标签服务投影(§9 P1): 打标结果当前值投影到 JDBC 表(TiDB), 供订阅/圈选/实体查标签实时查询。

@@ -1,12 +1,12 @@
 package com.dcp.tagstream;
 
-import com.dcp.tagjob.run.TagActions;
+import com.dcp.tag.kie.AssetPlan;
+import com.dcp.tag.kie.BuildPlan;
+import com.dcp.tag.kie.DrlGenerator;
+import com.dcp.tag.kie.FactSourceGen;
+import com.dcp.tag.kie.KieBaseFactory;
+import com.dcp.tag.kie.TagActions;
 import com.dcp.tagstream.config.StreamConfig;
-import com.dcp.tagstream.kie.AssetPlan;
-import com.dcp.tagstream.kie.BuildPlan;
-import com.dcp.tagstream.kie.DrlGenerator;
-import com.dcp.tagstream.kie.FactSourceGen;
-import com.dcp.tagstream.kie.KieBaseFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.api.common.state.ValueState;
@@ -130,7 +130,7 @@ public class StreamEvaluator extends KeyedProcessFunction<String, String, Stream
         TagActions.Collector collector = new TagActions.Collector();
         KieSession session = bundle.base.newKieSession();
         try {
-            TagActions.bindCollector(collector);
+            TagActions.bindSink(collector);
             // ① 平铺规则(数组序); halt/停止动作 → 跳过剩余平铺(规则流照跑)
             for (int flat : bundle.flatOrder) {
                 fireAsset(session, fact, flat);

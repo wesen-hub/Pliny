@@ -1,7 +1,5 @@
-package com.dcp.tagjob.drl;
+package com.dcp.tag.kie;
 
-import com.dcp.tagjob.plan.AssetPlan;
-import com.dcp.tagjob.util.Log;
 import org.drools.compiler.kie.builder.impl.KieServicesImpl;
 import org.kie.api.KieBase;
 import org.kie.api.KieServices;
@@ -11,6 +9,7 @@ import org.kie.api.builder.Message;
 import org.kie.api.builder.Results;
 
 import java.util.List;
+import java.util.logging.Logger;
 
 /**
  * KieBase 编译工厂(driver 校验编译 + executor 本地重建共用; 设计文档 §12)。
@@ -27,6 +26,8 @@ import java.util.List;
  */
 public final class KieBaseFactory {
 
+    private static final Logger LOG = Logger.getLogger("dcp-tag-kie");
+
     private KieBaseFactory() {
     }
 
@@ -35,7 +36,7 @@ public final class KieBaseFactory {
         try {
             return KieServices.Factory.get();
         } catch (Throwable t) {
-            Log.warn("KieServices.Factory.get() 失败(" + t + "), 直接 new KieServicesImpl() 兜底");
+            LOG.warning(() -> "KieServices.Factory.get() 失败(" + t + "), 直接 new KieServicesImpl() 兜底");
             return new KieServicesImpl();
         }
     }

@@ -8,6 +8,7 @@ frontend/dist/
 agent/target/
 dist/
 seatunnel/dist/
+dcp-tag-kie/target/
 
 # v2 消费通道模块(outlet-*)
 outlet-sdk/target/

@@ -1,13 +1,13 @@
 package com.dcp.tagjob;
 
 import com.dcp.tagjob.config.TaskConfig;
-import com.dcp.tagjob.drl.DrlGenerator;
-import com.dcp.tagjob.drl.KieBaseFactory;
-import com.dcp.tagjob.fact.FactSourceGen;
-import com.dcp.tagjob.plan.AssetPlan;
-import com.dcp.tagjob.plan.BuildPlan;
+import com.dcp.tag.kie.AssetPlan;
+import com.dcp.tag.kie.BuildPlan;
+import com.dcp.tag.kie.DrlGenerator;
+import com.dcp.tag.kie.FactSourceGen;
+import com.dcp.tag.kie.KieBaseFactory;
+import com.dcp.tag.kie.TagActions;
 import com.dcp.tagjob.run.RowSink;
-import com.dcp.tagjob.run.TagActions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kie.api.KieBase;
 import org.kie.api.runtime.KieSession;

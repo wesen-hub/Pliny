@@ -1,7 +1,8 @@
 package com.dcp.tagjob.run;
 
-import com.dcp.tagjob.plan.AssetPlan;
-import com.dcp.tagjob.plan.BuildPlan;
+import com.dcp.tag.kie.AssetPlan;
+import com.dcp.tag.kie.BuildPlan;
+import com.dcp.tag.kie.TagActions;
 import com.dcp.tagjob.util.Log;
 import org.apache.spark.api.java.function.MapPartitionsFunction;
 import org.apache.spark.broadcast.Broadcast;

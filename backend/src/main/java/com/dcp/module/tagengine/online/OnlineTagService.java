@@ -1,13 +1,12 @@
 package com.dcp.module.tagengine.online;
 
 import com.dcp.module.tagengine.TagPaths;
-import com.dcp.module.tagengine.online.kie.AssetPlan;
-import com.dcp.module.tagengine.online.kie.BuildPlan;
-import com.dcp.module.tagengine.online.kie.DrlGenerator;
-import com.dcp.module.tagengine.online.kie.FactSourceGen;
-import com.dcp.module.tagengine.online.kie.KieBaseFactory;
-import com.dcp.module.tagengine.online.kie.OnlineRule;
-import com.dcp.tagjob.run.TagActions;
+import com.dcp.tag.kie.AssetPlan;
+import com.dcp.tag.kie.BuildPlan;
+import com.dcp.tag.kie.DrlGenerator;
+import com.dcp.tag.kie.FactSourceGen;
+import com.dcp.tag.kie.KieBaseFactory;
+import com.dcp.tag.kie.TagActions;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -95,7 +94,7 @@ public class OnlineTagService {
             }
             org.kie.api.runtime.KieSession session = b.base.newKieSession();
             try {
-                TagActions.bindCollector(collector);
+                TagActions.bindSink(collector);
                 TagActions.bindSession(session);
                 org.kie.api.runtime.rule.FactHandle h = session.insert(fact);
                 session.fireAllRules();

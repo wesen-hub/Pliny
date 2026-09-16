@@ -1,10 +1,9 @@
-package com.dcp.tagstream.kie;
-
+package com.dcp.tag.kie;
 
 import java.util.List;
 
 /**
- * 动态 Fact 类源码生成(设计文档 §12: Fact 类由执行器 driver 按任务字段清单 + schema 类型动态生成并编译)。
+ * 动态 Fact 类源码生成(设计文档 §12: Fact 类由 driver 按任务字段清单 + schema 类型动态生成并编译)。
  *
  * 约定:
  *  - 简单名固定为 Fact, 包名 dcp.tagjob.fact.t{taskId}_v{taskVer} —— 包级隔离避免任务间类名冲突
