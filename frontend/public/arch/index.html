@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据采集平台 V3 · 系统架构设计图</title>
+<style>
+  :root{
+    --bg:#eef2f8;
+    --border:#e4ebf5;
+    --text:#0f172a;
+    --text-2:#475569;
+    --text-3:#94a3b8;
+    --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    background:
+      radial-gradient(1400px 700px at 12% -12%, #e7eefb 0%, transparent 62%),
+      radial-gradient(1100px 600px at 96% 112%, #eaf1fd 0%, transparent 58%),
+      var(--bg);
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+
+  .app{height:100vh;display:flex;flex-direction:column;}
+
+  .topbar{
+    flex:none;display:flex;align-items:center;gap:22px;
+    height:64px;padding:0 22px;
+    background:rgba(255,255,255,.82);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(226,234,245,.9);
+    box-shadow:0 1px 2px rgba(15,23,42,.03);
+    z-index:20;
+  }
+  .brand{display:flex;align-items:center;gap:11px;min-width:0;}
+  .logo{
+    width:36px;height:36px;flex:none;border-radius:10px;
+    background:linear-gradient(135deg,#4f8cff,#8b5cf6);
+    display:grid;place-items:center;
+    color:#fff;font-weight:700;font-size:15px;
+    box-shadow:0 5px 14px -3px rgba(79,140,255,.55);
+  }
+  .brand-text{min-width:0;}
+  .brand-text h1{
+    margin:0;font-size:14px;font-weight:650;letter-spacing:.01em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px;
+  }
+  .brand-text p{
+    margin:2px 0 0;font-size:11.5px;color:var(--text-3);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px;
+  }
+
+  .breadcrumb{
+    margin-left:auto;display:flex;align-items:center;
+    overflow-x:auto;scrollbar-width:none;
+  }
+  .breadcrumb::-webkit-scrollbar{display:none;}
+  .crumb{
+    border:none;background:transparent;cursor:pointer;font-family:inherit;
+    font-size:12.5px;color:#64748b;padding:6px 11px;border-radius:8px;
+    white-space:nowrap;transition:background .15s,color .15s;
+  }
+  .crumb:hover{background:#eff4fb;color:var(--text);}
+  .crumb.active{color:#1d4ed8;font-weight:650;background:#eaf1fe;cursor:default;}
+  .crumb-sep{color:#cbd5e1;font-size:11px;padding:0 1px;user-select:none;}
+
+  .stage{
+    flex:1;min-height:0;overflow:auto;
+    padding:22px;
+    display:flex;align-items:center;justify-content:center;
+    scrollbar-width:thin;
+  }
+  .stage::-webkit-scrollbar{width:9px;height:9px;}
+  .stage::-webkit-scrollbar-thumb{
+    background:#cfdae8;border-radius:9px;border:2px solid transparent;
+    background-clip:padding-box;
+  }
+  .stage::-webkit-scrollbar-thumb:hover{background:#b9c8da;background-clip:padding-box;}
+
+  .canvas-fit{position:relative;flex:0 0 auto;margin:auto;}
+  .canvas{
+    position:absolute;left:0;top:0;
+    transform-origin:top left;
+    background:#fff;
+    background-image:radial-gradient(circle, #e8eef7 1px, transparent 1px);
+    background-size:22px 22px;
+    background-position:-1px -1px;
+    border-radius:20px;
+    border:1px solid #e9eff7;
+    box-shadow:
+      0 1px 3px rgba(15,23,42,.04),
+      0 22px 60px -26px rgba(15,23,42,.18);
+  }
+  .groups,.labels,.nodes{position:absolute;inset:0;}
+  .groups{z-index:0;}
+  .links{position:absolute;left:0;top:0;z-index:1;overflow:visible;pointer-events:none;}
+  .labels{z-index:5;pointer-events:none;}
+  .nodes{z-index:4;pointer-events:none;}
+  .nodes .node{pointer-events:auto;}
+
+  .group{
+    position:absolute;
+    border:1.5px solid #e9f0f9;
+    border-radius:18px;
+    background:linear-gradient(180deg, rgba(250,252,255,.94), rgba(247,250,254,.6));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.9);
+  }
+  .group-label{
+    position:absolute;top:-11px;left:20px;
+    padding:2px 12px;
+    font-size:11px;font-weight:700;letter-spacing:.08em;
+    color:#93a5bb;
+    background:#fff;
+    border:1px solid #e9f0f9;
+    border-radius:99px;
+    box-shadow:0 1px 3px rgba(15,23,42,.05);
+    white-space:nowrap;
+  }
+
+  .node{
+    position:absolute;
+    display:flex;flex-direction:column;justify-content:center;
+    padding:10px 14px 10px 18px;
+    background:linear-gradient(135deg,#ffffff 0%,#fbfdff 100%);
+    border:1px solid #e8eef7;
+    border-radius:12px;
+    box-shadow:
+      0 1px 2px rgba(15,23,42,.04),
+      0 6px 16px -9px rgba(15,23,42,.12);
+    user-select:none;
+    cursor:default;
+    transition:transform .18s cubic-bezier(.22,1,.36,1),
+               box-shadow .18s ease,
+               border-color .18s ease,
+               opacity .2s ease;
+    animation:nodeIn .34s cubic-bezier(.22,1,.36,1) backwards;
+  }
+  @keyframes nodeIn{
+    from{opacity:0;transform:translateY(9px) scale(.975);}
+    to{opacity:1;transform:none;}
+  }
+
+  .node::before{
+    content:'';
+    position:absolute;left:0;top:14px;bottom:14px;
+    width:3.5px;border-radius:0 3px 3px 0;
+    background:var(--c,#3b82f6);
+    box-shadow:0 0 10px -1px var(--c,#3b82f6);
+  }
+  .node::after{
+    content:'';
+    position:absolute;right:-28px;bottom:-28px;
+    width:84px;height:84px;border-radius:50%;
+    background:var(--c,#3b82f6);
+    opacity:.07;
+    filter:blur(10px);
+    pointer-events:none;
+  }
+
+  .node.drillable{cursor:pointer;}
+  .node:hover{
+    transform:translateY(-2px);
+    border-color:var(--c,#3b82f6);
+    box-shadow:
+      0 2px 5px rgba(15,23,42,.05),
+      0 18px 38px -16px rgba(15,23,42,.28);
+  }
+  .node.dim{opacity:.16;filter:saturate(.4);}
+
+  .node-name{
+    font-size:13px;font-weight:650;color:var(--text);
+    line-height:1.25;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .node.drillable .node-name{padding-right:20px;}
+  .node-meta{
+    margin-top:4px;
+    font-size:11px;line-height:1.42;color:#9aabbd;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .node.compact .node-meta{display:none;}
+
+  .node-drill{
+    position:absolute;top:7px;right:7px;
+    width:19px;height:19px;border-radius:6px;
+    display:grid;place-items:center;
+    font-size:10px;font-weight:800;line-height:1;
+    color:var(--c,#3b82f6);
+    background:#f5f9fe;
+    border:1px solid #e7eef8;
+    transition:background .15s,color .15s,border-color .15s,transform .15s;
+  }
+  .node.drillable:hover .node-drill{
+    background:var(--c,#3b82f6);
+    color:#fff;
+    border-color:var(--c,#3b82f6);
+    transform:scale(1.1);
+  }
+
+  .link{
+    fill:none;
+    stroke-width:1.7;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    transition:stroke .18s ease,opacity .18s ease,stroke-width .18s ease;
+  }
+  .link.async{stroke-dasharray:7 5;}
+  .link.dim{opacity:.07;}
+
+  .link-hit{
+    fill:none;
+    stroke:transparent;
+    stroke-width:22;
+    stroke-linecap:round;
+    pointer-events:stroke;
+    cursor:pointer;
+  }
+
+  .link-flow{
+    fill:none;
+    stroke-width:2.3;
+    stroke-linecap:round;
+    stroke-dasharray:2 14;
+    opacity:0;
+    transition:opacity .2s ease;
+    pointer-events:none;
+  }
+  .edge.active .link-flow{
+    opacity:.95;
+    animation:flow 1.05s linear infinite;
+  }
+  @keyframes flow{
+    from{stroke-dashoffset:0;}
+    to{stroke-dashoffset:-16;}
+  }
+
+  .link-label{
+    position:absolute;
+    transform:translate(-50%,-50%);
+    padding:3px 10px;
+    border-radius:99px;
+    font-size:10.5px;font-weight:600;letter-spacing:.01em;
+    color:#7c8ba1;
+    background:#fff;
+    border:1px solid #e8eef7;
+    box-shadow:0 1px 4px rgba(15,23,42,.08);
+    white-space:nowrap;
+    cursor:pointer;
+    user-select:none;
+    pointer-events:auto;
+    transition:color .16s,background .16s,border-color .16s,box-shadow .16s,transform .16s,opacity .18s;
+  }
+  .link-label:hover,
+  .link-label.hl{
+    color:#fff;
+    background:var(--lc,#3b82f6);
+    border-color:var(--lc,#3b82f6);
+    box-shadow:0 6px 18px -5px var(--lc,#3b82f6);
+    transform:translate(-50%,-50%) scale(1.08);
+  }
+  .link-label.dim{opacity:.10;pointer-events:none;}
+  .link-label.drillable::after{
+    content:'↗';
+    margin-left:5px;
+    font-size:8.5px;
+    opacity:.9;
+  }
+
+  .legend{
+    position:fixed;left:22px;bottom:18px;z-index:25;
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:8px 15px;
+    background:rgba(255,255,255,.92);
+    -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    border:1px solid rgba(226,234,245,.95);
+    border-radius:12px;
+    box-shadow:0 10px 30px -14px rgba(15,23,42,.3);
+    font-size:11px;color:#64748b;
+  }
+  .legend-item{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+  .legend-item i{width:9px;height:9px;border-radius:3px;display:block;flex:none;}
+  .legend-item i.dash{
+    width:17px;height:0;border-radius:0;
+    border-top:2px dashed #f0b429;
+  }
+  .legend-item i.cursor{
+    width:14px;height:14px;border-radius:50%;
+    background:#3b82f6;opacity:.25;
+    border:1.5px solid #3b82f6;
+  }
+
+  .detail{
+    position:fixed;right:22px;bottom:22px;width:300px;z-index:30;
+    background:#fff;
+    border:1px solid #e8eef7;border-radius:14px;
+    padding:16px 18px 18px;
+    box-shadow:0 24px 60px -20px rgba(15,23,42,.35);
+    animation:slideUp .22s cubic-bezier(.22,1,.36,1);
+  }
+  @keyframes slideUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+  .detail[hidden]{display:none;}
+  .detail-close{
+    position:absolute;top:10px;right:10px;
+    width:23px;height:23px;border-radius:7px;border:none;
+    background:#f5f8fc;color:#94a3b8;cursor:pointer;
+    font-size:14px;line-height:1;font-family:inherit;
+    transition:background .15s,color .15s;
+  }
+  .detail-close:hover{background:#eef3fa;color:#475569;}
+  .detail-badge{
+    display:inline-block;font-size:10.5px;font-weight:700;
+    padding:3px 8px;border-radius:6px;margin-bottom:9px;
+    letter-spacing:.03em;
+  }
+  .detail h3{margin:0 0 7px;font-size:14px;font-weight:650;}
+  .detail p{margin:0;font-size:12px;line-height:1.65;color:var(--text-2);}
+  .detail .path{
+    margin-top:9px;padding:8px 10px;
+    background:#f7fafd;border-radius:8px;
+    font-size:11px;color:#64748b;
+    display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  }
+  .detail .path b{color:#334155;font-weight:600;}
+  .detail .hint{
+    margin-top:11px;padding-top:10px;
+    border-top:1px dashed #e8eef7;
+    font-size:11px;color:var(--text-3);
+  }
+
+  @media (max-width:760px){
+    .topbar{height:auto;flex-wrap:wrap;padding:11px 14px;gap:10px;}
+    .breadcrumb{margin-left:0;width:100%;}
+    .brand-text h1,.brand-text p{max-width:220px;}
+    .stage{padding:12px;}
+    .legend{left:12px;right:12px;bottom:12px;justify-content:center;}
+    .detail{left:12px;right:12px;width:auto;bottom:76px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">D</div>
+      <div class="brand-text">
+        <h1 id="viewTitle">加载中…</h1>
+        <p id="viewSub"></p>
+      </div>
+    </div>
+    <nav class="breadcrumb" id="breadcrumb"></nav>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="canvas-fit" id="canvasFit">
+      <div class="canvas" id="canvas">
+        <div class="groups" id="groups"></div>
+        <svg class="links" id="links" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="labels" id="labels"></div>
+        <div class="nodes" id="nodes"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="legend">
+  <span class="legend-item"><i style="background:#06b6d4"></i>客户端</span>
+  <span class="legend-item"><i style="background:#8b5cf6"></i>接入层</span>
+  <span class="legend-item"><i style="background:#3b82f6"></i>业务服务</span>
+  <span class="legend-item"><i style="background:#14b8a6"></i>领域模型</span>
+  <span class="legend-item"><i style="background:#f59e0b"></i>中间件</span>
+  <span class="legend-item"><i style="background:#10b981"></i>数据存储</span>
+  <span class="legend-item"><i class="dash"></i>异步消息</span>
+  <span class="legend-item"><i class="cursor"></i>连线可点击</span>
+</div>
+
+<aside class="detail" id="detail" hidden>
+  <button class="detail-close" id="detailClose" aria-label="关闭">×</button>
+  <div class="detail-badge" id="detailBadge"></div>
+  <h3 id="detailName"></h3>
+  <p id="detailDesc"></p>
+  <div class="path" id="detailPath" hidden></div>
+  <div class="hint" id="detailHint">点击带 ↗ 的元素可继续下钻</div>
+</aside>
+
+<script>
+/* =========================================================
+ * 0. 基础常量
+ * =======================================================*/
+const NS = 'http://www.w3.org/2000/svg';
+
+const TYPE_META = {
+  client:  { color:'#06b6d4', label:'客户端'   },
+  gateway: { color:'#8b5cf6', label:'接入层'   },
+  service: { color:'#3b82f6', label:'业务服务' },
+  domain:  { color:'#14b8a6', label:'领域模型' },
+  infra:   { color:'#f59e0b', label:'中间件'   },
+  data:    { color:'#10b981', label:'数据存储' }
+};
+
+const ASYNC_COLOR = '#f0b429';
+const HL_COLOR    = '#3b82f6';
+
+const DEFS = (() => {
+  let s = '<defs>';
+  const mk = (id, fill) =>
+    `<marker id="${id}" viewBox="0 0 10 10" refX="8.5" refY="5"
+      markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse"
+      orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="${fill}"/>
+    </marker>`;
+  Object.entries(TYPE_META).forEach(([k, v]) => { s += mk('arw-' + k, v.color); });
+  s += mk('arw-async', ASYNC_COLOR);
+  s += mk('arw-hl', HL_COLOR);
+  s += '</defs>';
+  return s;
+})();
+
+/* =========================================================
+ * 1. 视图数据 —— 数据采集平台 V3
+ * =======================================================*/
+const VIEWS = {
+
+  /* ---------------- 顶层:系统总览 ---------------- */
+  root: {
+    title: '数据采集平台 V3 · 系统架构总览',
+    subtitle: '采集 → 平台服务 → v2 消费通道 → 数据底座 · 模块与连线均可点击下钻',
+    groups: [
+      { name:'用户与采集 USER & COLLECT',     x:24,  y:30,  w:300, h:330 },
+      { name:'平台服务层 PLATFORM SERVICES', x:348, y:30,  w:560, h:330 },
+      { name:'v2 增量消费通道 CONSUMPTION',  x:932, y:30,  w:330, h:420 },
+      { name:'数据底座 DATA & INFRA',        x:24,  y:474, w:1238, h:140 }
+    ],
+    nodes: [
+      { id:'web',      name:'前端控制台', type:'client',  meta:'Vue3 · Vite · Element Plus', desc:'数据源/同步任务/标签/订阅/权限的全量管理界面,直连平台后端 REST。', x:48, y:76,  w:252, h:74 },
+      { id:'agent',    name:'采集 Agent', type:'service', meta:'节点常驻进程',           desc:'部署在业务机,拉取命令执行采集任务,心跳上报执行状态。', x:48, y:172, w:252, h:74 },
+      { id:'seatunnel',name:'同步引擎',   type:'domain',  meta:'SeaTunnel 3.x · 容器化', desc:'批/流数据同步执行体,源端读取并落地数据湖/目标库。',   x:48, y:268, w:252, h:74 },
+
+      { id:'backend', name:'平台主后端', type:'service', meta:'Spring Boot 3.2 · 8081', desc:'数据接入、同步编排、变更流出口、打标引擎、订阅中心的核心服务。', x:372, y:76,  w:230, h:74, children:'backend' },
+      { id:'outlet',  name:'变更流出口 + 权限', type:'service', meta:'契约 ∩ 主体 · 五道判定', desc:'快照/变更/回查的统一授权出口:列级、行级、密级、配额逐层裁剪。', x:372, y:172, w:230, h:74, children:'outlet' },
+      { id:'tagengine', name:'打标引擎模块', type:'service', meta:'规则 / 任务 / 在线 / 流 / 批', desc:'打标任务与规则资产,在线求值与 v2 批/增执行体的登记入口。', x:372, y:268, w:230, h:74, children:'tag' },
+      { id:'sync',    name:'数据接入与同步', type:'service', meta:'CDC / 全量 / 文件', desc:'sync 域:配置驱动的同步作业编排与执行状态管理。', x:622, y:76,  w:250, h:74 },
+      { id:'datasub', name:'订阅与分发', type:'service', meta:'PULL API · token 鉴权', desc:'订阅方 schema/snapshot/changes 数据服务与导出任务。', x:622, y:172, w:250, h:74 },
+      { id:'perm',    name:'权限体系', type:'domain', meta:'统一 ABAC · 策略中心 + PDP + Plan', desc:'数据权限统一控制模型:定义层完备、执行层六出口 PEP 切面。', x:622, y:268, w:250, h:74, children:'perm' },
+
+      { id:'v2ctrl',  name:'v2 控制面', type:'service', meta:'outlet-service · 8095', desc:'锚点/起点/规划/租约/巡检/批阶段,批增两阶段的决策中心。', x:956, y:76,  w:282, h:74, children:'v2' },
+      { id:'v2worker',name:'v2 计算面', type:'service', meta:'worker-service · 8096', desc:'单元运行器:契约裁剪 → 业务逻辑 → commitSync,异常进死信。', x:956, y:172, w:282, h:74 },
+      { id:'spark',   name:'Spark 批执行体', type:'domain', meta:'tagengine-executor', desc:'批阶段:平台快照 API → 规则求值 → tag_fact 落湖。', x:956, y:268, w:282, h:74, children:'tag' },
+      { id:'flink',   name:'Flink 流执行体', type:'domain', meta:'dcp-tagstream', desc:'增量段:从播种 offset 消费 → 求值 → Redis + tag_fact_view。', x:956, y:360, w:282, h:74 },
+
+      { id:'mysql', name:'MySQL 元库',   type:'data',  meta:'8.0 · dcp 库',   desc:'元数据/任务/契约/标签/权限全量持久化。', x:48,  y:506, w:162, h:72 },
+      { id:'kafka', name:'Kafka',        type:'infra', meta:'KRaft 3 节点',   desc:'变更流总线与任务事件管道。',             x:218, y:506, w:162, h:72 },
+      { id:'tidb',  name:'TiDB + TiCDC', type:'data',  meta:'v7.5 · 3 副本',  desc:'数据面与 CDC 变更捕获。',               x:388, y:506, w:162, h:72 },
+      { id:'redis', name:'Redis',        type:'infra', meta:'在线层',        desc:'在线标签 hash、缓存与 TTL。',            x:558, y:506, w:162, h:72 },
+      { id:'minio', name:'MinIO',        type:'data',  meta:'对象存储',      desc:'文件数据与湖底层存储。',                 x:728, y:506, w:162, h:72 },
+      { id:'lake',  name:'Iceberg 湖',   type:'data',  meta:'catalog demo',  desc:'tag_fact 与同步数据落地,支持时间旅行。', x:898, y:506, w:162, h:72 },
+      { id:'neo4j', name:'Neo4j 血缘',   type:'data',  meta:'图谱',          desc:'逻辑表血缘与影响分析。',                 x:1068,y:506, w:162, h:72 }
+    ],
+    edges: [
+      { id:'r1',  from:'web',      to:'backend',  label:'HTTPS REST' },
+      { id:'r2',  from:'agent',    to:'backend',  label:'心跳/命令', type:'async' },
+      { id:'r3',  from:'seatunnel',to:'lake',     label:'同步写湖', type:'async' },
+      { id:'r4',  from:'backend',  to:'mysql',    label:'持久化' },
+      { id:'r5',  from:'backend',  to:'redis',    label:'在线标签' },
+      { id:'r6',  from:'backend',  to:'neo4j',    label:'血缘' },
+      { id:'r7',  from:'backend',  to:'v2ctrl',   label:'登记桥 deploy-v2', children:'tag', desc:'打标任务发布后,登记成 v2 消费任务(流扫描 + 契约/账号预置)。' },
+      { id:'r8',  from:'tidb',     to:'kafka',    label:'CDC 变更流', type:'async', desc:'TiCDC 按 index-value 分 3 区产出变更事件。' },
+      { id:'r9',  from:'kafka',    to:'outlet',   label:'变更读取', type:'async' },
+      { id:'r10', from:'kafka',    to:'v2ctrl',   label:'流扫描/锚点' },
+      { id:'r11', from:'kafka',    to:'v2worker', label:'增量消费', type:'async' },
+      { id:'r12', from:'kafka',    to:'flink',    label:'增量消费', type:'async' },
+      { id:'r13', from:'v2ctrl',   to:'v2worker', label:'CreateUnit 下发' },
+      { id:'r14', from:'v2ctrl',   to:'spark',    label:'spark-submit' },
+      { id:'r15', from:'v2ctrl',   to:'flink',    label:'播种起点', desc:'批完成后计算每分区起点,播给 Flink 起消费。' },
+      { id:'r16', from:'v2worker', to:'backend',  label:'契约视图', desc:'每 30s 拉取契约视图,fail-closed。' },
+      { id:'r17', from:'spark',    to:'backend',  label:'快照 AS OF T0' },
+      { id:'r18', from:'spark',    to:'lake',     label:'tag_fact' },
+      { id:'r19', from:'flink',    to:'redis',    label:'在线标签' },
+      { id:'r20', from:'flink',    to:'tidb',     label:'tag_fact_view' }
+    ]
+  },
+
+  /* ---------------- 第二层:平台主后端内部 ---------------- */
+  backend: {
+    title: '平台主后端 · 模块与职责边界',
+    subtitle: '单 Maven 模块 · 220 文件 / 249 端点 · 部署单元不变,逻辑按域划分',
+    groups: [
+      { name:'接入与同步 INGEST & SYNC', x:24,  y:28,  w:500, h:200 },
+      { name:'出口与打标 OUTLET & TAG',  x:548, y:28,  w:500, h:200 },
+      { name:'订阅与权限 SUB & PERM',    x:1072,y:28,  w:430, h:200 },
+      { name:'依赖底座 DEPENDENCIES',    x:24,  y:252, w:1478, h:140 }
+    ],
+    nodes: [
+      { id:'b-ingest',  name:'数据接入',   type:'service', meta:'ingest / 数据源管理',   desc:'数据源配置、连通性探测、接入任务。',   x:48,  y:76,  w:210, h:72 },
+      { id:'b-sync',    name:'同步编排',   type:'service', meta:'sync 域 · 44 文件',     desc:'CDC/全量/文件同步作业的编排与调度。', x:286, y:76,  w:210, h:72 },
+      { id:'b-file',    name:'文件同步',   type:'domain',  meta:'rclone 引擎',          desc:'整文件搬运、校验与增量同步。',         x:48,  y:160, w:210, h:58 },
+      { id:'b-lake',    name:'湖同步',     type:'domain',  meta:'dcp-lakesync',         desc:'TiDB 数据面入 Iceberg 湖。',           x:286, y:160, w:210, h:58 },
+
+      { id:'b-outlet',  name:'变更流出口', type:'service', meta:'OutletController',      desc:'快照/变更/回查 REST + 权限引擎。',     x:572, y:76,  w:210, h:72, children:'outlet' },
+      { id:'b-tag',     name:'打标引擎',   type:'service', meta:'tagengine · 24 文件',   desc:'规则/任务/在线求值/订阅/权限。',      x:810, y:76,  w:210, h:72, children:'tag' },
+      { id:'b-sdk',     name:'Outlet SDK', type:'domain',  meta:'SDK 运行器',           desc:'平台进程内跑出口逻辑的运行器。',       x:572, y:160, w:210, h:58 },
+      { id:'b-batch',   name:'批作业服务', type:'domain',  meta:'SparkJobSpecBuilder',   desc:'快照批作业规格生成与提交。',           x:810, y:160, w:210, h:58 },
+
+      { id:'b-sub',     name:'订阅中心',   type:'service', meta:'datasub · PULL API',    desc:'订阅方数据拉取与导出任务。',           x:1096,y:76,  w:190, h:72 },
+      { id:'b-perm',    name:'权限体系',   type:'domain',  meta:'RBAC + L0-L3',          desc:'功能权限与数据权限判定。',             x:1308,y:76,  w:170, h:72 },
+      { id:'b-keystore',name:'KeyStore',   type:'domain',  meta:'密钥/令牌',             desc:'token 生成与校验。',                   x:1096,y:160, w:190, h:58 },
+
+      { id:'b-mysql', name:'MySQL 元库', type:'data',  meta:'元数据与业务表', desc:'全部持久化状态。', x:48,  y:292, w:230, h:70 },
+      { id:'b-kafka', name:'Kafka',      type:'infra', meta:'19092',        desc:'变更流与任务事件。', x:306, y:292, w:230, h:70 },
+      { id:'b-redis', name:'Redis',      type:'infra', meta:'在线层',       desc:'在线标签与缓存。',   x:564, y:292, w:230, h:70 },
+      { id:'b-tidb',  name:'TiDB 只读',  type:'data',  meta:'GC safe point',desc:'R2 规则与数据面查询。', x:822, y:292, w:230, h:70 },
+      { id:'b-neo4j', name:'Neo4j',      type:'data',  meta:'血缘图谱',     desc:'逻辑表血缘存储。',     x:1080,y:292, w:230, h:70 }
+    ],
+    edges: [
+      { id:'b1',  from:'b-ingest',  to:'b-sync',  label:'触发同步' },
+      { id:'b2',  from:'b-sync',    to:'b-file' },
+      { id:'b3',  from:'b-sync',    to:'b-lake' },
+      { id:'b4',  from:'b-outlet',  to:'b-sdk',   label:'进程内运行' },
+      { id:'b5',  from:'b-tag',     to:'b-batch' },
+      { id:'b6',  from:'b-tag',     to:'b-perm',  label:'数据权限' },
+      { id:'b7',  from:'b-sub',     to:'b-perm',  label:'契约校验' },
+      { id:'b8',  from:'b-ingest',  to:'b-mysql', label:'持久化' },
+      { id:'b9',  from:'b-sync',    to:'b-kafka', label:'任务事件', type:'async' },
+      { id:'b10', from:'b-outlet',  to:'b-kafka', label:'消费/水位', type:'async' },
+      { id:'b11', from:'b-outlet',  to:'b-tidb',  label:'AS OF 快照' },
+      { id:'b12', from:'b-tag',     to:'b-redis', label:'在线标签' },
+      { id:'b13', from:'b-tag',     to:'b-neo4j', label:'血缘' }
+    ]
+  },
+
+  /* ---------------- 第三层:v2 增量消费通道 ---------------- */
+  v2: {
+    title: '增量消费通道 v2 · 控制面与计算面',
+    subtitle: 'SDK → 内核 → 两平面服务 · 批/增两阶段 · 契约 fail-closed',
+    groups: [
+      { name:'SDK 与内核 SDK & CORE',   x:24,  y:28,  w:520, h:420 },
+      { name:'控制面 CONTROL PLANE',    x:568, y:28,  w:340, h:420 },
+      { name:'计算面 DATA PLANE',       x:932, y:28,  w:300, h:420 },
+      { name:'适配与服务 ADAPTERS',      x:1256,y:28,  w:250, h:420 }
+    ],
+    nodes: [
+      { id:'v-sdk',   name:'outlet-sdk', type:'domain', meta:'ConsumerLogic · TestKit',  desc:'逻辑作者唯一依赖:init/process/close 三方法 + 零依赖。', x:48,  y:76,  w:230, h:72 },
+      { id:'v-core',  name:'outlet-control', type:'domain', meta:'内核五件套', desc:'锚点/起点/规划/租约/巡检 + 批阶段 + 进度口径。', x:48,  y:168, w:230, h:72 },
+      { id:'v-worker',name:'outlet-worker', type:'domain', meta:'UnitRunner', desc:'单元运行循环:契约裁剪 → process → commitSync。', x:48,  y:260, w:230, h:72 },
+      { id:'v-adapt', name:'outlet-adapters', type:'domain', meta:'JDBC/Kafka/HTTP', desc:'真实中间件适配 + 平台快照 API + 契约视图拉取。', x:48,  y:352, w:230, h:72 },
+
+      { id:'v-anchor',name:'锚点与水位', type:'service', meta:'AnchorStore',  desc:'每分区已提交位点与水位。',   x:592, y:76,  w:292, h:64 },
+      { id:'v-t0',    name:'起点决策',   type:'service', meta:'T0 三规则',    desc:'R1 changefeed 起点 / R2 GC 安全点 / R3 最新水位。', x:592, y:156, w:292, h:64 },
+      { id:'v-plan',  name:'规划与租约', type:'service', meta:'UnitPlanner · Lease', desc:'单元均分规划 + 租约防双消费。', x:592, y:236, w:292, h:64 },
+      { id:'v-batch', name:'批阶段',     type:'service', meta:'BatchPhaseRunner', desc:'快照切片 → SNAPSHOT 全量打底。', x:592, y:316, w:292, h:64 },
+      { id:'v-sup',   name:'巡检对账',   type:'service', meta:'Supervisor · 只告警', desc:'租约过期/停滞/缺单元巡检,不自动补齐。', x:592, y:396, w:292, h:44 },
+
+      { id:'v-run',   name:'单元运行器', type:'service', meta:'poll → 契约 → process', desc:'消费、裁剪、执行业务逻辑、提交位点。', x:956, y:76,  w:252, h:72 },
+      { id:'v-filter',name:'契约裁剪',   type:'service', meta:'fail-closed', desc:'行条件 → 列白名单 → 脱敏,视图拉不到拒绝消费。', x:956, y:168, w:252, h:72 },
+      { id:'v-dlq',   name:'死信与重试', type:'service', meta:'consumer_dlq', desc:'重试耗尽进死信,可查询/回放。', x:956, y:260, w:252, h:72 },
+      { id:'v-lease', name:'心跳续约',   type:'service', meta:'租约失败自停', desc:'续约失败即自停,宁可停不双消费。', x:956, y:352, w:252, h:72 },
+
+      { id:'v-ctrl-svc', name:'控制面服务', type:'gateway', meta:'8095 · REST', desc:'streams/tasks/units/progress/anchor/actions。', x:1280, y:76,  w:202, h:72 },
+      { id:'v-worker-svc', name:'计算面服务', type:'gateway', meta:'8096 · HTTP', desc:'CreateUnit 下发、心跳、续约。', x:1280, y:168, w:202, h:72 },
+      { id:'v-jar',    name:'逻辑仓库',   type:'data',  meta:'jar + sha256', desc:'LogicRepository 加载,哈希校验。', x:1280, y:260, w:202, h:72 }
+    ],
+    edges: [
+      { id:'v1',  from:'v-core',  to:'v-sdk',    label:'依赖' },
+      { id:'v2',  from:'v-worker',to:'v-sdk',    label:'依赖' },
+      { id:'v3',  from:'v-anchor',to:'v-t0',     label:'水位输入' },
+      { id:'v4',  from:'v-t0',    to:'v-batch',  label:'定 T0' },
+      { id:'v5',  from:'v-plan',  to:'v-anchor', label:'起点查询' },
+      { id:'v6',  from:'v-batch', to:'v-plan',   label:'切片' },
+      { id:'v7',  from:'v-run',   to:'v-filter', label:'裁剪' },
+      { id:'v8',  from:'v-run',   to:'v-dlq',    label:'重试耗尽' },
+      { id:'v9',  from:'v-run',   to:'v-lease',  label:'心跳' },
+      { id:'v10', from:'v-ctrl-svc', to:'v-core', label:'装配' },
+      { id:'v11', from:'v-ctrl-svc', to:'v-adapt', label:'生产端口' },
+      { id:'v12', from:'v-worker-svc', to:'v-worker', label:'装配' },
+      { id:'v13', from:'v-worker-svc', to:'v-adapt', label:'契约/仓库' },
+      { id:'v14', from:'v-jar',  to:'v-worker', label:'jar 加载' },
+      { id:'v15', from:'v-ctrl-svc', to:'v-worker-svc', label:'CreateUnit 下发', desc:'批完成后按每分区起点下发单元,或播给外部引擎。' }
+    ]
+  },
+
+  /* ---------------- 第四层:变更流出口数据权限 ---------------- */
+  outlet: {
+    title: '变更流出口 · 数据权限五道判定',
+    subtitle: '契约 ∩ 主体 · 每次读都跑 · 计算面镜像同语义',
+    groups: [
+      { name:'授权模型 AUTHORIZATION', x:24,  y:28,  w:400, h:260 },
+      { name:'执行链 ENFORCEMENT',     x:448, y:28,  w:760, h:260 },
+      { name:'消费侧 CONSUMER SIDE',   x:1232,y:28,  w:270, h:260 }
+    ],
+    nodes: [
+      { id:'o-contract', name:'契约 contract', type:'data', meta:'白名单/行条件/密级', desc:'静态授权:哪些流、哪些列、什么行条件、什么密级上限。', x:48, y:76,  w:352, h:72 },
+      { id:'o-subject', name:'主体权限', type:'domain', meta:'L0-L3 · deny 短路', desc:'用户/角色/标签路径三级授权,只能收窄不能放大。', x:48, y:180, w:352, h:72 },
+
+      { id:'o-1', name:'① 流级', type:'service', meta:'契约覆盖校验', desc:'消费方 active、契约 active 且覆盖该流。', x:472, y:76,  w:160, h:72 },
+      { id:'o-2', name:'② 列级', type:'service', meta:'白名单 ∩ 主体', desc:'契约列白名单,再被主体 HIDDEN 列收窄一层。', x:652, y:76,  w:160, h:72 },
+      { id:'o-3', name:'③ 行级', type:'service', meta:'契约行条件', desc:'逐行谓词判定,不满足等价删除(墓碑)。', x:832, y:76,  w:160, h:72 },
+      { id:'o-4', name:'④ 密级', type:'service', meta:'脱敏/剔除', desc:'超限列按 maskRules 脱敏,无规则整列剔除。', x:1012, y:76,  w:160, h:72 },
+      { id:'o-5', name:'⑤ 配额', type:'service', meta:'QPS/行数/连接', desc:'配额限制,超出限流。', x:1012, y:180, w:160, h:72 },
+      { id:'o-project', name:'投影计划', type:'domain', meta:'ProjectionPlan', desc:'一次读生成一次投影计划,快照/增量共用。', x:472, y:180, w:340, h:72 },
+
+      { id:'o-pull', name:'消费方', type:'client', meta:'快照/变更/回查', desc:'订阅方或 v2 执行体按身份拉数。', x:1256, y:76,  w:222, h:72 },
+      { id:'o-mirror', name:'计算面镜像', type:'domain', meta:'DefaultContractFilter', desc:'视图 30s 拉取,行级→列级→脱敏,空视图 0 条交付。', x:1256, y:180, w:222, h:72 }
+    ],
+    edges: [
+      { id:'o1',  from:'o-contract', to:'o-1', label:'授权' },
+      { id:'o2',  from:'o-subject',  to:'o-2', label:'收窄' },
+      { id:'o3',  from:'o-1', to:'o-2', label:'通过' },
+      { id:'o4',  from:'o-2', to:'o-3' },
+      { id:'o5',  from:'o-3', to:'o-4' },
+      { id:'o6',  from:'o-4', to:'o-5' },
+      { id:'o7',  from:'o-2', to:'o-project', label:'生成投影' },
+      { id:'o8',  from:'o-4', to:'o-project' },
+      { id:'o9',  from:'o-project', to:'o-pull', label:'裁剪后交付' },
+      { id:'o10', from:'o-pull', to:'o-mirror', label:'契约视图 HTTP', desc:'平台合算成视图下发,计算面进程内逐行判定。' }
+    ]
+  },
+
+  /* ---------------- 第五层:数据权限统一控制模型 ---------------- */
+  perm: {
+    title: '数据权限统一控制模型 · PAP / PDP / Plan / PEP',
+    subtitle: '策略集中管理、判定分散执行、Plan 注入外部引擎 · 定义层完备/执行层可裁剪',
+    groups: [
+      { name:'管理层 PAP',   x:24,  y:28,  w:340, h:380 },
+      { name:'决策层 PDP',   x:388, y:28,  w:300, h:380 },
+      { name:'协议 PLAN',    x:712, y:28,  w:260, h:380 },
+      { name:'执行层 PEP(六出口)', x:996, y:28, w:480, h:380 },
+      { name:'策略库与属性 STORE & PIP', x:24, y:432, w:1452, h:110 }
+    ],
+    nodes: [
+      { id:'pm-center', name:'策略中心(8 页面)', type:'client', meta:'管理唯一入口', desc:'总览/资源授权/策略编辑器/行规则/契约/密级与脱敏/有效权限预览/变更审计。', x:48, y:76,  w:292, h:74 },
+      { id:'pm-store',  name:'策略库(五表)', type:'data', meta:'perm_* + perm_policy_log', desc:'资源注册/授权策略/行规则/脱敏注册表/变更审计。', x:48, y:172, w:292, h:74 },
+      { id:'pm-audit',  name:'变更审计', type:'data', meta:'perm_policy_log', desc:'策略变更前后值 + 操作人,与判定审计联动。', x:48, y:268, w:292, h:64 },
+
+      { id:'pm-engine', name:'判定引擎', type:'service', meta:'契约 ∩ 主体 · deny 短路', desc:'specificity 链合成:列/行/标签/密级四路。', x:412, y:76,  w:252, h:74 },
+      { id:'pm-cache',  name:'策略缓存', type:'domain', meta:'版本号 + 事件失效', desc:'收窄 <1s、放大 ≤30s、失败关闸。', x:412, y:172, w:252, h:64 },
+      { id:'pm-compile',name:'Plan 编译器', type:'domain', meta:'谓词下推三目标', desc:'SQL/Kafka/Spark expr + 列投影;可下推性报告。', x:412, y:252, w:252, h:74 },
+      { id:'pm-res',    name:'资源注册', type:'data', meta:'流→列→标签/文件', desc:'敏感级、key 列等资源属性。', x:412, y:344, w:252, h:56 },
+
+      { id:'pm-plan',  name:'Plan 协议', type:'domain', meta:'扁平键值 · 版本+TTL', desc:'可见列/占位谓词/脱敏/标签过滤 —— 唯一交付物。', x:736, y:76,  w:212, h:74 },
+      { id:'pm-report',name:'可下推性报告', type:'domain', meta:'引擎无关原则', desc:'策略不声明引擎;PDP 出各引擎下推程度。', x:736, y:172, w:212, h:64 },
+      { id:'pm-bind',  name:'会话变量 PIP', type:'domain', meta:'白名单绑定', desc:'${subject.attr} 执行期解析,防注入。', x:736, y:252, w:212, h:64 },
+
+      { id:'pm-rest',  name:'平台 REST', type:'gateway', meta:'快照/变更/回查', desc:'服务层切面,列投影+谓词进 SQL。', x:1020, y:76,  w:200, h:64 },
+      { id:'pm-worker',name:'v2 计算面', type:'gateway', meta:'单元级 PEP', desc:'30s 拉取+版本比对,fail-closed。', x:1020, y:156, w:200, h:64 },
+      { id:'pm-exec',  name:'Spark / Flink', type:'gateway', meta:'Plan 注入 job-json', desc:'运行时零网络,执行器本地执行。', x:1020, y:236, w:200, h:64 },
+      { id:'pm-pull',  name:'订阅 PULL', type:'gateway', meta:'token → Plan', desc:'订阅方数据服务出口。', x:1020, y:316, w:200, h:64 },
+      { id:'pm-file',  name:'文件下载', type:'gateway', meta:'路径授权+短期签名', desc:'目录通配匹配,签名防重放。', x:1248, y:156, w:204, h:64 },
+
+      { id:'pm-policy',name:'perm_policy', type:'data', meta:'主体×资源×动作×约束', desc:'效果/等级/priority/环境/义务/生命周期。', x:48,  y:472, w:230, h:56 },
+      { id:'pm-row',   name:'perm_row_rule', type:'data', meta:'cond|list|tag_ref', desc:'可复用行规则零件,带 bind_scope。', x:306, y:472, w:230, h:56 },
+      { id:'pm-mask',  name:'perm_mask_rule', type:'data', meta:'脱敏注册表', desc:'两端同源,版本不一致拒下发。', x:564, y:472, w:230, h:56 },
+      { id:'pm-pip',   name:'PIP 属性', type:'data', meta:'主体/标签展开', desc:'角色用户属性与标签集合。', x:822, y:472, w:230, h:56 }
+    ],
+    edges: [
+      { id:'m1',  from:'pm-center',  to:'pm-store',   label:'写策略' },
+      { id:'m2',  from:'pm-center',  to:'pm-audit',   label:'变更落审计' },
+      { id:'m3',  from:'pm-store',   to:'pm-engine',  label:'策略 + 版本号' },
+      { id:'m4',  from:'pm-engine',  to:'pm-cache',   label:'缓存/命中' },
+      { id:'m5',  from:'pm-res',     to:'pm-engine',  label:'资源属性' },
+      { id:'m6',  from:'pm-pip',     to:'pm-engine',  label:'主体属性' },
+      { id:'m7',  from:'pm-engine',  to:'pm-compile', label:'合成 → 编译' },
+      { id:'m8',  from:'pm-compile', to:'pm-plan',    label:'产出 Plan' },
+      { id:'m9',  from:'pm-compile', to:'pm-report',  label:'编译报告' },
+      { id:'m10', from:'pm-report',  to:'pm-center',  label:'管理面回显' },
+      { id:'m11', from:'pm-plan',    to:'pm-rest',    label:'下发' },
+      { id:'m12', from:'pm-plan',    to:'pm-worker',  label:'下发' },
+      { id:'m13', from:'pm-plan',    to:'pm-exec',    label:'注入 job-json' },
+      { id:'m14', from:'pm-plan',    to:'pm-pull',    label:'下发' },
+      { id:'m15', from:'pm-plan',    to:'pm-file',    label:'下发' },
+      { id:'m16', from:'pm-engine',  to:'pm-audit',   label:'判定审计' },
+      { id:'m17', from:'pm-bind',    to:'pm-compile', label:'变量白名单' }
+    ]
+  },
+
+  /* ---------------- 第六层:打标迁移 v2 链路 ---------------- */
+  tag: {
+    title: '打标任务迁移 v2 · 方案 C 执行链路(已真栈验证)',
+    subtitle: '登记 → 批(Spark) → 交接 → 增(Flink) · 同一份契约身份',
+    groups: [
+      { name:'登记 REGISTER',   x:24,  y:28,  w:300, h:340 },
+      { name:'批阶段 BATCH',    x:348, y:28,  w:560, h:340 },
+      { name:'交接 HANDOVER',   x:932, y:28,  w:230, h:340 },
+      { name:'增量 INCREMENTAL',x:1186,y:28,  w:310, h:340 }
+    ],
+    nodes: [
+      { id:'t-deploy', name:'登记桥', type:'service', meta:'POST deploy-v2', desc:'流扫描 + logic/契约/账号预置 + 建 v2 任务。', x:48, y:76,  w:252, h:72 },
+      { id:'t-v2task', name:'v2 任务', type:'service', meta:'incrementalEngine=external', desc:'startPolicy=snapshot,契约身份 = 契约 consumer_id。', x:48, y:180, w:252, h:72 },
+      { id:'t-select', name:'执行体选择', type:'domain', meta:'BatchExecutorPolicy', desc:'按行数估算选 Spark/容器/进程内。', x:48, y:284, w:252, h:64 },
+
+      { id:'t-spark',   name:'spark-submit', type:'service', meta:'SparkBatchRunner', desc:'组装 task-json,真提交 Spark 作业。', x:372, y:76,  w:240, h:72 },
+      { id:'t-snapshot',name:'快照源', type:'service', meta:'SnapshotInput · AS OF T0', desc:'平台快照 API 分页拉取,身份随任务透传。', x:640, y:76,  w:240, h:72 },
+      { id:'t-eval',    name:'规则求值', type:'domain', meta:'dcp-tag-kie · Drools', desc:'动态 Fact + DRL 编译求值,三端共用编译库。', x:372, y:180, w:240, h:72 },
+      { id:'t-fact',    name:'tag_fact 落湖', type:'data', meta:'Iceberg · 按任务分区', desc:'批结果写湖,时间旅行可回溯。', x:640, y:180, w:240, h:72 },
+      { id:'t-t0',      name:'T0 三规则', type:'domain', meta:'R1/R2/R3', desc:'changefeed 起点 ≤ T0 ≤ 最新水位,且 ≥ GC 安全点。', x:372, y:284, w:240, h:64 },
+
+      { id:'t-starts', name:'起点播种', type:'service', meta:'每分区第一个 commitTs > T0', desc:'算全部分区起点。', x:956, y:76, w:182, h:72 },
+      { id:'t-flinkd', name:'Flink 适配器', type:'service', meta:'jar 上传 + run', desc:'job-json base64 传参,播种 offset。', x:956, y:180, w:182, h:72 },
+
+      { id:'t-job',  name:'Flink 作业', type:'domain', meta:'dcp-tagstream', desc:'从播种 offset 起消费,窗口/规则求值。', x:1210, y:76,  w:262, h:72 },
+      { id:'t-redis',name:'Redis 在线标签', type:'infra', meta:'tag:online:{entity}', desc:'即时在线层 hash 置位。', x:1210, y:180, w:262, h:72 },
+      { id:'t-view', name:'tag_fact_view', type:'data', meta:'双写 tag_dict_id', desc:'投影事实层,订阅/圈选查询面。', x:1210, y:284, w:262, h:64 }
+    ],
+    edges: [
+      { id:'t1',  from:'t-deploy', to:'t-v2task', label:'建 external 任务' },
+      { id:'t2',  from:'t-v2task', to:'t-select', label:'批触发' },
+      { id:'t3',  from:'t-select', to:'t-spark',  label:'选中 Spark' },
+      { id:'t4',  from:'t-t0',     to:'t-select', label:'T0' },
+      { id:'t5',  from:'t-spark',  to:'t-snapshot', label:'task-json' },
+      { id:'t6',  from:'t-snapshot', to:'t-eval', label:'切片行' },
+      { id:'t7',  from:'t-eval',   to:'t-fact',  label:'命中标签' },
+      { id:'t8',  from:'t-v2task', to:'t-starts', label:'批完成后交接' },
+      { id:'t9',  from:'t-starts', to:'t-flinkd', label:'分区起点' },
+      { id:'t10', from:'t-flinkd', to:'t-job',    label:'提交作业' },
+      { id:'t11', from:'t-job',    to:'t-redis',  label:'在线置位' },
+      { id:'t12', from:'t-job',    to:'t-view',   label:'投影双写' }
+    ]
+  }
+};
+
+/* =========================================================
+ * 2. DOM & 状态
+ * =======================================================*/
+const stageEl      = document.getElementById('stage');
+const canvasFit    = document.getElementById('canvasFit');
+const canvasEl     = document.getElementById('canvas');
+const groupsEl     = document.getElementById('groups');
+const nodesEl      = document.getElementById('nodes');
+const labelsEl     = document.getElementById('labels');
+const linksEl      = document.getElementById('links');
+const breadcrumbEl = document.getElementById('breadcrumb');
+const titleEl      = document.getElementById('viewTitle');
+const subEl        = document.getElementById('viewSub');
+const detailEl     = document.getElementById('detail');
+const detailBadge  = document.getElementById('detailBadge');
+const detailName   = document.getElementById('detailName');
+const detailDesc   = document.getElementById('detailDesc');
+const detailPath   = document.getElementById('detailPath');
+const detailHint   = document.getElementById('detailHint');
+
+let stack = [{ label: '数据采集平台', key: 'root' }];
+let nodeEls = new Map();
+let nodeData = new Map();
+let edgeRefs = new Map();
+let currentEdges = [];
+let currentBounds = { w: 800, h: 600 };
+
+const currentView = () => VIEWS[stack[stack.length - 1].key];
+
+/* =========================================================
+ * 3. 渲染
+ * =======================================================*/
+function render() {
+  const view = currentView();
+
+  titleEl.textContent = view.title;
+  subEl.textContent   = view.subtitle || '';
+  renderBreadcrumb();
+  closeDetail();
+
+  nodeEls.clear();
+  nodeData.clear();
+  edgeRefs.clear();
+  groupsEl.innerHTML = '';
+  nodesEl.innerHTML  = '';
+  labelsEl.innerHTML = '';
+  linksEl.innerHTML  = '';
+
+  (view.groups || []).forEach(g => {
+    const el = document.createElement('div');
+    el.className = 'group';
+    el.style.cssText = `left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px;`;
+    const label = document.createElement('span');
+    label.className = 'group-label';
+    label.textContent = g.name;
+    el.appendChild(label);
+    groupsEl.appendChild(el);
+  });
+
+  view.nodes.forEach((n, i) => {
+    const el = createNodeEl(n, i);
+    nodesEl.appendChild(el);
+    nodeEls.set(n.id, el);
+    nodeData.set(n.id, n);
+  });
+
+  currentEdges = view.edges || [];
+  drawEdges(view);
+
+  fitCanvas(view);
+}
+
+function fitCanvas(view) {
+  let maxX = 0, maxY = 0;
+  (view.groups || []).forEach(g => {
+    maxX = Math.max(maxX, g.x + g.w);
+    maxY = Math.max(maxY, g.y + g.h);
+  });
+  view.nodes.forEach(n => {
+    maxX = Math.max(maxX, n.x + n.w);
+    maxY = Math.max(maxY, n.y + n.h);
+  });
+  const contentW = maxX + 34;
+  const contentH = maxY + 34;
+  currentBounds = { w: contentW, h: contentH };
+
+  const availW = Math.max(360, stageEl.clientWidth  - 56);
+  const availH = Math.max(280, stageEl.clientHeight - 56);
+
+  let scale = Math.min(
+    (availW * 0.96) / contentW,
+    (availH * 0.96) / contentH
+  );
+  scale = Math.max(0.4, Math.min(scale, 1.75));
+
+  canvasEl.style.width  = contentW + 'px';
+  canvasEl.style.height = contentH + 'px';
+  canvasEl.style.transform = `scale(${scale})`;
+
+  canvasFit.style.width  = (contentW * scale) + 'px';
+  canvasFit.style.height = (contentH * scale) + 'px';
+}
+
+function createNodeEl(node, index) {
+  const meta = TYPE_META[node.type] || TYPE_META.service;
+
+  const el = document.createElement('div');
+  el.className = 'node' + (node.children ? ' drillable' : '');
+  el.style.cssText =
+    `left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px;--c:${meta.color};` +
+    `animation-delay:${Math.min(index * 22, 320)}ms;`;
+  el.dataset.id = node.id;
+
+  if (node.h < 68) el.classList.add('compact');
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'node-name';
+  nameEl.textContent = node.name;
+  el.appendChild(nameEl);
+
+  if (node.meta) {
+    const m = document.createElement('div');
+    m.className = 'node-meta';
+    m.textContent = node.meta;
+    el.appendChild(m);
+  }
+
+  if (node.children) {
+    const badge = document.createElement('span');
+    badge.className = 'node-drill';
+    badge.textContent = '↗';
+    el.appendChild(badge);
+    el.addEventListener('click', e => { e.stopPropagation(); drillDown(node); });
+  } else {
+    el.addEventListener('click', e => { e.stopPropagation(); showNodeDetail(node); });
+  }
+
+  el.addEventListener('mouseenter', () => highlightNode(node.id));
+  el.addEventListener('mouseleave', clearHighlight);
+
+  return el;
+}
+
+/* =========================================================
+ * 4. 连线绘制
+ * =======================================================*/
+function drawEdges(view) {
+  linksEl.setAttribute('viewBox', `0 0 ${currentBounds.w} ${currentBounds.h}`);
+  linksEl.setAttribute('width',  currentBounds.w);
+  linksEl.setAttribute('height', currentBounds.h);
+  linksEl.style.width  = currentBounds.w + 'px';
+  linksEl.style.height = currentBounds.h + 'px';
+  linksEl.innerHTML = DEFS;
+
+  const map = {};
+  view.nodes.forEach(n => map[n.id] = n);
+
+  currentEdges.forEach(edge => {
+    const a = map[edge.from];
+    const b = map[edge.to];
+    if (!a || !b) return;
+
+    const pts = cleanPts(buildRoute(a, b));
+    if (pts.length < 2) return;
+    const d = roundedPath(pts);
+
+    const type      = edge.type || 'sync';
+    const fromType  = a.type;
+    const baseColor = TYPE_META[fromType] ? TYPE_META[fromType].color : HL_COLOR;
+    const color     = type === 'async' ? ASYNC_COLOR : baseColor;
+    const markerId  = type === 'async' ? 'arw-async' : ('arw-' + fromType);
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'edge');
+    g.dataset.id = edge.id;
+
+    const hit = document.createElementNS(NS, 'path');
+    hit.setAttribute('d', d);
+    hit.setAttribute('class', 'link-hit');
+
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('class', 'link' + (type === 'async' ? ' async' : ''));
+    p.style.stroke = hexToRgba(color, type === 'async' ? .58 : .45);
+    p.setAttribute('marker-end', `url(#${markerId})`);
+
+    const f = document.createElementNS(NS, 'path');
+    f.setAttribute('d', d);
+    f.setAttribute('class', 'link-flow');
+    f.style.stroke = color;
+
+    g.append(hit, p, f);
+    linksEl.appendChild(g);
+
+    let labelEl = null;
+    if (edge.label) {
+      const mid = pointAt(pts, .5);
+      labelEl = document.createElement('div');
+      labelEl.className = 'link-label' + (edge.children ? ' drillable' : '');
+      labelEl.style.left = mid.x.toFixed(1) + 'px';
+      labelEl.style.top  = mid.y.toFixed(1) + 'px';
+      labelEl.style.setProperty('--lc', color);
+      labelEl.textContent = edge.label;
+      labelsEl.appendChild(labelEl);
+    }
+
+    const ref = { g, hit, p, f, labelEl, edge, color, markerId, type };
+    edgeRefs.set(edge.id, ref);
+
+    const enter = () => highlightEdge(edge.id);
+    const leave = () => clearHighlight();
+    const click = e => { e.stopPropagation(); onEdgeClick(edge); };
+
+    [hit, labelEl].forEach(target => {
+      if (!target) return;
+      target.addEventListener('mouseenter', enter);
+      target.addEventListener('mouseleave', leave);
+      target.addEventListener('click', click);
+    });
+  });
+}
+
+function buildRoute(a, b) {
+  const acx = a.x + a.w / 2, acy = a.y + a.h / 2;
+  const bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
+  const dx = bcx - acx, dy = bcy - acy;
+  const horizontal = Math.abs(dx) >= Math.abs(dy);
+
+  if (horizontal) {
+    const goRight = dx >= 0;
+    const sx = goRight ? a.x + a.w : a.x;
+    const ex = goRight ? b.x : b.x + b.w;
+    if (Math.abs(acy - bcy) < 1) return [{x:sx,y:acy},{x:ex,y:bcy}];
+    const mx = (sx + ex) / 2;
+    return [{x:sx,y:acy},{x:mx,y:acy},{x:mx,y:bcy},{x:ex,y:bcy}];
+  } else {
+    const goDown = dy >= 0;
+    const sy = goDown ? a.y + a.h : a.y;
+    const ey = goDown ? b.y : b.y + b.h;
+    if (Math.abs(acx - bcx) < 1) return [{x:acx,y:sy},{x:bcx,y:ey}];
+    const my = (sy + ey) / 2;
+    return [{x:acx,y:sy},{x:acx,y:my},{x:bcx,y:my},{x:bcx,y:ey}];
+  }
+}
+
+function cleanPts(pts) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i], q = out[out.length - 1];
+    if (Math.abs(p.x - q.x) > .6 || Math.abs(p.y - q.y) > .6) out.push(p);
+  }
+  return out;
+}
+
+function roundedPath(pts) {
+  const r = 10;
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}`;
+
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i-1], cur = pts[i], next = pts[i+1];
+    const v1x = cur.x - prev.x, v1y = cur.y - prev.y;
+    const v2x = next.x - cur.x, v2y = next.y - cur.y;
+    const l1 = Math.hypot(v1x, v1y) || 1;
+    const l2 = Math.hypot(v2x, v2y) || 1;
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    const p1x = cur.x - v1x / l1 * rr, p1y = cur.y - v1y / l1 * rr;
+    const p2x = cur.x + v2x / l2 * rr, p2y = cur.y + v2y / l2 * rr;
+    d += ` L${p1x.toFixed(1)},${p1y.toFixed(1)} Q${cur.x},${cur.y} ${p2x.toFixed(1)},${p2y.toFixed(1)}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L${last.x},${last.y}`;
+}
+
+function pointAt(pts, t) {
+  let total = 0;
+  const segs = [];
+  for (let i = 1; i < pts.length; i++) {
+    const l = Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
+    segs.push(l); total += l;
+  }
+  let target = total * t;
+  for (let i = 0; i < segs.length; i++) {
+    if (target <= segs[i]) {
+      const k = segs[i] ? target / segs[i] : 0;
+      return {
+        x: pts[i].x + (pts[i+1].x - pts[i].x) * k,
+        y: pts[i].y + (pts[i+1].y - pts[i].y) * k
+      };
+    }
+    target -= segs[i];
+  }
+  return pts[pts.length - 1];
+}
+
+/* =========================================================
+ * 5. 高亮
+ * =======================================================*/
+function setEdgeState(id, state) {
+  const ref = edgeRefs.get(id);
+  if (!ref) return;
+  const { p, g, edge, color, markerId, type, labelEl } = ref;
+
+  g.classList.toggle('active', state === 'hl');
+  p.classList.toggle('dim', state === 'dim');
+  p.style.strokeWidth = state === 'hl' ? 2.5 : 1.7;
+
+  if (state === 'hl') {
+    p.style.stroke = color;
+    p.setAttribute('marker-end', 'url(#arw-hl)');
+  } else {
+    p.style.stroke = hexToRgba(color, type === 'async' ? .58 : .45);
+    p.setAttribute('marker-end', `url(#${markerId})`);
+  }
+
+  if (labelEl) {
+    labelEl.classList.toggle('dim', state === 'dim');
+    labelEl.classList.toggle('hl',   state === 'hl');
+  }
+}
+
+function highlightNode(id) {
+  const related = new Set([id]);
+  currentEdges.forEach(e => {
+    if (e.from === id || e.to === id) { related.add(e.from); related.add(e.to); }
+  });
+  nodeEls.forEach((el, nid) => el.classList.toggle('dim', !related.has(nid)));
+  edgeRefs.forEach((ref, eid) => {
+    const hit = ref.edge.from === id || ref.edge.to === id;
+    setEdgeState(eid, hit ? 'hl' : 'dim');
+  });
+}
+
+function highlightEdge(id) {
+  const ref = edgeRefs.get(id);
+  if (!ref) return;
+  const { from, to } = ref.edge;
+
+  nodeEls.forEach((el, nid) => {
+    el.classList.toggle('dim', nid !== from && nid !== to);
+  });
+  edgeRefs.forEach((r, eid) => {
+    setEdgeState(eid, eid === id ? 'hl' : 'dim');
+  });
+}
+
+function clearHighlight() {
+  nodeEls.forEach(el => el.classList.remove('dim'));
+  edgeRefs.forEach((r, eid) => setEdgeState(eid, 'normal'));
+}
+
+/* =========================================================
+ * 6. 点击行为
+ * =======================================================*/
+function onEdgeClick(edge) {
+  if (edge.children) {
+    stack.push({ label: edge.label || '连接详情', key: edge.children });
+    render();
+    stageEl.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  } else {
+    showEdgeDetail(edge);
+  }
+}
+
+/* =========================================================
+ * 7. 下钻 & 面包屑
+ * =======================================================*/
+function drillDown(node) {
+  if (!node.children) return;
+  stack.push({ label: node.name, key: node.children });
+  render();
+  stageEl.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function jumpTo(index) {
+  stack = stack.slice(0, index + 1);
+  render();
+  stageEl.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function renderBreadcrumb() {
+  breadcrumbEl.innerHTML = '';
+  stack.forEach((item, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'crumb-sep';
+      sep.textContent = '/';
+      breadcrumbEl.appendChild(sep);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'crumb' + (i === stack.length - 1 ? ' active' : '');
+    btn.textContent = item.label;
+    if (i < stack.length - 1) btn.addEventListener('click', () => jumpTo(i));
+    breadcrumbEl.appendChild(btn);
+  });
+}
+
+/* =========================================================
+ * 8. 详情面板
+ * =======================================================*/
+function showNodeDetail(node) {
+  const meta = TYPE_META[node.type] || TYPE_META.service;
+  detailBadge.textContent = meta.label;
+  detailBadge.style.color = meta.color;
+  detailBadge.style.background = hexToRgba(meta.color, .12);
+
+  detailName.textContent = node.name;
+  detailDesc.textContent = node.desc || node.meta || '暂无更多说明。';
+  detailPath.hidden = true;
+  detailHint.textContent = node.children ? '点击带 ↗ 的元素可继续下钻' : '这是最底层模块';
+  detailEl.hidden = false;
+}
+
+function showEdgeDetail(edge) {
+  const fromName = (nodeData.get(edge.from) || {}).name || edge.from;
+  const toName   = (nodeData.get(edge.to)   || {}).name || edge.to;
+  const isAsync  = edge.type === 'async';
+
+  detailBadge.textContent = isAsync ? '异步消息' : '调用关系';
+  detailBadge.style.color = isAsync ? ASYNC_COLOR : HL_COLOR;
+  detailBadge.style.background = hexToRgba(isAsync ? ASYNC_COLOR : HL_COLOR, .12);
+
+  detailName.textContent = edge.label || `${fromName} → ${toName}`;
+  detailDesc.textContent = edge.desc || '两个模块之间的依赖关系。';
+
+  detailPath.hidden = false;
+  detailPath.innerHTML = `<b>${escapeHtml(fromName)}</b> → <b>${escapeHtml(toName)}</b>`;
+
+  detailHint.textContent = edge.children ? '点击该连线可继续下钻' : '点击其他元素查看更多';
+  detailEl.hidden = false;
+}
+
+function closeDetail() { detailEl.hidden = true; }
+
+document.getElementById('detailClose').addEventListener('click', closeDetail);
+stageEl.addEventListener('click', () => { clearHighlight(); closeDetail(); });
+detailEl.addEventListener('click', e => e.stopPropagation());
+
+/* =========================================================
+ * 9. 工具函数
+ * =======================================================*/
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  ));
+}
+
+/* =========================================================
+ * 10. 窗口自适应
+ * =======================================================*/
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const view = currentView();
+    if (!view) return;
+    fitCanvas(view);
+  }, 120);
+});
+
+/* =========================================================
+ * 11. 启动
+ * =======================================================*/
+render();
+</script>
+</body>
+</html>
