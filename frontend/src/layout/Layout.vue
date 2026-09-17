@@ -37,7 +37,6 @@
           <el-menu-item v-if="userStore.hasPerm('tag:rule:page')" index="/tagengine2/rule">规则库 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:task:page')" index="/tagengine2/task">打标任务 V2</el-menu-item>
           <el-menu-item v-if="userStore.hasPerm('tag:sub:page')" index="/tagengine2/subs">标签订阅 V2</el-menu-item>
-          <el-menu-item v-if="userStore.isAdmin" index="/system/permission">数据权限</el-menu-item>
         </el-sub-menu>
         <template v-if="userStore.isAdmin">
           <el-sub-menu index="userperm">
@@ -45,7 +44,17 @@
             <el-menu-item index="/system/user">用户管理</el-menu-item>
             <el-menu-item index="/system/role-perm">角色权限</el-menu-item>
           </el-sub-menu>
-          <el-menu-item index="/perm-center"><el-icon><Key /></el-icon><span>策略中心</span></el-menu-item>
+          <el-sub-menu index="perm">
+            <template #title><el-icon><Key /></el-icon><span>数据权限</span></template>
+            <el-menu-item index="/perm-center/overview">策略总览</el-menu-item>
+            <el-menu-item index="/perm-center/resource">资源授权</el-menu-item>
+            <el-menu-item index="/perm-center/editor">策略编辑器</el-menu-item>
+            <el-menu-item index="/perm-center/rowrules">行规则管理</el-menu-item>
+            <el-menu-item index="/perm-center/contracts">契约管理</el-menu-item>
+            <el-menu-item index="/perm-center/mask">密级与脱敏</el-menu-item>
+            <el-menu-item index="/perm-center/preview">有效权限预览</el-menu-item>
+            <el-menu-item index="/perm-center/audit">变更审计</el-menu-item>
+          </el-sub-menu>
           <el-menu-item index="/system/audit"><el-icon><Document /></el-icon><span>审计日志</span></el-menu-item>
           <el-menu-item index="/system/architecture"><el-icon><Connection /></el-icon><span>系统架构</span></el-menu-item>
         </template>

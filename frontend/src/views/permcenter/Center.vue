@@ -1,6 +1,6 @@
 <template>
   <div class="perm-center">
-    <el-tabs v-model="tab" type="border-card" class="pc-tabs">
+    <el-tabs v-model="tab" type="border-card" class="pc-tabs" @tab-change="onTabChange">
       <!-- ==================== 总览 ==================== -->
       <el-tab-pane label="策略总览" name="overview">
         <el-row :gutter="12" style="margin-bottom:14px">
@@ -381,10 +381,18 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 // TODO: 接入后端 API —— 本页全部为 mock 数据,接口契约见《数据权限统一控制模型设计》§8
+const route = useRoute()
+const router = useRouter()
 const tab = ref('overview')
+const TAB_NAMES = ['overview', 'resource', 'editor', 'rowrules', 'contracts', 'mask', 'preview', 'audit']
+// 子菜单 → tab 联动:路由参数直达对应 tab;tab 切换同步 URL
+watch(() => route.params.page, p => { const v = p ? String(p) : 'overview'; if (TAB_NAMES.includes(v)) tab.value = v })
+onMounted(() => { const p = route.params.page; if (p && TAB_NAMES.includes(String(p))) tab.value = String(p) })
+const onTabChange = name => router.replace('/perm-center/' + name)
 
 /* ---------- 总览 ---------- */
 const stats = [
