@@ -123,9 +123,17 @@ public class OutletConfig {
     @Bean
     public ContractLookup contractLookup(DataSource ds) { return new JdbcContractLookup(ds); }
 
-    /** 逻辑目录:建任务时拦"逻辑未注册"。 */
+    /** 逻辑目录:建任务时拦"逻辑未注册 / 已禁用"。 */
     @Bean
     public LogicCatalog logicCatalog(DataSource ds) { return new JdbcLogicCatalog(ds); }
+
+    /** 逻辑管理服务:上传发布一次动作(七步)+ 列表 / 版本列表 / 启停 / 删除 / 下载。 */
+    @Bean
+    public com.dcp.outlet.service.logic.LogicService logicService(LogicCatalog logicCatalog, DataSource ds,
+                                                                  @Value("${outlet.logic.repo}") String repoRoot,
+                                                                  @Value("${outlet.logic.max-jar-bytes:52428800}") long maxJarBytes) {
+        return new com.dcp.outlet.service.logic.LogicService(logicCatalog, ds, Path.of(repoRoot), maxJarBytes);
+    }
 
     /** startPolicy=latest 的"最新 TSO" = 水位表(不猜时点;取不到=0)。 */
     @Bean
