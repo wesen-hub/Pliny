@@ -50,11 +50,17 @@ public class TaskKernelService {
             }
         }
 
-        // ③ 逻辑已注册
+        // ③ 逻辑已注册且 status=active(生产化:disabled/archived 拦新建任务,不影响运行中单元)
         if (isBlank(draft.logicId()) || isBlank(draft.logicVersion())) {
             errs.add("logic 必填(logicId + version)");
-        } else if (!logicCatalog.registered(draft.logicId(), draft.logicVersion())) {
-            errs.add("逻辑未注册:" + draft.logicId() + "@" + draft.logicVersion());
+        } else {
+            Optional<LogicInfo> li = logicCatalog.find(draft.logicId(), draft.logicVersion());
+            if (li.isEmpty()) {
+                errs.add("逻辑未注册:" + draft.logicId() + "@" + draft.logicVersion());
+            } else if (!li.get().active()) {
+                errs.add("逻辑已禁用或废弃(LOGIC_DISABLED):" + draft.logicId() + "@"
+                        + draft.logicVersion() + " status=" + li.get().status());
+            }
         }
 
         // ④ 契约存在、active,且覆盖全部 stream

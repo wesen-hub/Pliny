@@ -72,6 +72,19 @@ public final class JarLogicLoaderCheck {
         loaded.close();
         check("close() 正常释放", true, true);
 
+        // ④-b 缺哈希 sidecar → fail-closed 拒绝(不告警跳过)
+        Path noHashRepo = work.resolve("repo-nohash");
+        Path noHashJar = noHashRepo.resolve("toy-logic/1.0.0.jar");
+        Files.createDirectories(noHashJar.getParent());
+        Files.copy(artifact, noHashJar);
+        boolean missingHashRejected = false;
+        try {
+            new JarLogicLoader(new FileLogicRepository(noHashRepo)).load(LogicRef.of("toy-logic", "1.0.0"));
+        } catch (IllegalStateException e) {
+            missingHashRejected = e.getMessage() != null && e.getMessage().contains("未提供 sha256");
+        }
+        check("缺哈希 sidecar → 拒绝加载(fail-closed)", missingHashRejected, true);
+
         // ⑤ 篡改 → 拒绝加载
         Files.write(artifact, new byte[]{1, 2, 3}, StandardOpenOption.APPEND);
         boolean rejected = false;

@@ -60,12 +60,12 @@ public class JarLogicLoader implements LogicLoader {
         }
     }
 
-    /** 哈希不符 = 制品被篡改或发布错误 → **拒绝加载**(不能带病运行)。 */
+    /** 哈希缺失 / 不符 = 制品不完整或被篡改 → **拒绝加载**(fail-closed,不带病运行)。 */
     private void verifyHash(LogicArtifact artifact) {
         String expected = artifact.sha256();
         if (expected == null || expected.isBlank()) {
-            LOG.warning(() -> "未提供 sha256,跳过校验(建议发布流程补 sidecar): " + artifact);
-            return;
+            throw new IllegalStateException("未提供 sha256,拒绝加载(fail-closed): " + artifact
+                    + "(发布流程必须写 sidecar;存量缺 sidecar 的 jar 需补写哈希)");
         }
         if (!Files.isRegularFile(artifact.path())) {
             throw new LogicNotFoundException(LogicRef.of(artifact.logicId(), artifact.version()));

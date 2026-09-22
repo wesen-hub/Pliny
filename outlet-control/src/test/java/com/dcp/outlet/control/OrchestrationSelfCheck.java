@@ -110,6 +110,16 @@ public final class OrchestrationSelfCheck {
         check("K7 单元已规划", f.units.byTask("tag-eval").size(), 3);
         check("K7 进入批阶段", ok.status(), TaskStatus.BATCH_RUNNING);
         check("K7 批阶段被触发", f.batch.startedCount(), 1);
+
+        // 生产化:disabled / archived 拦新建任务(不影响运行中,已加载 jar 继续跑)
+        f.logics.register(LogicInfo.builder("es-sync", "2.0.0").status(LogicInfo.STATUS_DISABLED).build());
+        check("K8 disabled 拒绝新建(含 LOGIC_DISABLED)",
+                firstError(f, task("t8").logic("es-sync", "2.0.0")),
+                "逻辑已禁用或废弃(LOGIC_DISABLED):es-sync@2.0.0 status=disabled");
+        f.logics.register(LogicInfo.builder("es-sync", "3.0.0").status(LogicInfo.STATUS_ARCHIVED).build());
+        check("K9 archived 拒绝新建",
+                firstError(f, task("t9").logic("es-sync", "3.0.0")),
+                "逻辑已禁用或废弃(LOGIC_DISABLED):es-sync@3.0.0 status=archived");
     }
 
     // ================= 批流交接(成功路径)=================
