@@ -62,7 +62,9 @@ const routes = [
       { path: 'system/user', name: 'user', component: () => import('../views/system/User.vue'), meta: { title: '用户管理', admin: true } },
       { path: 'system/audit', name: 'audit', component: () => import('../views/system/Audit.vue'), meta: { title: '审计日志', admin: true } },
       { path: 'system/architecture', name: 'architecture', component: () => import('../views/system/Architecture.vue'), meta: { title: '系统架构', admin: true } },
-      { path: 'perm-center/:page?', name: 'perm-center', component: () => import('../views/permcenter/Center.vue'), meta: { title: '数据权限', admin: true } }
+      { path: 'perm-center/:page?', name: 'perm-center', component: () => import('../views/permcenter/Center.vue'), meta: { title: '数据权限', admin: true } },
+      // ---------- 数据消费(消费底座 v2) ----------
+      { path: 'outlet/logics', name: 'outlet-logics', component: () => import('../views/outlet/LogicManage.vue'), meta: { title: '逻辑管理', active: '/outlet/logics' } }
     ]
   }
 ]

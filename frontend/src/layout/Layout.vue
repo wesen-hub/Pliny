@@ -31,6 +31,10 @@
           <template #title><el-icon><Promotion /></el-icon><span>订阅与分发</span></template>
           <el-menu-item index="/datasub">数据订阅中心</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="consume">
+          <template #title><el-icon><DataAnalysis /></el-icon><span>数据消费</span></template>
+          <el-menu-item index="/outlet/logics">逻辑管理</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="govern">
           <template #title><el-icon><Management /></el-icon><span>数据管控</span></template>
           <el-menu-item index="/tag">标签管理</el-menu-item>
