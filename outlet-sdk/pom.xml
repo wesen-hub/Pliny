@@ -17,4 +17,14 @@
     </properties>
 
     <!-- 刻意不引入任何第三方依赖:逻辑工程据此编译,不与平台版本耦合 -->
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+        </plugins>
+    </build>
 </project>

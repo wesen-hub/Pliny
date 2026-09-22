@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS chg_watermark_latest (
 ) COMMENT 'v2 分区水位最新值';
 
 -- 4) 消费逻辑注册(发布流程的产物)
+-- 2026-09-22 生产化扩展四列:status(启停/废弃)、published_by(发布人)、jar_size(字节)、preflight(试加载预检结果)
 CREATE TABLE IF NOT EXISTS consumer_logic (
   logic_id    VARCHAR(64)  NOT NULL,
   version     VARCHAR(32)  NOT NULL,
@@ -46,8 +47,32 @@ CREATE TABLE IF NOT EXISTS consumer_logic (
   artifact_uri VARCHAR(512) NULL COMMENT 'jar 位置(方式③);classpath/SPI 方式可空',
   artifact_hash VARCHAR(128) NULL,
   registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status      VARCHAR(16)  NOT NULL DEFAULT 'active' COMMENT 'active | disabled | archived',
+  published_by VARCHAR(64)  NULL COMMENT '发布人',
+  jar_size    BIGINT       NULL COMMENT 'jar 大小(字节)',
+  preflight   VARCHAR(1024) NULL COMMENT '试加载预检结果(通过/失败原因)',
   PRIMARY KEY (logic_id, version)
 ) COMMENT 'v2 消费逻辑注册表';
+
+-- 4-b) 逻辑发布审计(谁、何时、发布/启停/删除/下载了什么版本)
+CREATE TABLE IF NOT EXISTS logic_publish_audit (
+  id         BIGINT        NOT NULL AUTO_INCREMENT,
+  logic_id   VARCHAR(64)   NOT NULL,
+  version    VARCHAR(32)   NOT NULL,
+  action     VARCHAR(32)   NOT NULL COMMENT 'publish | disable | enable | archive | delete | download',
+  operator   VARCHAR(64)   NULL,
+  detail     VARCHAR(1024) NULL,
+  created_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_logic (logic_id, version)
+) COMMENT 'v2 逻辑发布审计表';
+
+-- 存量库迁移(新列非空默认已兜底;重复执行需手工判断,MySQL 8 无 ADD COLUMN IF NOT EXISTS):
+-- ALTER TABLE consumer_logic
+--   ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active' AFTER registered_at,
+--   ADD COLUMN published_by VARCHAR(64) NULL AFTER status,
+--   ADD COLUMN jar_size BIGINT NULL AFTER published_by,
+--   ADD COLUMN preflight VARCHAR(1024) NULL AFTER jar_size;
 
 -- 5) 消费任务
 CREATE TABLE IF NOT EXISTS consumer_task (

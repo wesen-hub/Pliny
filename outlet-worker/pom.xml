@@ -28,4 +28,14 @@
       依赖边界(铁律):计算面只依赖 SDK + 自身端口;
       Kafka 客户端 / HTTP 上报等生产适配在后续增量中叠加为端口实现。
     -->
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+        </plugins>
+    </build>
 </project>
