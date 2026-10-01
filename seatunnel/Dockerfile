@@ -82,6 +82,8 @@ RUN echo "seatunnel.transform.AviatorTransform=aviator-transform" \
 # 引擎配置（REST 8081 / Hazelcast 5801, 覆盖发行包默认配置）
 COPY config/seatunnel.yaml /opt/config/seatunnel.yaml
 COPY config/hazelcast.yaml /opt/config/hazelcast.yaml
+# checkpoint 持久化目录(命名卷 seatunnel-checkpoint 挂载点; 需先存在且可写)
+RUN mkdir -p /opt/checkpoint
 
 ENV TZ=Asia/Shanghai
 WORKDIR /opt

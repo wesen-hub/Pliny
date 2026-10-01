@@ -42,6 +42,14 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
     private final FieldMappingExecutor fieldMappingExecutor;
     /** 行级转换执行器(向导 Step4: 仅 filter/filter-kind; null = 不过滤) */
     private final RowChainExecutor rowChainExecutor;
+    /** 源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb; null = 补丁落地前旧配置) */
+    private final String sourceType;
+    /** ⑤ 位点模式灰度开关: null=兼容(有位点用位点否则计数器); true=严格位点; false=纯号段 */
+    private final Boolean emitPosition;
+    /** ④ 快照起点位点(type:k1:v1...): 位点模式下快照行统一编码为快照级号 S */
+    private final String snapshotStartPosition;
+    /** ③ seq 体系回退告警阈值(体系重置检测) */
+    private final long seqResetThreshold;
 
     public CdcSeqTransformConfig(List<CatalogTable> inputTables,
                                  org.apache.seatunnel.api.configuration.ReadonlyConfig options) {
@@ -67,6 +75,10 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
         this.fieldMappingExecutor = fm == null || fm.isBlank() ? null : new FieldMappingExecutor(fm);
         String rc = options.get(CdcSeqTransformFactory.ROW_CHAIN);
         this.rowChainExecutor = rc == null || rc.isBlank() ? null : new RowChainExecutor(rc);
+        this.sourceType = options.get(CdcSeqTransformFactory.SOURCE_TYPE);
+        this.emitPosition = options.get(CdcSeqTransformFactory.EMIT_POSITION);
+        this.snapshotStartPosition = options.get(CdcSeqTransformFactory.SNAPSHOT_START_POSITION);
+        this.seqResetThreshold = options.get(CdcSeqTransformFactory.SEQ_RESET_THRESHOLD);
 
         // 输出 schema: __bucket INT + __payload STRING(替换输入 schema, 消息体只带这两列)
         List<org.apache.seatunnel.api.table.catalog.Column> cols = new ArrayList<>();
@@ -122,4 +134,13 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
     public CatalogTable getOutputTable() { return outputTable; }
     public FieldMappingExecutor getFieldMappingExecutor() { return fieldMappingExecutor; }
     public RowChainExecutor getRowChainExecutor() { return rowChainExecutor; }
+    public String getSourceType() { return sourceType; }
+    public Boolean getEmitPosition() { return emitPosition; }
+    public String getSnapshotStartPosition() { return snapshotStartPosition; }
+    public long getSeqResetThreshold() { return seqResetThreshold; }
+
+    /** ⑤ 位点模式生效判定: emit_position=true 严格位点; false/null 兼容/号段 */
+    public boolean isStrictPositionMode() {
+        return Boolean.TRUE.equals(emitPosition);
+    }
 }

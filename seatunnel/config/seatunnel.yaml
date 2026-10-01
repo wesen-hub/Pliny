@@ -1,4 +1,4 @@
-# SeaTunnel Zeta 引擎配置（基于发行包默认, REST 端口改 8081, checkpoint 本地存储）
+# SeaTunnel Zeta 引擎配置（基于发行包默认, REST 端口改 8081, checkpoint 持久化到命名卷 seatunnel-checkpoint:/opt/checkpoint）
 seatunnel:
   engine:
     classloader-cache-mode: true
@@ -17,9 +17,9 @@ seatunnel:
         type: hdfs
         max-retained: 3
         plugin-config:
-          namespace: /tmp/seatunnel/checkpoint_snapshot
+          namespace: /opt/checkpoint/checkpoint_snapshot
           storage.type: hdfs
-          fs.defaultFS: file:///tmp/ # Ensure that the directory has written permission
+          fs.defaultFS: file:///opt/checkpoint/ # 命名卷挂载(seatunnel-checkpoint), 容器重启不丢; 原 /tmp 为全量重发高危项
     telemetry:
       metric:
         enabled: false

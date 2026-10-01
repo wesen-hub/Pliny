@@ -21,10 +21,18 @@ import java.util.Map;
  * <pre>
  *   RowKind → INSERT/UPDATE/DELETE
  *   businessKey = business_key_fields 值按声明顺序以 '|' 拼接(空值按 null_key_mode)
- *   seq        = 元库 seq_counter 区间预分配(行锁并发不重, 允许间隙; open() 首取, 用尽再领)
+ *   seq        = 位点即序号(路径 1, emit_position=true) 或 元库 seq_counter 号段(旧)
  *   bucket     = MurmurHash3(businessKey) % bucketCount(固定桶, 扩容映射热更新在 sink 侧)
  *   输出       = [__bucket, __payload(CdcRecord JSON)]
  * </pre>
+ *
+ * <p>位点发号三态(⑤ emit_position 灰度开关):
+ * <ul>
+ *   <li>true(严格位点): 增量行必须有补丁透传位点(缺位点=混发 → fail-fast);
+ *       快照行(无位点)统一编码为快照级号 S=f(snapshot_start_position)(④);</li>
+ *   <li>false(纯号段): 计数器模式, 忽略补丁位点列(灰度双跑对照旧链路);</li>
+ *   <li>缺省(兼容): 有位点用位点, 否则计数器(补丁落地前旧配置不受影响)。</li>
+ * </ul>
  *
  * <p>要点:
  * <ul>
@@ -53,6 +61,15 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
 
     private static final ObjectMapper OM = new ObjectMapper();
 
+    private static final org.slf4j.Logger LOGGER =
+            org.slf4j.LoggerFactory.getLogger(CdcSeqTransform.class);
+
+    /** ③ 体系重置检测: 位点模式历史最大 seq(transient: 重启后首行不告警, 观测级守卫) */
+    private transient long lastSeq = Long.MIN_VALUE;
+    /** ④ 快照级号 S=f(快照起点位点)缓存: 全批同号(重放恒定) */
+    private transient long snapshotSeqValue;
+    private transient boolean snapshotSeqReady;
+
     public CdcSeqTransform(CdcSeqTransformConfig config) {
         this.config = config;
     }
@@ -64,6 +81,11 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
 
     @Override
     public void open() {
+        // 严格位点模式下计数器不可达(缺位点 fail-fast), 不连元库;
+        // 号段/兼容模式仍需 seq_counter
+        if (config.isStrictPositionMode()) {
+            return;
+        }
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
             this.seqConn = DriverManager.getConnection(
@@ -128,8 +150,12 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
                 srcFields.put(names[i], v == null ? null : String.valueOf(v));
             }
 
-            // ② 全局 seq(区间预分配)
-            long seq = nextSeq();
+            // ② seq: 位点即序号(路径 1, connector 补丁在行末透传位点列, 不进 schema)
+            //    快照行与补丁未落地(无位点列)回退计数器; 快照批/流批分派独立, 两体系不互比
+            String srcPos = values.length > names.length ? strOf(values[names.length]) : null;
+            boolean isSnapshot = values.length > names.length + 1
+                    && "true".equalsIgnoreCase(strOf(values[names.length + 1]));
+            long seq = resolveSeq(srcPos, isSnapshot);
 
             // ③ 字段映射执行器(向导 Step3: 直连/计算/生成 + 加工链; 输出模型字段)
             FieldMappingExecutor executor = config.getFieldMappingExecutor();
@@ -181,6 +207,11 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
             rec.put("keyColumns", config.getKeyColumns());
             rec.put("rowKind", rowKind);
             rec.put("seq", seq);
+            // ⑤ 发号体系标志(position/compat/counter), 灰度双跑对照用
+            rec.put("positionMode", config.getEmitPosition() == null
+                    ? "compat" : String.valueOf(config.getEmitPosition()));
+            // 快照标志透传(消费端据此分派批/流模板; 补丁未落地 false 等价旧行为)
+            rec.put("snapshot", isSnapshot);
             rec.put("fields", fields);
             String payload = OM.writeValueAsString(rec);
 
@@ -191,6 +222,100 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
         } catch (Exception e) {
             throw new IllegalStateException("CdcSeqTransform 处理失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * ②④⑤⑥ seq 发号分派(位点/快照级号/号段三路径)。
+     *
+     * <p>④ 快照行优先走快照级号 S: 快照行位点不逐行单调(快照阶段共享同一位点), 不能作序号;
+     * 严格位点模式必配 snapshot_start_position(否则 fail-fast);
+     * 兼容模式: 配了起点走 S, 否则回退计数器(补丁未透传快照标志的旧链路)。
+     *
+     * <p>⑤ 增量行三态: true(严格位点, 位点缺失即混发 fail-fast);
+     * false(纯号段, 忽略补丁位点列); 缺省(兼容, 有位点用位点)。
+     *
+     * <p>⑥ 兼容模式位点编码失败(如 mongo ts_ms 缺失等实测位点取值形态异常)时
+     * 不 fail-fast, 告警后回退计数器号段(满位源治理回退分支; 严格位点模式仍 fail-fast)。
+     * (包可见: 供同包 PositionCheck 自检直连)
+     */
+    long resolveSeq(String srcPos, boolean isSnapshot) throws Exception {
+        if (isSnapshot) {
+            String snap = config.getSnapshotStartPosition();
+            if (snap != null && !snap.isBlank()) {
+                return snapshotSeq(snap);
+            }
+            if (config.isStrictPositionMode()) {
+                throw new IllegalStateException("快照行需配置 snapshot_start_position"
+                        + "(④ 快照级号 S=f(起点位点), fail-fast)");
+            }
+            return nextSeq();
+        }
+        if (config.isStrictPositionMode()) {
+            if (srcPos != null && !srcPos.isBlank()) {
+                checkLayout(srcPos);
+                return guardReset(PositionSeq.encode(config.getSourceType(), srcPos));
+            }
+            throw new IllegalStateException("位点模式下增量行位点缺失, "
+                    + "疑似位点透传补丁未生效(守卫: 新旧号混发检测, fail-fast)");
+        }
+        if (config.getEmitPosition() != null && !config.getEmitPosition()) {
+            return nextSeq(); // 纯号段模式(灰度双跑对照旧链路)
+        }
+        // 兼容模式(缺省): 有位点用位点, 位点不可用回退计数器(⑥ 满位源治理回退分支)
+        if (srcPos != null && !srcPos.isBlank()) {
+            try {
+                checkLayout(srcPos);
+                return guardReset(PositionSeq.encode(config.getSourceType(), srcPos));
+            } catch (IllegalStateException e) {
+                LOGGER.warn("兼容模式位点编码失败, 回退计数器号段: {} ({})", srcPos, e.getMessage());
+            }
+        }
+        return nextSeq();
+    }
+
+    /**
+     * ② 逐源键名映射表校验 + 位点类型与配置源类型一致校验
+     * (守卫: 未知格式/错位体系 fail-fast; 旧配置无 source_type 时跳过)
+     */
+    private void checkLayout(String srcPos) {
+        String st = config.getSourceType();
+        if (st == null || st.isBlank()) {
+            return;
+        }
+        int cut = srcPos.indexOf(':');
+        String posType = cut > 0 ? srcPos.substring(0, cut) : srcPos;
+        if (!st.equalsIgnoreCase(posType)) {
+            throw new IllegalStateException("位点类型与配置源类型不符: 位点=" + posType
+                    + " 配置=" + st + "(守卫: 新旧号混发检测, fail-fast)");
+        }
+        SourcePositionSpec.checkLayout(st, srcPos);
+    }
+
+    /** ④ 快照级号 S=f(快照起点位点): 同批共享同号, 缓存编码结果(重放恒定) */
+    private long snapshotSeq(String snap) {
+        if (!snapshotSeqReady) {
+            checkLayout(snap);
+            snapshotSeqValue = PositionSeq.encode(config.getSourceType(), snap);
+            snapshotSeqReady = true;
+        }
+        return snapshotSeqValue;
+    }
+
+    /** ③ 体系重置检测: 新 seq 比历史峰值回退超阈值 → 告警(不丢数据, 人工裁决) */
+    private long guardReset(long seq) {
+        if (lastSeq != Long.MIN_VALUE && seq < lastSeq - config.getSeqResetThreshold()) {
+            LOGGER.error("seq 体系回退: 新 seq={} 远小于历史峰值 {} (阈值 {}), "
+                            + "疑似源端位点体系重置(重建/GTID 重置), 下游只认更大 seq 的幂等裁判将拒绝新数据, 请人工裁决",
+                    seq, lastSeq, config.getSeqResetThreshold());
+        }
+        if (seq > lastSeq) {
+            lastSeq = seq;
+        }
+        return seq;
+    }
+
+    private static String strOf(Object v) {
+        return v == null ? null : String.valueOf(v);
     }
 
     private int indexOf(String field) {

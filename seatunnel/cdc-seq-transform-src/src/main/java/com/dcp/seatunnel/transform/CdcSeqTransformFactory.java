@@ -76,6 +76,14 @@ public class CdcSeqTransformFactory implements TableTransformFactory {
             .stringType().noDefaultValue().withDescription("字段映射配置 JSON(向导 Step3: [{modelField, source:{kind,srcField,expr}, steps:[...]}])");
     public static final Option<String> ROW_CHAIN = Options.key("row_chain")
             .stringType().noDefaultValue().withDescription("行级转换链 JSON(向导 Step4: 仅 filter/filter-kind, [{type,enabled,params}])");
+    public static final Option<String> SOURCE_TYPE = Options.key("source_type")
+            .stringType().noDefaultValue().withDescription("源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb), 路径 1 位点编码分派");
+    public static final Option<Boolean> EMIT_POSITION = Options.key("emit_position")
+            .booleanType().noDefaultValue().withDescription("⑤ 位点模式灰度开关: true=严格位点(缺位点 fail-fast), false=纯号段计数器, 缺省=兼容(有位点用位点否则计数器)");
+    public static final Option<String> SNAPSHOT_START_POSITION = Options.key("snapshot_start_position")
+            .stringType().noDefaultValue().withDescription("④ 快照起点位点(type:k1:v1...), 位点模式下快照行统一编码为快照级号 S");
+    public static final Option<Long> SEQ_RESET_THRESHOLD = Options.key("seq_reset_threshold")
+            .longType().defaultValue(1_000_000_000_000L).withDescription("③ seq 体系回退告警阈值(体系重置检测)");
 
     @Override
     public String factoryIdentifier() {
@@ -87,7 +95,8 @@ public class CdcSeqTransformFactory implements TableTransformFactory {
         return OptionRule.builder()
                 .required(LOGICAL_TABLE, BUSINESS_KEY_FIELDS, KEY_COLUMNS, SEQ_DB_URL, SEQ_DB_USER, SEQ_DB_PASSWORD)
                 .optional(BUCKET_COUNT, NULL_KEY_MODE, FALLBACK_VALUE, SEQ_BATCH, FIELD_MAPPING, ROW_CHAIN,
-                        DATASOURCE_ID, SOURCE_DB, SOURCE_TABLE, TASK_ID)
+                        DATASOURCE_ID, SOURCE_DB, SOURCE_TABLE, TASK_ID, SOURCE_TYPE,
+                        EMIT_POSITION, SNAPSHOT_START_POSITION, SEQ_RESET_THRESHOLD)
                 .build();
     }
 
