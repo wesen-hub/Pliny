@@ -5,9 +5,15 @@ spring:
   application:
     name: dcp-outlet-control
 
+dcp:
+  # dcp-worker 执行体服务(方案 §9:TaskSpec 提交/注销/探针读均走 REST,不再直连 etcd)
+  worker:
+    url: ${DCP_WORKER_URL:http://127.0.0.1:8097}
+
 outlet:
-  # 元数据库(v2 元数据表:consumer_task / consumer_unit / chg_anchor / chg_watermark_latest /
-  # consumer_logic / consumer_dlq / chg_stream;建表见 outlet/v2-meta-ddl.sql)
+  # 元数据库(彻底版元数据表:consumer_task(纯业务登记) / chg_anchor / chg_watermark_latest /
+  # consumer_logic / consumer_dlq / chg_stream;consumer_unit* 已删除,调度状态全部由框架 etcd 承担;
+  # 建表见 outlet/v2-meta-ddl.sql)
   # 密码从环境变量注入,不落盘:OUTLET_META_PASSWORD=xxx
   meta:
     jdbc-url: ${OUTLET_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
@@ -35,6 +41,10 @@ outlet:
   logic:
     repo: ${OUTLET_LOGIC_REPO:./logic-repo}   # <repo>/<logicId>/<version>.jar
   epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)
+  indexer:                                   # 锚点索引器常驻启动器(栅栏方案前置条件)
+    enabled: ${OUTLET_INDEXER_ENABLED:true}  # 常驻消费全量变更流;false=不启动(起点查询退化 earliest,慢不错)
+    group-id: ${OUTLET_INDEXER_GROUP_ID:dcp-outlet-indexer}  # 固定消费组:重启后从上次提交位点续读
+    from-beginning: ${OUTLET_INDEXER_FROM_BEGINNING:false}   # 无已提交位点时:false=latest;true=earliest 全量重建锚点
   batch:
     executor: ${OUTLET_BATCH_EXECUTOR:local}  # local | container | spark | auto(按行数:≥100万→spark;否则 container)
   spark:                                     # 批阶段 Spark 执行体(tagengine-executor)

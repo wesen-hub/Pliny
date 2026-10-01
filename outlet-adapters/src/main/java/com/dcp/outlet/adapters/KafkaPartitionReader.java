@@ -28,16 +28,37 @@ import java.util.Properties;
 public class KafkaPartitionReader implements PartitionReader, AutoCloseable {
 
     private final String bootstrap;
-    private final AdminClient admin;
+    private volatile AdminClient admin;
     private KafkaConsumer<byte[], byte[]> consumer;
 
     public KafkaPartitionReader(String bootstrap) {
         this.bootstrap = bootstrap;
-        Properties p = new Properties();
-        p.put("bootstrap.servers", bootstrap);
-        p.put("request.timeout.ms", "8000");
-        p.put("default.api.timeout.ms", "15000");
-        this.admin = AdminClient.create(p);
+    }
+
+    /** 惰性单例 + 失败自愈:AdminClient 在 topic 删除重建等元数据剧变后可能进入坏状态
+     *  (无限 METADATA 重试,之后所有请求超时),失败后重建实例(重新 bootstrap)。 */
+    private AdminClient admin() {
+        if (admin == null) {
+            synchronized (this) {
+                if (admin == null) {
+                    Properties p = new Properties();
+                    p.put("bootstrap.servers", bootstrap);
+                    p.put("request.timeout.ms", "8000");
+                    p.put("default.api.timeout.ms", "15000");
+                    admin = AdminClient.create(p);
+                }
+            }
+        }
+        return admin;
+    }
+
+    private synchronized void resetAdmin() {
+        if (admin != null) {
+            try {
+                admin.close(Duration.ofMillis(500));
+            } catch (Exception ignored) { /* 关闭失败也继续重建 */ }
+            admin = null;
+        }
     }
 
     private synchronized KafkaConsumer<byte[], byte[]> consumer() {
@@ -68,10 +89,11 @@ public class KafkaPartitionReader implements PartitionReader, AutoCloseable {
         Map<TopicPartition, OffsetSpec> req = new HashMap<>();
         TopicPartition tp = new TopicPartition(topic, partition);
         req.put(tp, spec);
-        ListOffsetsResult r = admin.listOffsets(req);
         try {
+            ListOffsetsResult r = admin().listOffsets(req);
             return r.partitionResult(tp).get().offset();
         } catch (Exception e) {
+            resetAdmin();   // 实例可能已坏(元数据剧变后无限重试),重建一次供下次调用自愈
             throw new IllegalStateException("listOffsets failed " + tp, e);
         }
     }
@@ -112,6 +134,6 @@ public class KafkaPartitionReader implements PartitionReader, AutoCloseable {
     @Override
     public void close() {
         if (consumer != null) consumer.close(Duration.ofMillis(500));
-        admin.close(Duration.ofMillis(500));
+        resetAdmin();
     }
 }

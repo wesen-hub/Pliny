@@ -67,54 +67,20 @@ management:
   health:
     mail:
       enabled: false
-    neo4j:
-      enabled: false   # 血缘图库 Neo4j 单独开关(未就绪/故障不影响平台 health)
+    # 血缘图库 Neo4j 已迁出至 asset-service(N12), backend 不再持有 neo4j 依赖
 
 logging:
   level:
     com.dcp: info
 
 dcp:
-  # 变更流出口(设计:《变更流出口设计-2026-09-14》)
-  outlet:
-    source: ${OUTLET_SOURCE:kafka}            # mock(内存) | kafka(消费 L1 内部流)
-    registry: ${OUTLET_REGISTRY:mapper}       # memory(种子) | mapper(元库 consumer/contract)
-    epoch: 1
-    retention-hours: 168
-    api:
-      mode: ${OUTLET_API_MODE:inprocess}      # inprocess(内部消费方直调) | http
-      base-url: ${OUTLET_API_BASE:http://localhost:8080}
-      consumer-id: ${OUTLET_API_CONSUMER:demo-tag}
-    kafka:
-      topics: ${OUTLET_KAFKA_TOPICS:dcp.cdc.target_db}
-      group-id: ${OUTLET_KAFKA_GROUP:dcp-outlet}
-      start-tso: ${OUTLET_START_TS:0}         # 生产应设为 changefeed.start_ts
-      buffer-max-events: 20000
-    tidb:                                     # 快照/回查的只读入口
-      url: ${OUTLET_TIDB_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
-      username: ${OUTLET_TIDB_USER:root}
-      password: ${OUTLET_TIDB_PASSWORD:root123}
-      pk-column: id
-    snapshot:
-      ttl-hours: 24
-      page-limit: 1000
-    # 出口监控(2026-09-14):Spring 定时采集栈指标(chg_*)→ Gauge,Prometheus 只抓后端一个 target
-    # 阈值口径与 outlet/monitor-outlet-stack.sh 完全一致(LAG_WARN=300s / LAG_CRIT=3600s / GC_WARN=21600s / ISR<RF)
-    monitor:
-      enabled: ${OUTLET_MONITOR_ENABLED:true}
-      interval-ms: ${OUTLET_MONITOR_INTERVAL_MS:20000}   # 采集间隔(15~30s)
-      initial-delay-ms: ${OUTLET_MONITOR_INITIAL_DELAY_MS:20000}
-      changefeed-id: ${OUTLET_MONITOR_CHANGEFEED:chg-target-db}
-      ticdc-url: ${OUTLET_MONITOR_TICDC_URL:http://ticdc1:8300}
-      topic: ${OUTLET_MONITOR_TOPIC:dcp.cdc.target_db}
-      # 为空则回退到 spring.kafka.bootstrap-servers(compose 已指向 3 broker 新集群)
-      kafka-bootstrap: ${OUTLET_MONITOR_KAFKA_BOOTSTRAP:}
-      lag-warn-seconds: ${OUTLET_LAG_WARN:300}
-      lag-crit-seconds: ${OUTLET_LAG_CRIT:3600}
-      gc-warn-seconds: ${OUTLET_GC_WARN:21600}
-      # Kafka 集群期望 broker 数(存活数低于它 → WARN);告警规则里的 "brokersUp < N" 由本键渲染
-      expected-brokers: ${OUTLET_MONITOR_EXPECTED_BROKERS:3}
-      batch-fail-window-minutes: ${OUTLET_BATCH_FAIL_WINDOW_MIN:10}
+  # dcp-worker 执行体服务(方案 §9:TaskSpec 提交/注销/扩容建议消费均走 REST,不再直连 etcd)
+  worker:
+    url: ${DCP_WORKER_URL:http://127.0.0.1:8097}
+  # 自动扩容上限系数:maxPartitions = 建表分区数 × 系数(演示缺省 2)
+  scheduler:
+    sync-max-factor: ${DCP_SCHEDULER_SYNC_MAX_FACTOR:2}
+  # 变更流出口已迁出至 delivery-service(N10), 相关配置见 delivery-service/src/main/resources/application.yml
   enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
   jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
   jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
@@ -133,6 +99,9 @@ dcp:
     url: ${SEATUNNEL_URL:http://seatunnel:8081}
   # V3 同步链路(P0):数据面目标库(2026-09-14 起默认指向新 TiDB 集群 dcp-outlet-tidb1:4000/target_db)
   sync:
+    # 消费端由调度框架托管(ns=sync;false = 旧链路消费组自治)
+    framework:
+      enabled: ${SYNC_FRAMEWORK_ENABLED:true}
     # 消费端监听的 topic(逗号分隔; CDC 演示链路用 dcp.order.cdc)
     topics: ${SYNC_TOPICS:dcp.order.demo,dcp.order.cdc}
     target:
@@ -157,6 +126,29 @@ dcp:
       write-threads: ${SYNC_BUFFER_WRITE_THREADS:4}
       commit-interval-ms: ${SYNC_BUFFER_COMMIT_INTERVAL_MS:5000}
       drain-per-queue: ${SYNC_BUFFER_DRAIN_PER_QUEUE:200}
+  # 事件接入(入站)底座任务登记桥(P3): 入站消费已迁出至底座任务(kafka-ingest@1.0.0,
+  # dcp-outlet-rt 执行), backend 只负责登记与状态探针; 本阶段只登记不激活(部署方案阶段 resume)
+  ingest:
+    outlet-control-url: ${OUTLET_CONTROL_URL:http://127.0.0.1:8095}
+    # 底座容器内可达的元库地址(seq_counter/logical_table/dlt_message; 与 cdc-st 段同模式)
+    meta-jdbc-url: ${INGEST_META_JDBC_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    meta-user: ${INGEST_META_USER:root}
+    meta-password: ${INGEST_META_PASSWORD:root123}
+    # 底座容器内可达的平台栈 Kafka(入站 topic dcp.in.{表} 与信封流 dcp.{表} 所在)
+    kafka-bootstrap: ${INGEST_KAFKA_BOOTSTRAP:dcp-kafka:9092}
+  lakesync:
+    # 湖增量底座任务登记桥(与 ingest 同模式; 任务执行体=dcp-outlet-rt 装载 dcp-lake-task jar)
+    outlet-control-url: ${OUTLET_CONTROL_URL:http://127.0.0.1:8095}
+    # 底座容器内可达的元库地址(logical_table 业务键读 / dlt_message 落库; 与 ingest 同库同视角)
+    meta-jdbc-url: ${LAKESYNC_META_JDBC_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    meta-user: ${LAKESYNC_META_USER:root}
+    meta-password: ${LAKESYNC_META_PASSWORD:root123}
+    # 批作业 runner 与湖增量任务的 catalog/s3 同源配置(见 compose DCP_LAKESYNC_CATALOG_* env)
+    runner-mode: ${LAKESYNC_RUNNER_MODE:simulate}
+    catalog:
+      uri: ${DCP_LAKESYNC_CATALOG_URI:http://dcp-polaris:8181/api/catalog}
+      warehouse: ${DCP_LAKESYNC_CATALOG_WAREHOUSE:demo}
+      namespace: ${DCP_LAKESYNC_CATALOG_NAMESPACE:dcp}
   alarm:
     # 默认告警 webhook（钉钉/企微），可空
     default-webhook: ${ALARM_WEBHOOK:}

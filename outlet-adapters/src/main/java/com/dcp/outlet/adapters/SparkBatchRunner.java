@@ -48,11 +48,13 @@ public class SparkBatchRunner implements BatchRunner {
     /** 执行器写湖目标(可空; 空则不写 warehouse/catalogType → 由 spark-submit 环境自备 catalog, 生产口径) */
     private final String warehouse;
     private final String catalogType;
+    /** 全局规划代(锚点索引维度,统一由配置 outlet.epoch 管理;彻底版:任务级 epoch 已删) */
+    private final int epoch;
 
     public SparkBatchRunner(TaskStore tasks, StreamRegistry streams, T0Selector t0, SdkLogger log,
                             String sparkSubmitBin, String executorJar, String catalog, String namespace,
                             String snapshotBaseUrl, ContractLookup contracts,
-                            String warehouse, String catalogType) {
+                            String warehouse, String catalogType, int epoch) {
         this.tasks = tasks;
         this.streams = streams;
         this.t0 = t0;
@@ -65,6 +67,7 @@ public class SparkBatchRunner implements BatchRunner {
         this.contracts = contracts;
         this.warehouse = warehouse;
         this.catalogType = catalogType;
+        this.epoch = epoch;
     }
 
     @Override
@@ -90,7 +93,7 @@ public class SparkBatchRunner implements BatchRunner {
                 }
                 String consumerId = identity.get();
                 T0Selector.Decision d = t0.select(si.get().topic(), 0, null);
-                String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), catalog, namespace,
+                String json = buildTaskJson(task, si.get().stream(), si.get().topic(), d.tso(), epoch, catalog, namespace,
                         snapshotBaseUrl, consumerId, warehouse, catalogType);
                 log.info("Spark 批阶段 task={} T0={} taskJson={}", taskId, d.tso(), json);
 
@@ -112,7 +115,7 @@ public class SparkBatchRunner implements BatchRunner {
     }
 
     /** 组装 task-json(tagengine-executor 的 TaskConfig 契约)。公开以便离线自检。 */
-    public static String buildTaskJson(TaskRecord task, String stream, String topic, long t0,
+    public static String buildTaskJson(TaskRecord task, String stream, String topic, long t0, int epoch,
                                        String catalog, String namespace, String snapshotBaseUrl,
                                        String consumerId, String warehouse, String catalogType) {
         Map<String, Object> p = task.params();
@@ -121,7 +124,7 @@ public class SparkBatchRunner implements BatchRunner {
         Object platformId = p.get("taskId");
         if (platformId instanceof Number n) cfg.put("taskId", n.longValue());
         else cfg.put("taskId", task.taskId());
-        cfg.put("taskVer", task.epoch());
+        cfg.put("taskVer", epoch);
         cfg.put("dataset", str(p.get("dataset"), stream));
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
         cfg.put("t0", t0);

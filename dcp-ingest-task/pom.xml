@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-ingest-task —— 入站消费底座任务(微服务架构方案 P3, 维度⑧ 数据接入)。
+
+  定位: KafkaIngestEngine 消费段的替代形态 —— IngestLogic
+  (@ConsumerLogicDef("kafka-ingest@1.0.0")) 实现二级 SPI ConsumerLogic,
+  由 dcp-outlet-rt 的 JarLogicLoader 从逻辑仓库(logic-repo/kafka-ingest/1.0.0.jar)
+  加载运行。切流后 backend 仅保留 HTTP 提交面(鉴权+预检+发 dcp.in.{表}),
+  本地消费容器退役。
+
+  语义对齐(与切流前 KafkaIngestEngine.handleBatch 同构):
+    · 消费 dcp.in.{逻辑表} 分区事件(after = 入站消息 {op,ts,submitter,data} 透传);
+    · 解析/验证(与 HTTP 预检同一套: op 归一 / 业务键 / 模型字段类型)失败 → 落
+      dlt_message(PENDING, 丢弃语义不阻断);
+    · 通过: 按 submitter(appKey) 分组领 seq(seq_counter, "kafka|{表}|{appKey}") →
+      桶号 hash(业务键)%bucketCount → 分区(桶映射/顺序映射) → CdcRecord 信封
+      (taskId=k{appKey}, sourceDb=kafka, sourceTable=ingest, datasourceId=k)
+      → 发 dcp.{逻辑表}(at-least-once, 失败抛 → 底座不提交重试 → 死信)。
+
+  代码组织铁律(方案 §8.2/§8.3):
+    - fat jar 自足: kafka-clients(生产者) + mysql 驱动 + jackson 打入本 jar;
+      二级 SPI 契约(outlet-sdk)由父加载器(dcp-outlet-rt 的 ConsumerLogic 类加载器)提供;
+    - 无 Spring 装配: 全部手工组装; slf4j 由宿主提供(provided);
+    - 失败要抛: 领号/发信封主链路失败必须抛异常, 平台据此不提交→重试→死信;
+      DLT 落库失败仅告警(与 KafkaIngestEngine 一致, 死信路径不阻断主链路)。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-ingest-task</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>dcp-ingest-task</name>
+    <description>入站消费底座任务:IngestLogic(@ConsumerLogicDef kafka-ingest) 消费 dcp.in.{表} → 验证/领号/打信封 → 发 dcp.{表}</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- 二级 SPI 契约(父加载器提供: dcp-outlet-rt 的 ConsumerLogic 类加载器; 这里 compile 仅为单测可运行, shade 后父优先加载) -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-outlet-sdk</artifactId>
+            <version>2.0.0-SNAPSHOT</version>
+        </dependency>
+        <!-- 信封目标(dcp.{逻辑表})生产者(与 backend KafkaIngestEngine 同家族版本) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.7.0</version>
+        </dependency>
+        <!-- 元库(seq_counter 领号 / dlt_message 落库 / logical_table·model_definition 读) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.3.0</version>
+        </dependency>
+        <!-- JSON(信封序列化 / 入站消息解析) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.17.2</version>
+        </dependency>
+        <!-- 日志门面(provided, 宿主统一管理日志后端) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- 测试(sdk testkit: FakeBatch/FakeInitContext/FakeConsumerContext/FakeRecord) -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-ingest-task</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <!-- fat jar: 二级 SPI 服务声明合并 + 排除依赖 jar 签名文件(shade 改写
+                 Manifest 后 JarVerifier 校验 *.SF/*.DSA/*.RSA 会抛 SecurityException) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

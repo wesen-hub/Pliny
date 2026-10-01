@@ -15,6 +15,7 @@ import java.util.Optional;
  *   TaskScheduler.onCreated ──▶ 本类.runAsync
  *        ├─ 取流登记(topic/分区数)
  *        ├─ T0 三规则选边界(R1/R2/R3)
+ *        ├─ 批终态物化(batch_job: RUNNING + 心跳续租 → 终态)
  *        ├─ 加载 logic(与增量同一份)
  *        ├─ BatchPhaseRunner.run(mode=SNAPSHOT)
  *        └─ 回调 done(t0, ok) → 成功才交接;失败 → BATCH_FAILED(人工重做批)
@@ -34,13 +35,15 @@ public class SchedulerBatchRunner implements BatchRunner {
     private final T0Selector t0Selector;
     private final LogicLoader logicLoader;
     private final ContractLookup contracts;
+    private final BatchJobStore batchJobs;
     private final SdkLogger log;
 
     public SchedulerBatchRunner(TaskStore tasks, StreamRegistry streams, SnapshotSource snapshotSource,
                                 T0Selector t0Selector, LogicLoader logicLoader, ContractLookup contracts,
-                                SdkLogger log) {
+                                BatchJobStore batchJobs, SdkLogger log) {
         this.tasks = tasks; this.streams = streams; this.snapshotSource = snapshotSource;
-        this.t0Selector = t0Selector; this.logicLoader = logicLoader; this.contracts = contracts; this.log = log;
+        this.t0Selector = t0Selector; this.logicLoader = logicLoader; this.contracts = contracts;
+        this.batchJobs = batchJobs; this.log = log;
     }
 
     /** 批段身份解析:任务 contractRef → 契约 consumer_id;不可用返回 empty(fail-closed 依据) */
@@ -75,12 +78,30 @@ public class SchedulerBatchRunner implements BatchRunner {
                 T0Selector.Decision d = t0Selector.select(si.get().topic(), 0, null);
                 log.info("批阶段开始 task={} consumer={} {} ({})", taskId, consumerId, d, d.detail());
 
-                ConsumerLogic logic = logicLoader.load(LogicRef.of(task.logicId(), task.logicVersion())).logic();
-                BatchPhaseRunner.Outcome o = new BatchPhaseRunner(snapshotSource).run(
-                        taskId, consumerId, task.consumerGroup(), si.get().stream(), si.get().topic(), d.tso(),
-                        si.get().partitions(), task.logicId(), task.logicVersion(), logic, task.params(), log);
-                log.info("批阶段结束 task={} {}", taskId, o);
-                callback.done(d.tso(), o.ok);
+                // 批终态物化(CP2a/CP2b 对账判据):RUNNING 行 + 心跳续租线程(每 30s), 终态在 run 返回后落
+                batchJobs.markStarted(taskId);
+                Thread heartbeat = new Thread(() -> {
+                    while (!Thread.currentThread().isInterrupted()) {
+                        batchJobs.heartbeat(taskId);
+                        try { Thread.sleep(30000L); } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                }, "outlet-batch-heartbeat-" + taskId);
+                heartbeat.setDaemon(true);
+                heartbeat.start();
+
+                try {
+                    ConsumerLogic logic = logicLoader.load(LogicRef.of(task.logicId(), task.logicVersion())).logic();
+                    BatchPhaseRunner.Outcome o = new BatchPhaseRunner(snapshotSource).run(
+                            taskId, consumerId, task.consumerGroup(), si.get().stream(), si.get().topic(), d.tso(),
+                            si.get().partitions(), task.logicId(), task.logicVersion(), logic, task.params(), log);
+                    log.info("批阶段结束 task={} {}", taskId, o);
+                    batchJobs.markDone(taskId, o.ok, o.ok ? d.tso() : 0L);
+                    callback.done(d.tso(), o.ok);
+                } finally {
+                    heartbeat.interrupt();
+                }
             } catch (Throwable e) {
                 log.error("批阶段异常 task=" + taskId, (Throwable) e);
                 callback.done(0L, false);

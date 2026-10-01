@@ -36,11 +36,6 @@
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.neo4j.driver</groupId>
-      <artifactId>neo4j-java-driver</artifactId>
-      <version>5.21.0</version>
-    </dependency>
-    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
@@ -77,6 +72,25 @@
     <dependency>
       <groupId>org.springframework.kafka</groupId>
       <artifactId>spring-kafka</artifactId>
+    </dependency>
+
+    <!-- 统一调度框架契约(TaskSpec 提交构造;提交走 dcp-worker REST,不直连 etcd) -->
+    <dependency>
+      <groupId>com.dcp</groupId>
+      <artifactId>dcp-scheduler-api</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+
+    <!-- ShedLock: 文件同步调度器等定时任务多实例互斥(锁表 shedlock, 见 schema.sql) -->
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-spring</artifactId>
+      <version>5.16.0</version>
+    </dependency>
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-jdbc-template</artifactId>
+      <version>5.16.0</version>
     </dependency>
 
     <!-- MySQL binlog 采集(轻量 CDC 连接器; zendesk fork 支持 MySQL8 caching_sha2_password) -->
@@ -167,38 +181,8 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- 在线执行 Redis 置位(P1) -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-data-redis</artifactId>
-    </dependency>
-    <!-- 打标在线执行(P1): 事件 → 动态 Fact → Drools KieModule 编译求值 → Redis 置位; 与 tagengine-executor 同 drools 版本/姿势 -->
-    <dependency>
-      <groupId>org.drools</groupId>
-      <artifactId>drools-engine</artifactId>
-      <version>8.44.1.Final</version>
-    </dependency>
-    <dependency>
-      <groupId>org.drools</groupId>
-      <artifactId>drools-core</artifactId>
-      <version>8.44.1.Final</version>
-    </dependency>
-    <dependency>
-      <groupId>org.drools</groupId>
-      <artifactId>drools-compiler</artifactId>
-      <version>8.44.1.Final</version>
-    </dependency>
-    <dependency>
-      <groupId>org.drools</groupId>
-      <artifactId>drools-mvel</artifactId>
-      <version>8.44.1.Final</version>
-    </dependency>
-    <!-- 打标编译库(三端共用: DRL 生成/KieBase 编译/TagActions), 见 dcp-tag-kie/README -->
-    <dependency>
-      <groupId>com.dcp</groupId>
-      <artifactId>dcp-tag-kie</artifactId>
-      <version>1.0.0</version>
-    </dependency>
+    <!-- 在线执行 Redis 置位(P1) 与 drools 打标在线执行已随 tagengine 域迁出至 tagengine-service(N9) -->
+
   </dependencies>
 
   <build>

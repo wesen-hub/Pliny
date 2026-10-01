@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-filesync-rt —— 文件同步执行 jar(微服务架构方案 N14/§7.4, 维度⑧ 文件同步端到端)。
+
+  迁出边界(方案 C1 ④):
+    - 迁入本 jar: rclone 引擎执行逻辑(RcloneRunner: 临时 conf/命名 remote/参数构造/
+      use-json-log 解析)、run 执行态落库(run_file 明细/finishRun)、baseline_done 推进;
+    - 留在 backend: 任务 CRUD/对账/browse/agent 通道/调度触发(缩水为文件同步调度器);
+    - 仅 platform 端到端直连分支(agent 任务保持长轮询通道)。
+
+  代码组织铁律(方案 §8.2):
+    - fat jar 自足: jackson(rclone JSON 日志解析) 打入本 jar;
+    - provided 依赖契约: dcp-scheduler-api 与 slf4j 由宿主(dcp-worker)提供, parent-first;
+    - 无 Spring 装配: 全部组件手工组装, 配置经 ExecutorEnvironment.env() 注入
+      (dcp.filesync.* 键), 元库访问走 env.metaDataSource()(不新建连接池);
+    - 凭证解密: 复用 backend CryptoUtil 的 AES-256-GCM 实现(com.dcp.filesync.util 独立复制,
+      密钥经 dcp.filesync.enc-key 注入; 凭证密文读元库, 不进 etcd/bizMeta)。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-filesync-rt</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- 契约(provided, 宿主提供): 一级 SPI 接口 + 零依赖契约模型 -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-scheduler-api</artifactId>
+            <version>0.1.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- 日志门面(provided, 宿主统一管理日志后端) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- fat jar 自足: rclone JSON 日志逐行解析 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.17.0</version>
+        </dependency>
+        <!-- 测试 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-filesync-rt</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <!-- fat jar: SPI 服务声明合并(与 dcp-indexer-rt/dcp-synclink 项目惯例一致) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

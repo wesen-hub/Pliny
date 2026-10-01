@@ -25,6 +25,7 @@ public class HttpContractProvider implements ContractProvider {
     private final String baseUrl;
     private final String contractRef;
     private final String consumerId;
+    private final String stream;
     private final HttpClient http;
     private final Duration timeout;
     private final long refreshMillis;
@@ -32,18 +33,19 @@ public class HttpContractProvider implements ContractProvider {
     private final AtomicReference<ContractView> cached = new AtomicReference<>();
     private volatile long loadedAt;
 
-    public HttpContractProvider(String baseUrl, String contractRef, String consumerId,
+    public HttpContractProvider(String baseUrl, String contractRef, String consumerId, String stream,
                                 Duration timeout, long refreshMillis) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.contractRef = contractRef;
         this.consumerId = consumerId;
+        this.stream = stream;
         this.timeout = timeout;
         this.refreshMillis = refreshMillis;
         this.http = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
-    public HttpContractProvider(String baseUrl, String contractRef, String consumerId) {
-        this(baseUrl, contractRef, consumerId, Duration.ofSeconds(3), 30_000L);
+    public HttpContractProvider(String baseUrl, String contractRef, String consumerId, String stream) {
+        this(baseUrl, contractRef, consumerId, stream, Duration.ofSeconds(3), 30_000L);
     }
 
     @Override
@@ -66,7 +68,8 @@ public class HttpContractProvider implements ContractProvider {
     }
 
     private ContractView fetch() {
-        String url = baseUrl + "/api/outlet/contracts/" + contractRef + "?consumerId=" + consumerId;
+        String url = baseUrl + "/api/outlet/contracts/" + contractRef + "?consumerId=" + consumerId
+                + "&stream=" + (stream == null ? "" : stream);
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(timeout).GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());

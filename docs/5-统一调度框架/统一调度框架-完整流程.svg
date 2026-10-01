@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 960" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#ef4444"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#10b981"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="960" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">统一调度框架 · 完整流程架构图</text>
+  <text x="40" y="70" font-size="13" fill="#64748b">业务外壳提交契约 → 调度主打分(CAS)→ 实例 watch 对账起停线程 → 执行器消费上报 → 监控/扩缩/迁移/注销 全流程闭环;换主对业务层透明</text>
+
+  <!-- ═══ 运维后台 ═══ -->
+  <rect x="40" y="92" width="1160" height="58" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="118" font-size="15" font-weight="700" fill="#0f172a">运维后台(管理面,ns 级权限)</text>
+  <text x="60" y="140" font-size="12" fill="#475569">ns 管理(创建/默认规则/缩容总开关)· 任务管理 · 实例调配(下架/权重/暂停)· 分区迁移 · 监控大盘</text>
+
+  <!-- ═══ etcd ═══ -->
+  <rect x="400" y="190" width="440" height="330" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="420" y="218" font-size="15" font-weight="700" fill="#2563eb">etcd(唯一状态中心,业务层只认它不认主)</text>
+  <g font-size="11.5" fill="#334155">
+    <rect x="420" y="234" width="400" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="432" y="255" font-family="monospace">/dcp/{ns}/leader</text>
+    <text x="600" y="255" fill="#64748b">竞选键(lease campaign,每 ns 独立)</text>
+    <rect x="420" y="274" width="400" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="432" y="295" font-family="monospace">/dcp/{ns}/instances/{id}</text>
+    <text x="610" y="295" fill="#64748b">实例注册+lease 30s(10s 续租)</text>
+    <rect x="420" y="314" width="400" height="34" rx="6" fill="#eff6ff"/>
+    <text x="432" y="335" font-family="monospace">/dcp/{ns}/tasks/{id}/spec</text>
+    <text x="612" y="335" fill="#64748b">TaskSpec(外壳写,框架只读)</text>
+    <rect x="420" y="354" width="400" height="34" rx="6" fill="#eff6ff"/>
+    <text x="432" y="375" font-family="monospace">/dcp/{ns}/tasks/{id}/parts/{n}</text>
+    <text x="624" y="375" fill="#64748b">分区归属(CAS+epoch,实例 watch)</text>
+    <rect x="420" y="394" width="400" height="34" rx="6" fill="#f0fdf4"/>
+    <text x="432" y="415" font-family="monospace">…/parts/{n}/snap</text>
+    <text x="574" y="415" fill="#64748b">执行器快照(10s 续写,TTL 30s)</text>
+    <rect x="420" y="434" width="400" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="432" y="455" font-family="monospace">/dcp/{ns}/tasks/{id}/status</text>
+    <text x="612" y="455" fill="#64748b">任务状态(主写,外壳可选 watch)</text>
+    <rect x="420" y="474" width="400" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="432" y="495" font-family="monospace">/dcp/{ns}/rules · /ops/{opId}</text>
+    <text x="622" y="495" fill="#64748b">默认规则 · 运维操作(后台写)</text>
+  </g>
+
+  <!-- ═══ 业务外壳 ═══ -->
+  <rect x="40" y="190" width="320" height="200" rx="10" fill="#ffffff" stroke="#10b981" stroke-width="1.5"/>
+  <text x="60" y="218" font-size="15" font-weight="700" fill="#10b981">业务外壳(任务来源,ns 各自)</text>
+  <g font-size="12" fill="#334155">
+    <text x="60" y="248">· 组装/提交/更新/注销 TaskSpec</text>
+    <text x="60" y="270">· sync:逻辑表保存 → 提交</text>
+    <text x="60" y="292">· indexer:流扫描新 topic → 提交</text>
+    <text x="60" y="314">· outlet:批打底 → 批流交接 T0</text>
+    <text x="76" y="336">→ 单元规划 → 起点计算 → 提交</text>
+    <text x="60" y="358">· Kafka 扩分区(收扩容建议)</text>
+    <text x="60" y="380">· 可选 watch 自己任务 status</text>
+  </g>
+
+  <!-- ═══ 调度主 ═══ -->
+  <rect x="880" y="190" width="320" height="330" rx="10" fill="#ffffff" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="900" y="218" font-size="15" font-weight="700" fill="#f59e0b">调度主(每 ns 独立选主)</text>
+  <g font-size="12" fill="#334155">
+    <text x="900" y="248">决策循环(10s/轮):</text>
+    <rect x="900" y="258" width="280" height="30" rx="6" fill="#fffbeb"/>
+    <text x="912" y="277">扫 PENDING → 候选过滤 → 打分</text>
+    <rect x="900" y="294" width="280" height="30" rx="6" fill="#fffbeb"/>
+    <text x="912" y="313">→ CAS 写归属 → ASSIGNED</text>
+    <text x="900" y="344">· 再平衡:新实例/下架/失衡/人工</text>
+    <text x="900" y="366">· 扩缩容决策:水位×持续期×冷却</text>
+    <text x="900" y="388">· 判死:lease 过期 + 快照失效</text>
+    <text x="916" y="410">(双窗口 → 保守交接)</text>
+    <text x="900" y="432">· 派生指标:lag/rps/latency/errorRate</text>
+    <text x="900" y="454">· 活性检测 + 告警</text>
+    <text x="900" y="476">· 主无内存态:决策结果全落 etcd</text>
+    <text x="916" y="498">(换主全量读恢复,业务无感)</text>
+  </g>
+
+  <!-- ═══ 实例 ×3 ═══ -->
+  <g>
+    <rect x="40" y="470" width="376" height="200" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="60" y="498" font-size="14" font-weight="700" fill="#0f172a">实例 sync-01(一实例一 ns)</text>
+    <rect x="60" y="512" width="336" height="78" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="76" y="534" font-size="12.5" font-weight="700" fill="#334155">实例骨架(框架代码)</text>
+    <text x="76" y="554" font-size="11.5" fill="#475569">注册+lease 保活 · watch 归属对账 diff</text>
+    <text x="76" y="574" font-size="11.5" fill="#475569">diff 新增→装载执行器 start(ctx);消失→stop()</text>
+    <rect x="60" y="600" width="336" height="56" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="76" y="622" font-size="12.5" font-weight="700" fill="#2563eb">执行器(业务代码,零 etcd 依赖)</text>
+    <text x="76" y="642" font-size="11.5" fill="#475569">poll → 业务处理 → 提交位点 → 四个计数器</text>
+  </g>
+  <g>
+    <rect x="432" y="470" width="376" height="200" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="452" y="498" font-size="14" font-weight="700" fill="#0f172a">实例 sync-02</text>
+    <rect x="452" y="512" width="336" height="78" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="468" y="534" font-size="12.5" font-weight="700" fill="#334155">实例骨架</text>
+    <text x="468" y="554" font-size="11.5" fill="#475569">注册+lease 保活 · watch 归属对账 diff</text>
+    <text x="468" y="574" font-size="11.5" fill="#475569">对账 diff 驱动起/停执行器线程</text>
+    <rect x="452" y="600" width="336" height="56" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="468" y="622" font-size="12.5" font-weight="700" fill="#2563eb">执行器(每分区一线程)</text>
+    <text x="468" y="642" font-size="11.5" fill="#475569">poll → 业务处理 → 提交位点 → 快照上报</text>
+  </g>
+  <g>
+    <rect x="824" y="470" width="376" height="200" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="844" y="498" font-size="14" font-weight="700" fill="#0f172a">实例 sync-03(宕机 → lease 过期)</text>
+    <rect x="844" y="512" width="336" height="78" rx="8" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="860" y="534" font-size="12.5" font-weight="700" fill="#dc2626">实例骨架(失联)</text>
+    <text x="860" y="554" font-size="11.5" fill="#475569">lease 30s 不续租 → 主发现失联</text>
+    <text x="860" y="574" font-size="11.5" fill="#475569">其分区 → 判死(双窗口)→ 改 PENDING</text>
+    <rect x="844" y="600" width="336" height="56" rx="8" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="860" y="622" font-size="12.5" font-weight="700" fill="#dc2626">执行器(已停)</text>
+    <text x="860" y="642" font-size="11.5" fill="#475569">快照停更 → TTL 失效 → 迁移到活实例</text>
+  </g>
+
+  <!-- ═══ 生命周期时间带 ═══ -->
+  <rect x="40" y="712" width="1160" height="86" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="738" font-size="13.5" font-weight="700" fill="#0f172a">完整生命周期(八阶段)</text>
+  <g>
+    <rect x="60" y="752" width="122" height="30" rx="15" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="74" y="771" font-size="11.5" fill="#0369a1">① 框架启动</text>
+    <rect x="192" y="752" width="122" height="30" rx="15" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="208" y="771" font-size="11.5" fill="#0369a1">② 任务创建</text>
+    <rect x="324" y="752" width="122" height="30" rx="15" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="338" y="771" font-size="11.5" fill="#0369a1">③ 调度决策</text>
+    <rect x="456" y="752" width="122" height="30" rx="15" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="480" y="771" font-size="11.5" fill="#0369a1">④ 执行</text>
+    <rect x="588" y="752" width="122" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/>
+    <text x="600" y="771" font-size="11.5" fill="#047857">⑤ 稳态监控</text>
+    <rect x="720" y="752" width="122" height="30" rx="15" fill="#fef3c7" stroke="#fcd34d"/>
+    <text x="728" y="771" font-size="11.5" fill="#b45309">⑥ 自动扩缩容</text>
+    <rect x="852" y="752" width="122" height="30" rx="15" fill="#fee2e2" stroke="#fca5a5"/>
+    <text x="874" y="771" font-size="11.5" fill="#b91c1c">⑦ 故障迁移</text>
+    <rect x="984" y="752" width="122" height="30" rx="15" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="1002" y="771" font-size="11.5" fill="#475569">⑧ 任务注销</text>
+  </g>
+
+  <!-- ═══ 流程箭头 ═══ -->
+  <!-- ① 外壳 → etcd:提交 TaskSpec + PENDING -->
+  <path d="M360 250 H420" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="370" y="240" font-size="12" font-weight="700" fill="#10b981">① 写 spec+PENDING</text>
+  <!-- 外壳 watch 自己任务状态(虚线回) -->
+  <path d="M400 480 C 380 560 60 560 80 395" stroke="#10b981" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrowGreen)"/>
+  <text x="100" y="500" font-size="11" fill="#10b981">watch 任务状态(可选,窄)</text>
+
+  <!-- ② 主 → etcd:CAS 写归属 -->
+  <path d="M880 285 H860" stroke="#f59e0b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <text x="792" y="278" font-size="12" font-weight="700" fill="#f59e0b">② CAS 写归属</text>
+
+  <!-- ③ etcd → 实例:watch 对账(两条) -->
+  <path d="M540 525 V470" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M700 525 V470" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <text x="546" y="505" font-size="12" font-weight="700" fill="#64748b">③ watch 对账</text>
+
+  <!-- ④ 实例骨架 → 执行器:start/stop -->
+  <text x="100" y="596" font-size="11.5" font-weight="700" fill="#2563eb">④ start(ctx)/stop()</text>
+
+  <!-- ⑤ 执行器 → etcd:快照(虚线,从实例顶部绕回) -->
+  <path d="M430 470 C 410 380 150 380 150 300 C 150 230 380 230 410 230" stroke="#2563eb" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrowBlue)"/>
+  <text x="160" y="300" font-size="11.5" font-weight="700" fill="#2563eb">⑤ 快照 10s(四计数器,续写=TLL 活性)</text>
+
+  <!-- ⑥ 主读快照 + Kafka Admin 派生指标 -->
+  <path d="M860 435 C 830 420 800 250 840 250" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="826" y="360" font-size="11" fill="#f59e0b">⑥ 读快照+Kafka endOffset</text>
+  <text x="826" y="376" font-size="11" fill="#f59e0b">→ 派生指标/活性检测</text>
+
+  <!-- ⑦ 扩缩容:主 ↔ 外壳 -->
+  <path d="M900 470 C 900 560 400 560 372 390" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="480" y="556" font-size="11" fill="#f59e0b">⑦ 扩容建议(Kafka 扩分区)/ 缩容调钩子切路由</text>
+
+  <!-- ⑧ 故障迁移:实例3 → etcd → 主 -->
+  <path d="M860 560 H820" stroke="#ef4444" stroke-width="2" fill="none" marker-end="url(#arrowRed)"/>
+  <text x="690" y="552" font-size="11.5" font-weight="700" fill="#ef4444">⑧ lease 过期→判死</text>
+  <path d="M880 500 C 920 470 920 380 880 330" stroke="#ef4444" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrowRed)"/>
+  <text x="896" y="440" font-size="11" fill="#ef4444">重分配(双窗口确认)</text>
+
+  <!-- ⑨ 注销 -->
+  <path d="M840 370 L830 350" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <text x="760" y="336" font-size="11.5" font-weight="700" fill="#64748b">⑨ DRAINING→GONE(注销)</text>
+
+  <!-- 后台与 etcd -->
+  <path d="M620 150 V190" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <text x="630" y="172" font-size="11.5" fill="#64748b">管理操作(读写)</text>
+
+  <!-- ═══ 图例 ═══ -->
+  <rect x="40" y="824" width="1160" height="112" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="850" font-size="13.5" font-weight="700" fill="#0f172a">图例</text>
+  <g font-size="11.5" fill="#475569">
+    <line x1="60" y1="868" x2="100" y2="868" stroke="#10b981" stroke-width="2" marker-end="url(#arrowGreen)"/>
+    <text x="108" y="872">业务外壳交互(提交/注销/watch)</text>
+    <line x1="300" y1="868" x2="340" y2="868" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="348" y="872">调度主决策(CAS/扩缩/判死)</text>
+    <line x1="560" y1="868" x2="600" y2="868" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="608" y="872">实例感知(watch 对账/管理操作)</text>
+    <line x1="820" y1="868" x2="860" y2="868" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrowBlue)"/>
+    <text x="868" y="872">快照上报(10s,TTL 30s)</text>
+    <line x1="60" y1="896" x2="100" y2="896" stroke="#ef4444" stroke-width="2" marker-end="url(#arrowRed)"/>
+    <text x="108" y="900">故障路径(失联/判死/迁移)</text>
+    <text x="300" y="900">虚线 = 周期/异步;实线 = 单次动作;业务层只认 etcd,不认调度主(换主透明)</text>
+    <text x="60" y="924" font-size="11" fill="#94a3b8">实例 TTL 30s 内重启:lease 未过期 → 归属不变 → 按 etcd 归属对账恢复,不触发重分配</text>
+  </g>
+</svg>

@@ -9,19 +9,19 @@ RUN --mount=type=cache,target=/root/.m2/repository mvn -B -DskipTests dependency
 COPY dist/dcp-tag-kie-1.0.0.jar /tmp/dcp-tag-kie-1.0.0.jar
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
     -Dfile=/tmp/dcp-tag-kie-1.0.0.jar -DgroupId=com.dcp -DartifactId=dcp-tag-kie -Dversion=1.0.0 -Dpackaging=jar
+# 内部库 dcp-scheduler-api(统一调度框架契约, 未发布到远端仓库): 构建前 scripts/build_outlet_dist.sh 产出 dist/ 预置 jar
+COPY dist/dcp-scheduler-api-0.1.0.jar /tmp/dcp-scheduler-api-0.1.0.jar
+COPY dist/dcp-scheduler-api-pom.xml /tmp/dcp-scheduler-api-pom.xml
+RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+    -Dfile=/tmp/dcp-scheduler-api-0.1.0.jar -DpomFile=/tmp/dcp-scheduler-api-pom.xml
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B package -DskipTests
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 ENV TZ=Asia/Shanghai
-ENV HADOOP_HOME=/opt/hadoop
-ENV PATH=$HADOOP_HOME/bin:$PATH
-# Hadoop 客户端(DistCp 引擎; 自带 s3a; 预下载进 build context 避免构建期网络抖动)
-COPY dist/hadoop-3.4.1.tar.gz /tmp/hadoop.tar.gz
-RUN tar xzf /tmp/hadoop.tar.gz -C /opt && mv /opt/hadoop-3.4.1 /opt/hadoop && rm /tmp/hadoop.tar.gz
-# 注: 文件同步引擎已切 rclone(mc 已从镜像移除, 2026-09-10)
-# rclone(文件同步新引擎, v1.71.0 arm64; dist/ 预置二进制, 免构建期网络)
+# 注: 文件同步引擎已切 rclone(DistCp/hadoop 客户端已随引擎退役移除, 2026-09-30)
+# rclone(文件同步引擎, v1.71.0 arm64; dist/ 预置二进制, 免构建期网络)
 COPY dist/rclone /usr/local/bin/rclone
 RUN chmod +x /usr/local/bin/rclone
 COPY --from=build /app/target/dcp.jar app.jar

@@ -21,14 +21,14 @@ public class ModelService {
 
     private final JdbcTemplate metaJdbc;
     private final LogicalTableConfigService tableConfigService;
-    private final TargetDbRegistry targetDbRegistry;
+    private final ShardTableInitializer shardTableInitializer;
     private final ObjectMapper om = new ObjectMapper();
 
     public ModelService(JdbcTemplate metaJdbc, LogicalTableConfigService tableConfigService,
-                        TargetDbRegistry targetDbRegistry) {
+                        ShardTableInitializer shardTableInitializer) {
         this.metaJdbc = metaJdbc;
         this.tableConfigService = tableConfigService;
-        this.targetDbRegistry = targetDbRegistry;
+        this.shardTableInitializer = shardTableInitializer;
     }
 
     public List<Map<String, Object>> list() {
@@ -51,6 +51,10 @@ public class ModelService {
      * 创建模型(发布):
      * ① 写 model_definition; ② upsert logical_table(运行时配置: topic/分区/表数/键);
      * ③ 自动建 topic + Kafka 分区; ④ 预建物理表骨架; ⑤ 注册消费监听
+     *
+     * <p>幂等补完(CP-M 半成品恢复): ① 已落库(此前半成品崩溃/对账重放)时不报错,
+     * 加载已有行继续跑 ②③④(全部幂等: upsert / describe-then-create / CREATE IF NOT EXISTS),
+     * 收敛到同一目标态; 以已有行为准(模型定义是事实源)。
      */
     public long create(String name, String layer, String domain, String tableName,
                        int partitionCount, int tableCount, List<String> keyColumns,
@@ -64,7 +68,7 @@ public class ModelService {
         // 去分片(2026-09-07): 物理单表 = 逻辑表(TiDB 自动 split), 参数 tableCount 不再生效
         final int physicalTables = 1;
         String topic = "dcp." + tableName;
-        // ① 模型定义(重复建模 → 友好业务错误, 勿漏为 500)
+        // ① 模型定义
         KeyHolder kh = new GeneratedKeyHolder();
         try {
             metaJdbc.update(con -> {
@@ -85,16 +89,33 @@ public class ModelService {
             return ps;
             }, kh);
         } catch (org.springframework.dao.DuplicateKeyException dke) {
-            throw new IllegalArgumentException("模型已存在(逻辑表建模即发布, 请勿重复): table_name=" + tableName);
+            // 半成品恢复: 模型已在(此前创建中途崩遇或对账重放) → 加载已有行 → 续跑 ②③④
+            long id = existingIdOf(tableName);
+            Map<String, Object> row = metaJdbc.queryForMap(
+                    "SELECT partition_count, key_columns FROM model_definition WHERE id = ?", id);
+            List<String> existingKeys = parseKeys((String) row.get("key_columns"));
+            int existingPc = row.get("partition_count") == null
+                    ? Math.max(partitionCount, 1) : ((Number) row.get("partition_count")).intValue();
+            log.warn("模型已存在, 幂等补完续跑 ②③④: table_name={} id={}", tableName, id);
+            publishArtifacts(tableName, topic, existingPc, existingKeys.isEmpty() ? keyColumns : existingKeys);
+            return id;
         }
         long id = kh.getKey().longValue();
 
+        publishArtifacts(tableName, topic, Math.max(partitionCount, 1), keyColumns);
+        log.info("模型发布: id={} {} → {} topic={} partitions={} tables={} keys={}",
+                id, name, tableName, topic, partitionCount, physicalTables, keyColumns);
+        return id;
+    }
+
+    /** ②③④⑤ 幂等发布物: logical_table upsert + topic 分区确保 + 物理表骨架 + 消费监听(均幂等)。 */
+    private void publishArtifacts(String tableName, String topic, int partitionCount, List<String> keyColumns) {
         // ② 逻辑表运行时配置(幂等 upsert; 内部自动建 topic + 分区 + 注册消费监听)
         LogicalTableConfigService.LogicalTableConfig cfg = new LogicalTableConfigService.LogicalTableConfig();
         cfg.setTableName(tableName);
         cfg.setTopic(topic);
         cfg.setBucketCount(4096);
-        cfg.setTableCount(physicalTables);
+        cfg.setTableCount(1);
         cfg.setTablePrefix(tableName);
         cfg.setPartitionCount(Math.max(partitionCount, 1));
         cfg.setConsumerGroup("dcp-sync-" + tableName);
@@ -108,10 +129,29 @@ public class ModelService {
         tableConfigService.save(cfg);   // ③⑤ 自动: ensureTopicPartitions + registry.register
 
         // ④ 预建物理表骨架(target_db; 多库场景模型默认写 target_db)
-        targetDbRegistry.ensureShardTables(tableName, physicalTables, keyColumns);
-        log.info("模型发布: id={} {} → {} topic={} partitions={} tables={} keys={}",
-                id, name, tableName, topic, partitionCount, physicalTables, keyColumns);
+        shardTableInitializer.ensureShardTables(tableName, 1, keyColumns);
+    }
+
+    private long existingIdOf(String tableName) {
+        Long id = metaJdbc.queryForObject(
+                "SELECT id FROM model_definition WHERE table_name = ?", Long.class, tableName);
+        if (id == null) {
+            throw new IllegalStateException("模型行存在但查询失败: table_name=" + tableName);
+        }
         return id;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> parseKeys(String keyColumnsJson) {
+        if (keyColumnsJson == null || keyColumnsJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return om.readValue(keyColumnsJson, List.class);
+        } catch (Exception e) {
+            log.warn("model_definition.key_columns JSON 解析失败, 忽略: {}", keyColumnsJson);
+            return List.of();
+        }
     }
 
     public void delete(long id) {

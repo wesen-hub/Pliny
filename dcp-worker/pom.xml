@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-worker —— 统一调度框架纯宿主(微服务架构方案 N3, 执行体服务)。
+
+  代码组织铁律(方案 §7.2/§8.2):
+    - 纯宿主零业务代码:业务逻辑全在业务 jar(dcp-synclink/dcp-indexer-rt/dcp-outlet-rt),
+      本仓只做:白名单 ClassLoader 装载 → SPI 发现 → 骨架启动 → REST 提交入口;
+    - 一镜像一骨架多 ns:InstanceConfig 声明 sync/indexer/outlet 多 ns,每 ns 独立容量/竞选;
+    - 业务 jar 经 MinIO jar_release 拉取 + sha256 校验(本地路径兼容,便于联调)。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-worker</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <java.version>17</java.version>
+        <kafka.version>3.6.1</kafka.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- 调度框架(shaded jar:jetcd/jackson 内嵌);契约 dcp-scheduler-api 随之传递 -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-scheduler-core</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+        <!-- 业务 jar 三方依赖的宿主侧对齐(parent-first 版本一致):
+             kafka-clients(dcp-synclink/indexer-rt/outlet-rt 同版本) + spring-jdbc(元库 DataSource) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <!-- 元库驱动(env.metaDataSource 供业务 jar 使用) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.0.33</version>
+        </dependency>
+        <!-- MinIO jar_release 拉取 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.10</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-worker</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -15,6 +15,8 @@ const routes = [
       { path: 'dict', name: 'dict', component: () => import('../views/dict/List.vue'), meta: { title: '字典管理' } },
       { path: 'monitor/execution', name: 'execution', component: () => import('../views/monitor/Execution.vue'), meta: { title: '执行历史' } },
       { path: 'monitor/stats', name: 'stats', component: () => import('../views/monitor/Stats.vue'), meta: { title: '统计报表' } },
+      { path: 'monitor/alerts', name: 'scheduler-alerts', component: () => import('../views/monitor/SchedulerAlerts.vue'), meta: { title: '调度告警' } },
+      { path: 'monitor/board', name: 'scheduler-board', component: () => import('../views/monitor/SchedulerBoard.vue'), meta: { title: '调度大盘' } },
       // ---------- 数据同步(建模驱动 + 链式缓冲) ----------
       { path: 'sync/overview', name: 'sync-overview', component: () => import('../views/sync/Overview.vue'), meta: { title: '同步总览' } },
       { path: 'model', name: 'model', component: () => import('../views/model/List.vue'), meta: { title: '模型管理' } },

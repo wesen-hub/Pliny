@@ -2,8 +2,9 @@ package com.dcp.outlet.control;
 
 import com.dcp.outlet.control.support.*;
 import java.util.List;
+import java.util.Map;
 
-/** 进度口径自检:滞后秒数/积压条数/缺单元/MISSING 状态。 */
+/** 进度口径自检:滞后秒数/积压条数/无快照 → SCHEDULED 缺省。 */
 public final class ProgressSelfCheck {
 
     private static final String TOPIC = "dcp.cdc.target_db.rt_sync_c";
@@ -30,18 +31,15 @@ public final class ProgressSelfCheck {
         PartitionProgress p3 = svc.fullProgressOfUnit("u1", TOPIC, 0, 1, "RUNNING", 900, processed, 123L);
         check("积压条数 = 末端 - 已提交", p3.lagRows(), 100L);
 
-        // 任务级展开:一个单元持 2 个分区
-        InMemoryUnitStore units = new InMemoryUnitStore();
-        units.insert("t1", List.of(new PlannedUnit("u1", "rt_sync_c", TOPIC, List.of(0, 1))));
-        List<UnitStatusStore.UnitStatus> st = List.of(
-                new UnitStatusStore.UnitStatus("u1", "t1", "RUNNING", 900, processed, 123L, 0L));
-        List<PartitionProgress> all = svc.progressOfTask("t1", units.byTask("t1"), st, 1, false);
+        // 任务级展开:直接按分区列展开(彻底版无单元层)
+        List<PartitionProgress> all = svc.progressOfTask("t1", TOPIC, List.of(0, 1), 1,
+                Map.of(0, 900L, 1, 500L), Map.of(0, "RUNNING", 1, "RUNNING"), false);
         check("按分区展开为 2 行", all.size(), 2);
 
-        List<PartitionProgress> missing = svc.progressOfTask("t1", units.byTask("t1"),
-                List.of(), 1, false);
-        check("无状态上报 → MISSING", missing.get(0).state(), "MISSING");
-        check("MISSING 不抛异常", missing.size(), 2);
+        List<PartitionProgress> missing = svc.progressOfTask("t1", TOPIC, List.of(0, 1), 1,
+                Map.of(), Map.of(), false);
+        check("无快照上报 → SCHEDULED(框架未分配)", missing.get(0).state(), "SCHEDULED");
+        check("SCHEDULED 缺省不抛异常", missing.size(), 2);
 
         System.out.println();
         System.out.println("==================================================");

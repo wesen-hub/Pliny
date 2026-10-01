@@ -49,11 +49,11 @@ public class FakeKafka {
         return log.get(topic).get(partition).get((int) offset).commitTs;
     }
 
-    public void commit(String group, int partition, long offset) {
+    public synchronized void commit(String group, int partition, long offset) {
         committed.computeIfAbsent(group, k -> new LinkedHashMap<>()).put(partition, offset);
     }
 
-    public long committedOf(String group, int partition) {
+    public synchronized long committedOf(String group, int partition) {
         return committed.getOrDefault(group, Map.of()).getOrDefault(partition, -1L);
     }
 }

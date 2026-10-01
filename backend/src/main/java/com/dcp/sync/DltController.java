@@ -23,9 +23,9 @@ import java.util.Map;
 @RequestMapping("/api/sync/dlt")
 public class DltController {
 
-    private final DltService dltService;
+    private final DltAdminService dltService;
 
-    public DltController(DltService dltService) {
+    public DltController(DltAdminService dltService) {
         this.dltService = dltService;
     }
 

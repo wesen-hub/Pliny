@@ -583,6 +583,7 @@ public class CdcStService {
         transform.put("seq_db_user", seqDbUser);
         transform.put("seq_db_password", seqDbPassword);
         transform.put("seq_batch", seqBatch);
+        transform.put("source_type", dsType);
         if (task.getFieldMapping() != null && !task.getFieldMapping().isBlank()) {
             transform.put("field_mapping", task.getFieldMapping());
         }

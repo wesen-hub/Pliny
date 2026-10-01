@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-scheduler-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>dcp-scheduler-api</artifactId>
+  <name>dcp-scheduler-api</name>
+  <description>调度框架契约(JDK 零依赖):业务 jar 唯一编译依赖面</description>
+
+  <dependencies>
+    <!-- 测试 -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

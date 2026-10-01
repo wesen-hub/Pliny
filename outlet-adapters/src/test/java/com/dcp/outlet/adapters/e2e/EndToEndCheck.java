@@ -7,13 +7,14 @@ import com.dcp.outlet.adapters.e2e.support.*;
 import com.dcp.outlet.sdk.*;
 import com.dcp.outlet.worker.*;
 
-
 import java.util.*;
 
 /**
  * 端到端自检(内存 Kafka,无需真实 broker/DB):
- * **控制面建任务 → 批打底 → 算起点 → 下发单元 → 计算面消费 → 位点提交 → 进度上报**
+ * **控制面建任务 → 批打底 → 算起点 → 框架出口(任务级 activate)→ 分区级执行器 → 位点提交**
  * 核心主张:**批(≤T0)与流(>T0)合起来既不丢也不重**;重复投递幂等;返工(换新 T0)后依然不丢不重。
+ * 租约/判死/迁移/防双消费由统一调度框架负责(归属键唯一),本自检只验证框架出口之前的控制面语义
+ * 与"任务级下发 → 分区级执行"的正确性。
  */
 public final class EndToEndCheck {
 
@@ -32,7 +33,6 @@ public final class EndToEndCheck {
         testReplayIdempotent();
         testReworkWithNewT0();
         testBatchFailureBlocksHandover();
-        testNoLeaseNoConsume();
 
         System.out.println();
         System.out.println("==================================================");
@@ -45,10 +45,11 @@ public final class EndToEndCheck {
     private static void testNoLossNoDup() throws Exception {
         Wire w = new Wire("e2e", 5);                        // T0 = 第 5 条(下标 5)
         w.createTask();
-        check("E1 任务进入 RUNNING", w.status, TaskStatus.RUNNING);
-        check("E1 一单元一分区(instances=3)", w.units.size(), 3);
+        check("E1 任务进入 RUNNING", w.status(), "RUNNING");
+        check("E1 任务级激活一次(单流)", w.activations().size(), 1);
+        check("E1 激活覆盖全部分区(3)", w.activationPartitions(), 3);
 
-        boolean done = w.awaitConsumed(5000);
+        boolean done = w.awaitConsumed(10_000);
         check("E1 消费到分区末尾", done, true);
 
         check("E1 批打底行数(3×6)", w.batchSink.size(), 18);
@@ -71,11 +72,11 @@ public final class EndToEndCheck {
     private static void testReplayIdempotent() throws Exception {
         Wire w = new Wire("e2e-replay", 5);
         w.createTask();
-        w.awaitConsumed(5000);
-        w.stopAll();                                        // 先停旧单元并释放租约
+        w.awaitConsumed(10_000);
+        w.stopAll();                                        // 先停旧分区执行器
         int before = w.streamSink.size();
 
-        w.redispatch("replay", 6, true);                    // 从同一批起点重投一遍(已授租约)
+        w.redispatch("replay", 6);                          // 从同一批起点重投一遍
         Thread.sleep(120);
         check("E2 重放后目标端行数不变(幂等)", w.streamSink.size(), before);
         check("E2 逻辑确实收到过重复", w.logic.applied() > 18, true);
@@ -85,7 +86,7 @@ public final class EndToEndCheck {
     private static void testReworkWithNewT0() throws Exception {
         Wire w = new Wire("e2e-rework", 8);                 // 新 T0 = 下标 8
         w.createTask();
-        w.awaitConsumed(5000);
+        w.awaitConsumed(10_000);
 
         check("E3 新批打底行数(3×9)", w.batchSink.size(), 27);
         check("E3 新流消费行数(3×3)", w.streamSink.size(), 9);
@@ -102,27 +103,9 @@ public final class EndToEndCheck {
         Wire w = new Wire("e2e-fail", 5);
         w.batch.failNextTime();
         w.createTask();
-        check("E4 批失败 → BATCH_FAILED", w.status, TaskStatus.BATCH_FAILED);
-        check("E4 未下发任何单元", w.runnerUnitsStarted(), 0);
+        check("E4 批失败 → BATCH_FAILED", w.status(), "BATCH_FAILED");
+        check("E4 未启动任何分区执行器", w.runnerUnitsStarted(), 0);
         check("E4 未提交任何位点", w.kafka.committedOf(w.group(), 0), -1L);
-    }
-
-    // ============ 5. 防双消费:未获租约的单元自停、不消费 ============
-    private static void testNoLeaseNoConsume() throws Exception {
-        Wire w = new Wire("e2e-lease", 5);
-        w.createTask();
-        w.awaitConsumed(5000);
-        w.stopAll();
-        int appliedBefore = w.logic.applied();
-        int sinkBefore = w.streamSink.size();
-
-        w.redispatch("nolease", 6, false);                  // 故意不授租约
-        Thread.sleep(150);
-
-        check("E5 未获租约的单元未消费", w.logic.applied(), appliedBefore);
-        check("E5 目标端未变化", w.streamSink.size(), sinkBefore);
-        check("E5 单元状态为 LEASE_LOST(自停)",
-                w.runner.state("u-nolease-0"), UnitRunner.State.LEASE_LOST);
     }
 
     // ================= 端到端装配 =================
@@ -135,17 +118,16 @@ public final class EndToEndCheck {
         final InMemoryLogicCatalog catalog = new InMemoryLogicCatalog();
         final InMemoryContractLookup contracts = new InMemoryContractLookup();
         final InMemoryTaskStore tasks = new InMemoryTaskStore();
-        final InMemoryUnitStore unitStore = new InMemoryUnitStore();
-        final LeaseManager leases = new LeaseManager();
-        final LeaseBackedHeartbeat heartbeat = new LeaseBackedHeartbeat();
         final UnitRunner runner;
-        final UnitDispatcherAdapter dispatcher;
+        final FrameworkTaskSink sink;
         final TaskScheduler scheduler;
         final TaskKernelService kernel;
         final SimulatingBatchRunner batch;
         final String taskId; final long t0;
-        TaskStatus status;
-        List<PlannedUnit> units = List.of();
+
+        /** 一次任务级 activate 的记录(任务 + 流 + 分区覆盖数)。 */
+        private final List<Activation> activations = new ArrayList<>();
+        private final List<String> batchFailed = new ArrayList<>();
 
         Wire(String tag, int boundaryIndex) {
             this.taskId = tag;
@@ -169,16 +151,17 @@ public final class EndToEndCheck {
             // 起点服务:锚点索引 + 轻量读取
             InMemoryAnchorStore anchors = new InMemoryAnchorStore();
             FakeKafkaPartitionReader reader = new FakeKafkaPartitionReader(kafka);
+            java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
             AnchorIndexer indexer = new AnchorIndexer(anchors, new InMemoryWatermarkStore(),
                     new AnchorIndexPolicy(3, 10_000L, 7L * 24 * 3600 * 1000, 500),
-                    new MonotonicityGuard(), () -> 0L);
+                    new MonotonicityGuard(), clock::get);
             for (int p = 0; p < PARTITIONS; p++) {
                 for (int i = 0; i < ROWS; i++) {
+                    clock.addAndGet(1000L);
                     indexer.onEvent(TOPIC, p, 1, i, kafka.commitTsAt(TOPIC, p, i));
                 }
             }
-            StartOffsetService startOffsets = new StartOffsetService(anchors, reader,
-                    AnchorIndexPolicy.defaults(), null, 200_000);
+            StartOffsetService startOffsets = new StartOffsetService(anchors, reader);
 
             // 计算面
             InMemoryLogicRegistry registry = new InMemoryLogicRegistry();
@@ -187,37 +170,74 @@ public final class EndToEndCheck {
             runner = new UnitRunner(new ClasspathLogicLoader(registry), new SdkEventDecoder(),
                     DefaultContractFilter.permissive(),
                     new FakeKafkaRecordSource.Factory(kafka),
-                    new LeaseBackedLeaseGuard(leases, 30_000L, () -> 0L),
-                    heartbeat, new WatermarkProvider() {
+                    new WatermarkProvider() {
                         public void update(int partition, long watermarkTs) { }
                         public long safeWatermark(int partition) { return 0L; }
                     },
                     new InMemoryDeadLetterSink(), metrics, id -> silent());
-            dispatcher = new UnitDispatcherAdapter(runner);
+
+            // 框架出口测试实现:任务级 activate → 按分区展开为分区级执行器(unitId = taskId#partId)
+            sink = new FrameworkTaskSink() {
+                @Override public void submitBatching(TaskRecord task, String topic, String stream, int partitions) {
+                    // 批阶段登记(框架只登记不分配),本地直连无框架 → 仅记录
+                }
+                @Override public void activate(TaskRecord task, String topic, String kafkaBootstrap,
+                                               String stream, Map<Integer, Long> startOffsets,
+                                               Map<Integer, Long> startTsos) {
+                    for (Map.Entry<Integer, Long> e : startOffsets.entrySet()) {
+                        int p = e.getKey();
+                        String unitId = task.taskId() + "#" + p;
+                        runner.start(new CreateUnitCmd()
+                                .reqId("act-" + task.taskId() + "-" + p).unitId(unitId).taskId(task.taskId())
+                                .topic(topic).stream(stream).contractRef(task.contractRef())
+                                .kafkaBootstrap(kafkaBootstrap)
+                                .partitions(List.of(p))
+                                .startOffsets(Map.of(p, e.getValue()))
+                                .startTsos(Map.of(p, startTsos.getOrDefault(p, 0L)))
+                                .consumerGroup(task.consumerGroup())
+                                .logic(LogicRef.of(task.logicId(), task.logicVersion()))
+                                .params(task.params()).failure(toFailure(task.failure())));
+                    }
+                    activations.add(new Activation(task.taskId(), topic, stream, startOffsets.size()));
+                }
+                @Override public void setPhase(String namespace, String taskId, String phase) { }
+                @Override public void cancelTask(String namespace, String taskId) {
+                    for (int p = 0; p < PARTITIONS; p++) runner.stop(taskId + "#" + p);
+                }
+                @Override public void markBatchFailed(String namespace, String taskId, String detail) { batchFailed.add(taskId); }
+            };
 
             // 控制面
             batch = new SimulatingBatchRunner(kafka, TOPIC, PARTITIONS, batchSink, t0);
-            scheduler = new TaskScheduler(tasks, unitStore, dispatcher, startOffsets, leases,
-                    (topic, partition, epoch) -> 0L, batch, () -> 0L, 30_000L);
-            kernel = new TaskKernelService(streams, catalog, contracts, tasks, unitStore,
-                    new UnitPlanner(), scheduler);
+            scheduler = new TaskScheduler(tasks, streams, startOffsets,
+                    (topic, partition, epoch) -> 0L, batch, null, sink, 1);
+            kernel = new TaskKernelService(streams, catalog, contracts, tasks, scheduler);
         }
 
         String group() { return "task-" + taskId; }
 
         void createTask() {
             TaskRecord t = new TaskRecord(taskId).name("E2E").consumerType("custom")
-                    .stream(STREAM).logic(LOGIC, VERSION).instances(PARTITIONS)
+                    .stream(STREAM).logic(LOGIC, VERSION)
                     .contractRef("ct-e2e").startPolicy("snapshot")
                     .params(Map.of("idField", "id"));
             kernel.create(t);
-            this.status = t.status();
-            this.units = unitStore.byTask(taskId);
         }
+
+        /** 状态派生(与生产 TasksController.deriveStatus 同口径):批失败 > 已激活 > 登记中。 */
+        String status() {
+            if (!batchFailed.isEmpty()) return "BATCH_FAILED";
+            if (!activations.isEmpty()) return "RUNNING";
+            return "SCHEDULED";
+        }
+
+        List<Activation> activations() { return List.copyOf(activations); }
+
+        int activationPartitions() { return activations.isEmpty() ? 0 : activations.get(0).partitions(); }
 
         int runnerUnitsStarted() {
             int n = 0;
-            for (PlannedUnit u : units) if (runner.state(u.unitId()) != null) n++;
+            for (int p = 0; p < PARTITIONS; p++) if (runner.state(taskId + "#" + p) != null) n++;
             return n;
         }
 
@@ -234,27 +254,31 @@ public final class EndToEndCheck {
             return false;
         }
 
-        /** 停机:停单元 + 释放租约(重启/返工前必须先做,否则新单元会撞 LEASE_CONFLICT)。 */
+        /** 停机:框架出口 cancelTask → 每分区执行器 runner.stop(重投/返工前先停旧执行器)。 */
         void stopAll() throws InterruptedException {
-            for (PlannedUnit u : units) {
-                runner.stop(u.unitId());
-                leases.release(u.unitId());
-            }
+            sink.cancelTask("outlet", taskId);
             Thread.sleep(80);
         }
 
-        /** 用新单元 ID 从指定起点重投(模拟重复投递 / 重启);withLease=false 时故意不授租约。 */
-        void redispatch(String tag, long startOffset, boolean withLease) throws InterruptedException {
+        /** 用新 unitId 从指定起点重投(模拟重复投递 / 重启),startTsos 缺省 = 不过滤。 */
+        void redispatch(String tag, long startOffset) throws InterruptedException {
             for (int p = 0; p < PARTITIONS; p++) {
                 String unitId = "u-" + tag + "-" + p;
-                if (withLease) {
-                    leases.grant(unitId, taskId, TOPIC, p, 1, 30_000L, 0L);
-                }
-                dispatcher.dispatch(new DispatchRequest("req-" + tag + "-" + p, unitId,
-                        taskId, TOPIC, STREAM, "ct-e2e", List.of(p), Map.of(p, startOffset), group(),
-                        LOGIC, VERSION, Map.of("idField", "id"), FailureSpec.defaults(), 30_000L));
+                runner.start(new CreateUnitCmd()
+                        .reqId("req-" + tag + "-" + p).unitId(unitId).taskId(taskId)
+                        .topic(TOPIC).stream(STREAM).contractRef("ct-e2e")
+                        .partitions(List.of(p)).startOffsets(Map.of(p, startOffset))
+                        .consumerGroup(group()).logic(LogicRef.of(LOGIC, VERSION))
+                        .params(Map.of("idField", "id")).failure(FailurePolicy.defaults()));
             }
             Thread.sleep(150);
+        }
+
+        private static FailurePolicy toFailure(FailureSpec spec) {
+            FailurePolicy.OnFailure on = "continue".equalsIgnoreCase(spec.onFailure())
+                    ? FailurePolicy.OnFailure.SKIP
+                    : FailurePolicy.OnFailure.STOP;
+            return new FailurePolicy(spec.maxRetries(), spec.backoffMillis(), on);
         }
 
         private static SdkLogger silent() {
@@ -268,6 +292,9 @@ public final class EndToEndCheck {
             };
         }
     }
+
+    /** 一次任务级激活的快照。 */
+    private record Activation(String taskId, String topic, String stream, int partitions) {}
 
     private static void check(String what, Object actual, Object expected) {
         boolean ok = String.valueOf(actual).equals(String.valueOf(expected));

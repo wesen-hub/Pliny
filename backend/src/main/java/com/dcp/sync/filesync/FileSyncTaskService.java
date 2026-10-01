@@ -1,10 +1,15 @@
 package com.dcp.sync.filesync;
 
 import com.dcp.module.agent.AgentService;
+import com.dcp.scheduler.model.Enums;
+import com.dcp.scheduler.model.TaskSpec;
+import com.dcp.scheduler.model.TaskStatus;
+import com.dcp.schedulerbridge.WorkerClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -12,7 +17,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -23,28 +27,22 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 文件同步 V3 —— rclone 引擎(2026-09-10 整体由 mc mirror 切换, 方案见
- * 《数据采集平台V3-文件同步引擎切换rclone方案-2026-09-10.md》):
+ * 文件同步 V3 —— 调度器化(P1.5: rclone 执行逻辑已迁出至 dcp-filesync-rt, 本服务只做
+ * 任务定义/调度/提交与观察, 方案见《微服务架构方案》§7.4):
  *
  * <pre>
  *   任务 = 一次 rclone 会话的描述: 源(文件数据源+路径) + 目标(数据源+bucket/prefix)
- *         + syncMode(三态) + strategy(直模 rclone 参数: 比较/覆盖/删除/过滤/性能/可靠性)
- *         + schedule(none|interval|cron) + execHost(platform|agent)
- *   模式: full_once        一次性全量: sync 镜像一次即止(deleteExtras=false 时退化为 copy)
- *         incr_scheduled   仅定时增量: copy, 只补新增/变更, 从不删目标
- *         full_then_incr   全量+定时增量: 首轮 sync 建基线, 之后按调度 copy 增量
- *   执行 = RcloneRunner: 生成临时 rclone.conf(命名 remote dcpsrc/dcpdst, 免连接串冒号/全局 flag 冲突)
- *          → rclone sync|copy → --use-json-log 逐行解析(Copied/Deleted/Failed) → 落 run/run_file;
- *          末行 stats JSON → run.summary(bytes/deletes/checks/errors/耗时)
- *   watch(常驻实时)随 mc 一并移除: 近实时请把增量周期设短(最小 1min)。
- *   旧 V1/V2 表(file_copy_task/ledger/file_meta)启动检测到即重建。
+ *         + syncMode(三态) + strategy(直模 rclone 参数) + schedule(none|interval|cron)
+ *         + execHost(platform|agent)
+ *   执行: platform 任务 → insertRun 建 run 行 → 提交一次性 TaskSpec(ns=filesync, phase=ONCE)
+ *         由 dcp-worker filesync 池起 rclone 子进程执行, 完成/失败经框架置 SUCCEEDED/FAILED;
+ *         执行器落 run/run_file 明细(RunRecorder), 本服务只读观察。
+ *         agent 任务保持长轮询通道(平台下发指令, agent 本地执行), 不动。
+ *   定时调度: autoTick(ShedLock 多实例互斥)到点提交; 孤儿 RUNNING run 按 worker 终态收尾。
+ *   browse(目标浏览)/reconcile(一致性对账)仍由本服务直接跑 rclone lsjson(镜像保留 rclone 二进制)。
  * </pre>
  */
 @Slf4j
@@ -59,11 +57,10 @@ public class FileSyncTaskService {
     static final String MODE_FULL_ONCE = "full_once";
     static final String MODE_INCR = "incr_scheduled";
     static final String MODE_FULL_THEN_INCR = "full_then_incr";
-    /** 单轮执行上限 */
-    private static final int RUN_TIMEOUT_SEC = 1800;
 
     private final JdbcTemplate metaJdbc;
     private final AgentService agentService;
+    private final WorkerClient workerClient;
 
     @Value("${dcp.enc-key}")
     private String encKey;
@@ -76,17 +73,12 @@ public class FileSyncTaskService {
     @Value("${dcp.filecopy.target-secret-key:minioadmin123}")
     private String dstSecretKey;
 
-    private final Map<Long, AtomicBoolean> running = new ConcurrentHashMap<>();
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "filesync-runner");
-        t.setDaemon(true);
-        return t;
-    });
-    private final Map<Long, Integer> lastCronMinute = new ConcurrentHashMap<>();
+    private final Map<Long, Integer> lastCronMinute = new HashMap<>();
 
-    public FileSyncTaskService(JdbcTemplate metaJdbc, AgentService agentService) {
+    public FileSyncTaskService(JdbcTemplate metaJdbc, AgentService agentService, WorkerClient workerClient) {
         this.metaJdbc = metaJdbc;
         this.agentService = agentService;
+        this.workerClient = workerClient;
     }
 
     @PostConstruct
@@ -166,11 +158,6 @@ public class FileSyncTaskService {
             log.warn("文件同步引擎切换迁移异常: {}", e.getMessage());
         }
         log.info("FileSync V3 schema ensured (engine=rclone)");
-    }
-
-    @PreDestroy
-    public void close() {
-        executor.shutdownNow();
     }
 
     // ────────────────────────── 任务 CRUD ──────────────────────────
@@ -333,215 +320,74 @@ public class FileSyncTaskService {
         if (rows.isEmpty()) return;
         if ("agent".equals(String.valueOf(rows.get(0).get("exec_host")))) {
             pushAgentCommand(((Number) rows.get(0).get("agent_id")).longValue(), id, "task_remove");
+        } else {
+            workerClient.deleteSpec("filesync", "fs-" + id);   // 平台任务: 注销 worker 侧一次性任务
         }
         metaJdbc.update("DELETE FROM file_sync_run_file WHERE run_id IN (SELECT id FROM file_sync_run WHERE task_id = ?)", id);
         metaJdbc.update("DELETE FROM file_sync_run WHERE task_id = ?", id);
         metaJdbc.update("DELETE FROM file_sync_task WHERE id = ?", id);
     }
 
-    // ────────────────────────── 执行(mirror runner) ──────────────────────────
+    // ────────────────────────── 提交(dcp-filesync-rt 执行) ──────────────────────────
 
-    /** 手动触发一轮; 已在跑返回 false */
+    /** 手动触发一轮; 已有 RUNNING run 返回 false(防双) */
     public boolean runAsync(long taskId) {
         return runAsync(taskId, "manual");
     }
 
     public boolean runAsync(long taskId, String trigger) {
-        AtomicBoolean flag = running.computeIfAbsent(taskId, k -> new AtomicBoolean(false));
-        if (!flag.compareAndSet(false, true)) {
-            return false;
-        }
-        executor.submit(() -> {
-            try {
-                runOnce(taskId, trigger);
-            } catch (Exception e) {
-                log.error("文件同步 V3 运行异常 task={}", taskId, e);
-                metaJdbc.update("UPDATE file_sync_task SET run_status = 'FAILED' WHERE id = ?", taskId);
-            } finally {
-                flag.set(false);
-            }
-        });
-        return true;
-    }
-
-    private void runOnce(long taskId, String trigger) {
         Map<String, Object> task = detail(taskId);
         if (task == null) throw new IllegalStateException("任务不存在: " + taskId);
         if ("agent".equals(String.valueOf(task.get("exec_host")))) {
-            // agent 任务由 agent 本地执行, 平台只下发 run_now 指令
+            // agent 任务由 agent 本地执行, 平台只下发 run_now 指令(长轮询通道不动)
             pushAgentCommand(((Number) task.get("agent_id")).longValue(), taskId, "run_now");
-            return;
+            return true;
+        }
+        // 防双: run 表最新一条 RUNNING 说明执行器仍在跑(含判死重派窗口), 拒绝重复触发
+        Integer runningCount = metaJdbc.queryForObject(
+                "SELECT COUNT(*) FROM file_sync_run WHERE task_id = ? AND status = 'RUNNING'",
+                Integer.class, taskId);
+        if (runningCount != null && runningCount > 0) {
+            return false;
         }
         long runId = insertRun(taskId, trigger, "platform", String.valueOf(task.get("strategy_json")));
         metaJdbc.update("UPDATE file_sync_task SET run_status = 'RUNNING', last_run_time = NOW() WHERE id = ?", taskId);
-        long t0 = System.currentTimeMillis();
-        int okN = 0, delN = 0, failN = 0;
-        long bytes = 0;
-        String errorTail = null;
-        Map<String, Object> stats = null;
-        boolean full = false;
-        Path conf = null;
-        try {
-            Map<String, String> src = sourceConf(((Number) task.get("source_datasource_id")).longValue());
-            src.put("path", task.get("source_path") == null ? "" : String.valueOf(task.get("source_path")));
-            Map<String, String> dst = targetConf(task);
-            Map<String, Object> st = parseJson(String.valueOf(task.get("strategy_json")));
-            String mode = normMode(task.get("sync_mode"));
-            full = isFullRound(mode, task);
-            String op = engineOp(full, st);
-            conf = writeRcloneConf(taskId, src, dst);
-            List<String> args = buildRcloneArgs(conf, src, dst, op, st);
-            log.info("[filesync] run#{} task#{} mode={} op={} {} → {}", runId, taskId, mode, op,
-                    srcRemote(src), dstRemote(dst));
-            Process p = new ProcessBuilder(args).redirectErrorStream(true).start();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    if (line.isBlank()) continue;
-                    JsonNode n;
-                    try {
-                        n = OM.readTree(line);
-                    } catch (Exception e) {
-                        continue;
-                    }
-                    if (!n.isObject()) continue;
-                    if (n.has("stats")) {   // rclone 周期性/收尾 stats → run.summary
-                        stats = OM.convertValue(n.get("stats"), LinkedHashMap.class);
-                        continue;
-                    }
-                    String level = n.path("level").asText();
-                    String msg = n.path("msg").asText("");
-                    String object = n.path("object").asText("");
-                    if (msg.startsWith("Config file")) continue;          // rclone.conf 缺失噪声
-                    if ("error".equals(level)) {
-                        if (msg.startsWith("Attempt ")) { errorTail = msg; continue; }   // 重试汇总, 非文件级
-                        // 文件级错误才有 *Object 的 objectType(目录/桶级错误只进 errorTail)
-                        if (n.path("objectType").asText("").endsWith(".Object")) {
-                            failN++;
-                            insertRunFile(runId, object.isEmpty() ? "-" : object, "error", 0, truncate(msg, 1900));
-                        }
-                        errorTail = msg;
-                    } else if (msg.startsWith("Copied")) {                 // Copied (new) / (replaced existing)
-                        long sz = n.path("size").asLong(0);
-                        insertRunFile(runId, object.isEmpty() ? "-" : object, "success", sz, null);
-                        okN++;
-                        bytes += sz;
-                    } else if ("Deleted".equals(msg)) {                    // 仅全量(sync)会删目标多余
-                        insertRunFile(runId, object.isEmpty() ? "-" : object, "deleted", 0, null);
-                        delN++;
-                    }
-                }
-            }
-            int code;
-            if (!p.waitFor(RUN_TIMEOUT_SEC, TimeUnit.SECONDS)) {
-                p.destroyForcibly();
-                code = -1;
-                if (errorTail == null) errorTail = "rclone 执行超时(" + RUN_TIMEOUT_SEC + "s)";
-            } else {
-                code = p.exitValue();
-            }
-            if (stats != null && stats.get("errors") instanceof Number se && se.longValue() > 0) {
-                failN = (int) se.longValue();      // stats.errors 为准(含未落 run_file 的错误)
-            }
-            if (code != 0 && okN == 0 && delN == 0) {
-                failN = Math.max(failN, 1);
-                if (errorTail == null) errorTail = "rclone 退出码 " + code;
-            }
-        } catch (Exception e) {
-            failN++;
-            errorTail = e.getMessage();
-        } finally {
-            if (conf != null) {
-                try {
-                    Files.deleteIfExists(conf);   // 临时 rclone.conf 含凭证, 轮次结束即删
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        String status = failN > 0 && okN == 0 && delN == 0 ? "FAILED" : "COMPLETED";
-        if ("COMPLETED".equals(status) && full) {
-            // 全量轮成功 → 标记基线就绪(full_then_incr 下一轮转增量)
-            metaJdbc.update("UPDATE file_sync_task SET baseline_done = 1 WHERE id = ?", taskId);
-        }
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("op", engineOp(full, parseJson(String.valueOf(task.get("strategy_json")))));
-        summary.put("transferred", okN);
-        summary.put("deleted", delN);
-        summary.put("bytes", stats != null && stats.get("bytes") instanceof Number b ? b.longValue() : bytes);
-        summary.put("failed", failN);
-        if (stats != null) {
-            summary.put("checks", stats.get("checks"));
-            summary.put("listed", stats.get("listed"));
-        }
-        summary.put("durationMs", System.currentTimeMillis() - t0);
-        finishRun(runId, status, summary, errorTail, taskId);
+        submitOnceTask(taskId, runId);
+        return true;
     }
 
-    /** 本轮是否为全量: full_once 恒全量; incr_scheduled 恒增量; full_then_incr 看基线 */
-    private static boolean isFullRound(String mode, Map<String, Object> task) {
-        if (MODE_FULL_ONCE.equals(mode)) return true;
-        if (MODE_INCR.equals(mode)) return false;
-        return !truthy(task.get("baseline_done"));
+    /**
+     * 提交一次性 TaskSpec(ns=filesync, phase=ONCE, F1-F3 约定):
+     * 先覆盖 spec(终态任务挂起, 不会误跑旧 run) → 删 status(框架按 SUBMITTED 重新上线新 spec)。
+     * bizMeta 只传 {taskId, runId}, 任务定义与凭证由执行器经元库读取, 不进 etcd。
+     */
+    private void submitOnceTask(long taskId, long runId) {
+        TaskSpec spec = new TaskSpec();
+        spec.namespace = "filesync";
+        spec.taskId = "fs-" + taskId;
+        spec.topic = "virtual://filesync/" + taskId;   // F2: 虚拟 topic(lag 探针跳过, 无 Kafka)
+        spec.partitions = 1;
+        spec.minPartitions = 1;
+        spec.maxPartitions = 1;
+        spec.targetRps = 0;
+        TaskSpec.HandlerRef ref = new TaskSpec.HandlerRef();
+        ref.type = Enums.HandlerType.SPI;
+        ref.ref = "filesync-runner";
+        spec.handlerRef = ref;
+        spec.handover = Enums.Handover.CONSERVATIVE;
+        spec.phase = Enums.Phase.ONCE;
+        Map<String, String> meta = new LinkedHashMap<>();
+        meta.put("taskId", String.valueOf(taskId));
+        meta.put("runId", String.valueOf(runId));
+        meta.put("maxAttempts", "3");                  // F3: 判死重派上限
+        spec.bizMeta = meta;
+        workerClient.submitSpec(spec);
+        workerClient.deleteStatus("filesync", "fs-" + taskId);
+        log.info("[filesync] task#{} run#{} 提交一次性任务(fs-{}, ns=filesync)", taskId, runId, taskId);
     }
 
     // ────────────────────────── rclone 引擎(命令构造/命名 remote) ──────────────────────────
-
-    /** 本轮实际引擎动作: 全量默认 sync(镜像删多余); deleteExtras=false 时全量退化为 copy; 增量恒 copy */
-    private static String engineOp(boolean full, Map<String, Object> st) {
-        boolean deleteExtras = st.get("deleteExtras") == null || truthy(st.get("deleteExtras"));
-        return full && deleteExtras ? "sync" : "copy";
-    }
-
-    /** 拼 rclone 参数: op 由 engineOp 决定(全量=sync 镜像 / 增量=copy), 策略直模 rclone flag */
-    private List<String> buildRcloneArgs(Path conf, Map<String, String> src, Map<String, String> dst,
-                                        String op, Map<String, Object> st) {
-        List<String> args = new ArrayList<>();
-        args.add("rclone");
-        args.add(op);
-        args.add(srcRemote(src));
-        args.add(dstRemote(dst));
-        args.add("--config");
-        args.add(conf.toString());
-        // 比较/覆盖口径
-        String cmp = String.valueOf(st.getOrDefault("compare", "size_mtime"));
-        if ("size_only".equals(cmp)) args.add("--size-only");
-        else if ("checksum".equals(cmp)) args.add("--checksum");
-        String um = String.valueOf(st.getOrDefault("updateMode", "overwrite"));
-        if ("update".equals(um)) args.add("--update");
-        else if ("ignore_existing".equals(um)) args.add("--ignore-existing");
-        // 过滤(白/黑名单链 + 时间/大小)
-        for (Object inc : list(st.get("includes"))) {
-            args.add("--include");
-            args.add(String.valueOf(inc));
-        }
-        for (Object ex : list(st.get("excludes"))) {
-            args.add("--exclude");
-            args.add(String.valueOf(ex));
-        }
-        addOpt(args, st, "minAge", "--min-age");
-        addOpt(args, st, "maxAge", "--max-age");
-        addOpt(args, st, "minSize", "--min-size");
-        addOpt(args, st, "maxSize", "--max-size");
-        // 性能/可靠性
-        args.add("--transfers");
-        args.add(String.valueOf(intOr(st.get("transfers"), 8)));
-        args.add("--checkers");
-        args.add(String.valueOf(intOr(st.get("checkers"), 8)));
-        addOpt(args, st, "bwlimit", "--bwlimit");
-        args.add("--retries");
-        args.add(String.valueOf(intOr(st.get("retries"), 3)));
-        args.add("--low-level-retries");
-        args.add(String.valueOf(intOr(st.get("lowLevelRetries"), 10)));
-        if (truthy(st.get("dryRun"))) args.add("--dry-run");
-        // 记账必需的日志口径(固定): 逐行 JSON + 每秒 stats
-        args.add("--use-json-log");
-        args.add("--log-level");
-        args.add("INFO");
-        args.add("--stats");
-        args.add("1s");
-        return args;
-    }
+    // (执行逻辑已迁出 dcp-filesync-rt; 以下仅保留 browse/reconcile 所需的命名 remote 与 conf 生成)
 
     /** 生成临时 rclone.conf(命名 remote dcpsrc/dcpdst; 含明文凭证 → 轮次结束即删) */
     private Path writeRcloneConf(long taskId, Map<String, String> src, Map<String, String> dst) throws Exception {
@@ -585,22 +431,6 @@ public class FileSyncTaskService {
         String bucket = dst.get("bucket") == null ? "" : dst.get("bucket");
         String prefix = strip(dst.get("prefix") == null ? "" : dst.get("prefix"));
         return REMOTE_DST + ":" + bucket + (prefix.isEmpty() ? "" : "/" + prefix);
-    }
-
-    private static void addOpt(List<String> args, Map<String, Object> st, String key, String flag) {
-        Object v = st.get(key);
-        if (v == null || String.valueOf(v).isBlank()) return;
-        args.add(flag);
-        args.add(String.valueOf(v));
-    }
-
-    private static int intOr(Object v, int dft) {
-        if (v instanceof Number n) return n.intValue();
-        try {
-            return v == null || String.valueOf(v).isBlank() ? dft : Integer.parseInt(String.valueOf(v).trim());
-        } catch (Exception e) {
-            return dft;
-        }
     }
 
     private static boolean truthy(Object v) {
@@ -674,6 +504,7 @@ public class FileSyncTaskService {
     // 拼 mirror 源/目标路径已由 srcRemote/dstRemote 取代(命名 remote, 无镜像路径状态)
 
     // ────────────────────────── run 落库 ──────────────────────────
+    // (明细 insertRunFile/finishRun 已随执行迁出至 dcp-filesync-rt 的 RunRecorder; 此处仅保留提交前建 run 行)
 
     private long insertRun(long taskId, String trigger, String executor, String strategySnapshot) {
         GeneratedKeyHolder kh = new GeneratedKeyHolder();
@@ -688,24 +519,6 @@ public class FileSyncTaskService {
             return ps;
         }, kh);
         return kh.getKey().longValue();
-    }
-
-    private void insertRunFile(long runId, String relPath, String status, long size, String error) {
-        metaJdbc.update("INSERT INTO file_sync_run_file (run_id, rel_path, status, size, error_msg) VALUES (?, ?, ?, ?, ?)",
-                runId, relPath, status, size, error);
-    }
-
-    private void finishRun(long runId, String status, Map<String, Object> summary, String error, long taskId) {
-        String summaryJson;
-        try {
-            summaryJson = OM.writeValueAsString(summary);
-        } catch (Exception e) {
-            summaryJson = "{}";
-        }
-        metaJdbc.update("UPDATE file_sync_run SET status = ?, summary = ?, error_msg = ?, finished_at = NOW() WHERE id = ?",
-                status, summaryJson, truncate(error, 1900), runId);
-        metaJdbc.update("UPDATE file_sync_task SET run_status = ?, last_run_summary = ?, last_run_time = NOW() WHERE id = ?",
-                status, summaryJson, taskId);
     }
 
     // ────────────────────────── 目标端浏览(rclone lsjson) ──────────────────────────
@@ -797,6 +610,7 @@ public class FileSyncTaskService {
 
     /** 轮次历史保留: 每日清理超过保留天数的 run 及其文件明细 */
     @Scheduled(cron = "0 30 3 * * ?")
+    @SchedulerLock(name = "filesyncCleanOldRuns", lockAtMostFor = "30m", lockAtLeastFor = "1m")
     public void cleanOldRuns() {
         try {
             metaJdbc.update("DELETE rf FROM file_sync_run_file rf JOIN file_sync_run r ON r.id = rf.run_id "
@@ -814,9 +628,12 @@ public class FileSyncTaskService {
 
     // ────────────────────────── 定时调度(platform 任务) ──────────────────────────
 
+    /** ShedLock 多实例互斥(锁表 shedlock): 到点提交一次性任务 + 孤儿 RUNNING run 收尾 */
     @Scheduled(fixedDelay = 15000)
+    @SchedulerLock(name = "filesyncAutoTick", lockAtMostFor = "30s", lockAtLeastFor = "10s")
     public void autoTick() {
         try {
+            reconcileOrphanRuns();
             List<Map<String, Object>> rows = metaJdbc.queryForList(
                     "SELECT id, exec_host, schedule_mode, interval_min, cron_expr, last_run_time FROM file_sync_task "
                             + "WHERE sync_mode <> 'full_once' AND schedule_mode IN ('interval','cron')");
@@ -827,9 +644,6 @@ public class FileSyncTaskService {
                     continue; // agent 任务由 agent 本地调度
                 }
                 long id = ((Number) r.get("id")).longValue();
-                if (running.containsKey(id) && running.get(id).get()) {
-                    continue;
-                }
                 String sched = String.valueOf(r.get("schedule_mode"));
                 boolean due;
                 if ("interval".equals(sched)) {
@@ -846,12 +660,43 @@ public class FileSyncTaskService {
                             && !Integer.valueOf(minuteKey).equals(lastCronMinute.putIfAbsent(id, minuteKey));
                 }
                 if (due) {
-                    runAsync(id, "schedule");
+                    runAsync(id, "schedule");   // 防双: run 表仍有 RUNNING 时返回 false
                 }
             }
         } catch (Exception e) {
             log.warn("文件同步定时 tick 异常: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 孤儿 RUNNING run 收尾: 执行器被框架停止/判死后无法 finishRun(进程被杀),
+     * 按 worker 侧任务终态(SUCCEEDED/FAILED/GONE)对账补齐 run/run_status。
+     */
+    private void reconcileOrphanRuns() {
+        List<Map<String, Object>> rows = metaJdbc.queryForList(
+                "SELECT r.id, r.task_id FROM file_sync_run r WHERE r.status = 'RUNNING'");
+        for (Map<String, Object> r : rows) {
+            long runId = ((Number) r.get("id")).longValue();
+            long taskId = ((Number) r.get("task_id")).longValue();
+            Optional<TaskStatus> st = workerClient.getStatus("filesync", "fs-" + taskId);
+            if (st.isEmpty()) continue;   // worker 不可达/spec 不存在: 下轮 tick 再试
+            String state = st.get().state;
+            if ("SUCCEEDED".equals(state) || "FAILED".equals(state) || "GONE".equals(state)) {
+                String status = "SUCCEEDED".equals(state) ? "COMPLETED" : "FAILED";
+                metaJdbc.update("UPDATE file_sync_run SET status = ?, error_msg = IFNULL(error_msg, ?), "
+                                + "finished_at = NOW() WHERE id = ?",
+                        status, "worker 终态收尾: " + state, runId);
+                metaJdbc.update("UPDATE file_sync_task SET run_status = ? WHERE id = ?", status, taskId);
+                log.info("[filesync] 孤儿 run#{} task#{} 按 worker 终态 {} 收尾", runId, taskId, state);
+            }
+        }
+    }
+
+    /** 停止 platform 任务: 注销 worker 侧 spec(框架推进 DRAINING → GONE, 执行器 stop 杀 rclone)。 */
+    public boolean stopPlatformTask(long taskId) {
+        workerClient.deleteSpec("filesync", "fs-" + taskId);
+        log.info("[filesync] task#{} 注销一次性任务(fs-{})", taskId, taskId);
+        return true;
     }
 
     private static long toEpoch(Object last) {
@@ -1038,11 +883,6 @@ public class FileSyncTaskService {
     private static boolean bool(Map<String, Object> m, String k) {
         Object v = m.get(k);
         return Boolean.TRUE.equals(v);
-    }
-
-    private static List<Object> list(Object o) {
-        if (o instanceof List<?> l) return new ArrayList<>(l);
-        return List.of();
     }
 
     private static ObjectNode extraNode(Object extra) {

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,6 +44,8 @@ public class LakeSyncService {
     private static final ObjectMapper OM = new ObjectMapper();
 
     private final JdbcTemplate metaJdbc;
+    /** 湖增量底座任务登记桥(P3: createTask 登记 / deleteTask 停 / listTasks 指标探针) */
+    private final LakeTaskDeployer lakeTaskDeployer;
 
     @Value("${dcp.lakesync.runner-mode:simulate}")
     private String runnerMode;              // simulate | spark
@@ -77,8 +80,9 @@ public class LakeSyncService {
 
     private final ExecutorService runs = Executors.newSingleThreadExecutor();
 
-    public LakeSyncService(JdbcTemplate metaJdbc) {
+    public LakeSyncService(JdbcTemplate metaJdbc, LakeTaskDeployer lakeTaskDeployer) {
         this.metaJdbc = metaJdbc;
+        this.lakeTaskDeployer = lakeTaskDeployer;
     }
 
     @PostConstruct
@@ -127,6 +131,10 @@ public class LakeSyncService {
                 r.put("cursor", new LinkedHashMap<String, Object>());
             }
             r.remove("cursor_json");
+            // 湖增量底座任务指标探针(批任务列表附带增量侧状态; 控制面不可达 → UNKNOWN/-1)
+            String lt = String.valueOf(r.get("logical_table"));
+            r.put("incrementalStatus", lakeTaskDeployer.statusOf(lt));
+            r.put("incrementalLag", lakeTaskDeployer.lagOf(lt));
         });
         return out;
     }
@@ -171,6 +179,13 @@ public class LakeSyncService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", kh.getKey());
         out.put("logicalTable", logicalTable);
+        // 湖增量底座任务登记(只登记不激活; 机会型动作失败不阻断批任务创建)
+        try {
+            Map<String, Object> d = lakeTaskDeployer.deploy(logicalTable, readKeys(logicalTable), 3);
+            out.put("incrementalTask", d);
+        } catch (Exception e) {
+            log.warn("[lakesync] 湖增量底座任务登记失败 {}: {}", logicalTable, e.getMessage());
+        }
         return out;
     }
 
@@ -189,8 +204,15 @@ public class LakeSyncService {
     }
 
     public void deleteTask(long id) {
-        getTask(id);
+        Map<String, Object> task = getTask(id);
+        String logicalTable = String.valueOf(task.get("logical_table"));
         metaJdbc.update("DELETE FROM lake_sync_task WHERE id=?", id);
+        // 湖增量底座任务停(保留登记, 部署方案阶段可复活)
+        try {
+            lakeTaskDeployer.stop(logicalTable);
+        } catch (Exception e) {
+            log.warn("[lakesync] 湖增量底座任务停失败 {}: {}", logicalTable, e.getMessage());
+        }
     }
 
     /* ═════════ 触发与执行 ═════════ */
@@ -425,6 +447,19 @@ public class LakeSyncService {
         return prefix;
     }
 
+    /** 湖增量登记用业务键(logical_table.business_key/key_columns; 与批作业 parseKeys 同款探测) */
+    private List<String> readKeys(String logicalTable) {
+        Map<String, Object> meta = metaJdbc.query("SELECT business_key, key_columns FROM logical_table WHERE table_name=?",
+                rs -> {
+                    if (!rs.next()) return null;
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("businessKey", rs.getString("business_key"));
+                    m.put("keyColumns", rs.getString("key_columns"));
+                    return m;
+                }, logicalTable);
+        return parseKeys(meta);
+    }
+
     private List<String> parseKeys(Map<String, Object> meta) {
         List<String> out = new ArrayList<>();
         if (meta == null) return out;
@@ -514,7 +549,61 @@ public class LakeSyncService {
 
     /* ═════════ 15s tick: 到期触发(interval/cron; last_auto_run_at 防热环; 停用/手动任务跳过) ═════════ */
 
+    /**
+     * 底座任务双向对账(ShedLock 域级锁 lakeTaskReconcile 多实例互斥; 判据=目标态差异, 判据即重试队列):
+     * CP0 创建方向:业务任务在 ∧ 底座缺(宽限期 180s 过滤=判活) → 补 deploy(五步幂等登记);
+     * CP4 删除方向:业务已删 ∧ 底座在且未停 → 补 stop(desired_state 收敛后判据自然不再命中)。
+     */
     @Scheduled(fixedDelay = 15000)
+    @SchedulerLock(name = "lakeTaskReconcile", lockAtMostFor = "2m", lockAtLeastFor = "5s")
+    public void reconcileBaseTasks() {
+        // CP0 创建方向(扫描只读; 宽限期在 SQL 内, 排除“正常登记中”的误判)
+        List<Map<String, Object>> missing;
+        try {
+            missing = metaJdbc.queryForList(
+                    "SELECT logical_table FROM lake_sync_task t "
+                            + "WHERE t.enabled = 1 AND t.create_time < NOW() - INTERVAL 180 SECOND "
+                            + "AND NOT EXISTS (SELECT 1 FROM consumer_task c "
+                            + "    WHERE c.task_id = CONCAT('lake-inc-', t.logical_table))");
+        } catch (Exception e) {
+            log.warn("[lakesync] 底座对账扫描失败(CP0, 下轮重试): {}", e.getMessage());
+            return;
+        }
+        for (Map<String, Object> row : missing) {
+            String lt = String.valueOf(row.get("logical_table"));
+            try {
+                lakeTaskDeployer.deploy(lt, readKeys(lt), 3);
+                log.info("[lakesync] 底座登记补发完成(CP0): logical_table={}", lt);
+            } catch (Exception e) {
+                log.warn("[lakesync] 底座登记补发失败(CP0, 下轮重试) {}: {}", lt, e.getMessage());
+            }
+        }
+        // CP4 删除方向(判据带 desired_state<>stopped: stop 成功后判据收敛, 不重复补发)
+        List<Map<String, Object>> orphan;
+        try {
+            orphan = metaJdbc.queryForList(
+                    "SELECT c.task_id FROM consumer_task c "
+                            + "WHERE c.namespace = 'lake' AND c.desired_state <> 'stopped' "
+                            + "AND NOT EXISTS (SELECT 1 FROM lake_sync_task t "
+                            + "    WHERE CONCAT('lake-inc-', t.logical_table) = c.task_id)");
+        } catch (Exception e) {
+            log.warn("[lakesync] 底座对账扫描失败(CP4, 下轮重试): {}", e.getMessage());
+            return;
+        }
+        for (Map<String, Object> row : orphan) {
+            String taskId = String.valueOf(row.get("task_id"));
+            String lt = taskId.startsWith("lake-inc-") ? taskId.substring("lake-inc-".length()) : taskId;
+            try {
+                lakeTaskDeployer.stop(lt);
+                log.info("[lakesync] 底座残留注销补发完成(CP4): task_id={}", taskId);
+            } catch (Exception e) {
+                log.warn("[lakesync] 底座残留注销补发失败(CP4, 下轮重试) {}: {}", taskId, e.getMessage());
+            }
+        }
+    }
+
+    @Scheduled(fixedDelay = 15000)
+    @SchedulerLock(name = "lakeAutoTick", lockAtMostFor = "2m", lockAtLeastFor = "5s")
     public void autoTick() {
         List<Map<String, Object>> tasks = metaJdbc.queryForList(
                 "SELECT id, enabled, schedule, interval_min, cron_expr, last_auto_run_at, status FROM lake_sync_task");
@@ -544,6 +633,26 @@ public class LakeSyncService {
             } catch (Exception e) {
                 log.warn("[lakesync] 任务#{} 自动触发失败: {}", id, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * 湖批孤儿 run 收尾(同文件同步 reconcileOrphanRuns 范式): spark 模式后台线程随进程消亡
+     * (backend 重启/spark-submit 失联)后 run 行永停 running → 超 30min 标记 failed 收尾审计。
+     * 只收 running(不碰 simulate 演练态的 submitted 行); 实际作业若仍在跑, 审计态标记不影响其完成。
+     */
+    @Scheduled(fixedDelay = 15000)
+    @SchedulerLock(name = "lakeOrphanRuns", lockAtMostFor = "2m", lockAtLeastFor = "5s")
+    public void reconcileOrphanRuns() {
+        try {
+            int n = metaJdbc.update(
+                    "UPDATE lake_sync_run SET status = 'failed', "
+                            + "error_msg = IFNULL(error_msg, '孤儿 run 收尾: 超 30min 未完成(backend 重启或 spark 进程失联)'), "
+                            + "finished_at = NOW() "
+                            + "WHERE status = 'running' AND started_at < NOW() - INTERVAL 30 MINUTE");
+            if (n > 0) log.warn("[lakesync] 孤儿 run 收尾: {} 条标记 failed", n);
+        } catch (Exception e) {
+            log.warn("[lakesync] 孤儿 run 收尾失败(下轮重试): {}", e.getMessage());
         }
     }
 

@@ -36,7 +36,7 @@ public final class ContractViewHttpCheck {
         server.start();
         String base = "http://127.0.0.1:" + server.getAddress().getPort();
 
-        HttpContractProvider provider = new HttpContractProvider(base, "ct-es-001", "c-es-001");
+        HttpContractProvider provider = new HttpContractProvider(base, "ct-es-001", "c-es-001", STREAM);
         ContractView v = provider.current();
         check("HTTP 拉取:允许列", v.columnWhitelist(STREAM), new LinkedHashSet<>(List.of("u_id", "v", "phone")));
         check("HTTP 拉取:脱敏规则", v.maskRules(), Map.of("phone", "MASK_PHONE"));
@@ -71,7 +71,7 @@ public final class ContractViewHttpCheck {
         server.stop(0);
         boolean threw = false;
         try {
-            new HttpContractProvider(base, "ct-es-001", "c-es-001").current();
+            new HttpContractProvider(base, "ct-es-001", "c-es-001", STREAM).current();
         } catch (RuntimeException ex) {
             threw = true;
         }

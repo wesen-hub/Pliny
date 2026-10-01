@@ -9,11 +9,15 @@ import com.dcp.outlet.worker.ClasspathLogicLoader;
 import com.dcp.outlet.worker.CompositeLogicLoader;
 import com.dcp.outlet.worker.DeadLetterSink;
 import com.dcp.outlet.worker.SpiLogicLoader;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
 import java.nio.file.Path;
@@ -35,8 +39,21 @@ public class OutletConfig {
         return new DriverManagerDataSource(url, user, password);
     }
 
+    /** ShedLock 域级锁提供者(锁表 shedlock 在元库;DB 时钟判到期,文档 5.8)。 */
+    @Bean
+    public LockProvider lockProvider(DataSource ds) {
+        return new JdbcTemplateLockProvider(JdbcTemplateLockProvider.Configuration.builder()
+                .withJdbcTemplate(new JdbcTemplate(ds))
+                .usingDbTime()
+                .build());
+    }
+
     @Bean
     public StreamRegistry streamRegistry(DataSource ds) { return new JdbcStreamRegistry(ds); }
+
+    /** 批阶段终态物化存储(batch_job 行)——批执行体与 Supervisor 巡检共用同一实例。 */
+    @Bean
+    public BatchJobStore batchJobStore(DataSource ds) { return new BatchJobStore(ds); }
 
     @Bean
     public AnchorStore anchorStore(DataSource ds) { return new JdbcAnchorStore(ds); }
@@ -47,38 +64,20 @@ public class OutletConfig {
     @Bean
     public TaskStore taskStore(DataSource ds) { return new JdbcTaskStore(ds); }
 
-    @Bean
-    public UnitStore unitStore(DataSource ds) { return new JdbcUnitStore(ds); }
+    /** 索引器分区污染死信(C1):chg_anchor_poison 表, 跨重启成立, 人工 DELETE 恢复采样。
+     *  (锚点采样链已迁出 dcp-indexer-rt, AnchorIndexer/PoisonStore/MonotonicityGuard 装配随之迁出) */
 
-    @Bean
-    public AnchorIndexPolicy anchorIndexPolicy() { return AnchorIndexPolicy.defaults(); }
-
-    @Bean
-    public MonotonicityGuard monotonicityGuard() { return new MonotonicityGuard(); }
-
+    /** 分区读器(栅栏方案):查询分区水位与起点。 */
     @Bean
     public PartitionReader partitionReader(@Value("${outlet.kafka.bootstrap}") String bootstrap) {
         return new KafkaPartitionReader(bootstrap);
     }
 
     @Bean
-    public StartOffsetService startOffsetService(AnchorStore anchors, PartitionReader reader,
-                                                 AnchorIndexPolicy policy, MonotonicityGuard guard,
-                                                 @Value("${outlet.start-offset.max-scan-rows:200000}") int maxScanRows) {
-        return new StartOffsetService(anchors, reader, policy, guard, maxScanRows);
+    public StartOffsetService startOffsetService(AnchorStore anchors, PartitionReader reader) {
+        // 栅栏方案:纯索引查询(lastFenceAtOrBefore), 短扫/时间索引/maxScanRows 已退役
+        return new StartOffsetService(anchors, reader);
     }
-
-    @Bean
-    public UnitPlanner unitPlanner() { return new UnitPlanner(); }
-
-    @Bean
-    public LeaseManager leaseManager() { return new LeaseManager(); }
-
-    @Bean
-    public UnitStatusStore unitStatusStore(DataSource ds) { return new JdbcUnitStatusStore(ds); }
-
-    @Bean
-    public HeartbeatStore heartbeatStore(DataSource ds) { return new JdbcHeartbeatStore(ds); }
 
     @Bean
     public com.dcp.outlet.adapters.JdbcContractViewSource contractViewSource(DataSource ds) {
@@ -104,10 +103,10 @@ public class OutletConfig {
     }
 
     @Bean
-    public Supervisor supervisor(TaskStore tasks, UnitStore units, UnitStatusStore statuses,
-                                 LeaseManager leases, AlertSink alertSink) {
-        return new Supervisor(tasks, units, statuses, leases, alertSink,
-                30_000L, 300_000L, 60_000L, System::currentTimeMillis);
+    public Supervisor supervisor(TaskStore tasks, TaskFrameworkProbe framework,
+                                 TaskScheduler outletTaskScheduler, HandoverFacts handoverFacts,
+                                 AlertSink alertSink) {
+        return new Supervisor(tasks, framework, outletTaskScheduler, handoverFacts, alertSink);
     }
 
     @Bean
@@ -139,12 +138,6 @@ public class OutletConfig {
     @Bean
     public LatestTsoProvider latestTsoProvider(WatermarkStore watermarks) {
         return new WatermarkStoreLatestTso(watermarks);
-    }
-
-    /** 交接:把 CreateUnit 下发给计算面(含 contractRef —— 计算面据此拉契约视图)。 */
-    @Bean
-    public UnitDispatcher unitDispatcher(@Value("${outlet.worker.url}") String workerUrl) {
-        return new HttpUnitDispatcher(workerUrl);
     }
 
     /* ------------------------------------------------ 批阶段(snapshot):T0 三适配器 + 真运行器 */
@@ -216,7 +209,7 @@ public class OutletConfig {
     public BatchRunner batchRunner(TaskStore taskStore, StreamRegistry streamRegistry,
                                    SnapshotSource snapshotSource, T0Selector t0Selector,
                                    LogicLoader logicLoader, SdkLogger sdkLogger,
-                                   ContractLookup contracts,
+                                   ContractLookup contracts, BatchJobStore batchJobStore,
                                    @Value("${outlet.batch.executor:local}") String executorMode,
                                    @Value("${outlet.spark.submit-bin:spark-submit}") String sparkSubmitBin,
                                    @Value("${outlet.spark.executor-jar:}") String executorJar,
@@ -224,12 +217,13 @@ public class OutletConfig {
                                    @Value("${outlet.spark.namespace:dcp}") String namespace,
                                    @Value("${outlet.snapshot.base-url:http://127.0.0.1:8081}") String snapshotBaseUrl,
                                    @Value("${outlet.spark.warehouse:}") String warehouse,
-                                   @Value("${outlet.spark.catalog-type:}") String catalogType) {
+                                   @Value("${outlet.spark.catalog-type:}") String catalogType,
+                                   @Value("${outlet.epoch:1}") int epoch) {
         BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
-                t0Selector, logicLoader, contracts, sdkLogger);
+                t0Selector, logicLoader, contracts, batchJobStore, sdkLogger);
         BatchRunner spark = new SparkBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
                 sparkSubmitBin, executorJar, catalog, namespace, snapshotBaseUrl, contracts,
-                warehouse, catalogType);
+                warehouse, catalogType, epoch);
         // 批容器执行体需拉起独立容器,依赖镜像/编排,先保留占位(置 BATCH_FAILED)
         BatchRunner container = (taskId, callback) -> {
             sdkLogger.error("批容器执行体未实现(需容器镜像 + 编排);任务 {} 置 BATCH_FAILED", taskId);
@@ -245,24 +239,29 @@ public class OutletConfig {
             @Value("${outlet.kafka.bootstrap}") String kafkaBootstrap,
             @Value("${outlet.flink.base-url:}") String flinkBaseUrl,
             @Value("${outlet.flink.jar:}") String jarPath,
-            @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap) {
-        return new FlinkIncrementalDispatcher(kafkaBootstrap, flinkBaseUrl, jarPath, flinkKafkaBootstrap);
+            @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap,
+            @Value("${outlet.epoch:1}") int epoch) {
+        return new FlinkIncrementalDispatcher(kafkaBootstrap, flinkBaseUrl, jarPath, flinkKafkaBootstrap, epoch);
     }
 
     /** 注意 bean 名不能叫 `taskScheduler`:Spring Boot 的自动配置已占用那个名字(启动才会报冲突)。 */
     @Bean
-    public TaskScheduler outletTaskScheduler(TaskStore tasks, UnitStore units, UnitDispatcher dispatcher,
-                                            StartOffsetService startOffsets, LeaseManager leases,
+    public TaskScheduler outletTaskScheduler(TaskStore tasks, StreamRegistry streams,
+                                            StartOffsetService startOffsets,
                                             LatestTsoProvider latestTso, BatchRunner batchRunner,
-                                            ExternalIncrementalDispatcher externalDispatcher) {
-        return new TaskScheduler(tasks, units, dispatcher, startOffsets, leases, latestTso,
-                batchRunner, externalDispatcher, System::currentTimeMillis, 30_000L);
+                                            ExternalIncrementalDispatcher externalDispatcher,
+                                            com.dcp.outlet.service.schedulerbridge.FrameworkTaskSpecSink frameworkSink,
+                                            SdkLogger sdkLogger, HandoverFacts handoverFacts,
+                                            @Value("${outlet.epoch:1}") int epoch) {
+        // 任务级下发的唯一出口 = 框架 TaskSpec(彻底版):归属/判死/迁移/防双消费由框架统一负责
+        return new TaskScheduler(tasks, streams, startOffsets, latestTso,
+                batchRunner, externalDispatcher, frameworkSink, epoch, sdkLogger, handoverFacts);
     }
 
     @Bean
     public TaskKernelService taskKernelService(StreamRegistry streams, LogicCatalog logicCatalog,
-                                               ContractLookup contracts, TaskStore tasks, UnitStore units,
-                                               UnitPlanner planner, TaskScheduler outletTaskScheduler) {
-        return new TaskKernelService(streams, logicCatalog, contracts, tasks, units, planner, outletTaskScheduler);
+                                               ContractLookup contracts, TaskStore tasks,
+                                               TaskScheduler outletTaskScheduler) {
+        return new TaskKernelService(streams, logicCatalog, contracts, tasks, outletTaskScheduler);
     }
 }

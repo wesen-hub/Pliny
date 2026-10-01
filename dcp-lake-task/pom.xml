@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-lake-task —— 湖增量底座任务(微服务架构方案 P3, 维度⑩ 数据湖仓)。
+
+  定位: 湖同步增量段的消费底座任务形态 —— LakeLogic(@ConsumerLogicDef("lake-sync@1.0.0"))
+  实现二级 SPI ConsumerLogic, 由 dcp-outlet-rt 的 JarLogicLoader 从逻辑仓库
+  (logic-repo/lake-sync/1.0.0.jar) 加载运行。与批全量 dcp-lakesync(Spark) 构成
+  "批作业 + 增量任务" 双形态: 批作业 MERGE 数据面权威态整行镜像, 增量任务消费
+  dcp.{逻辑表} 信封流直写同一湖表。
+
+  语义对齐(与数据面消费端 dcp-synclink AtomicUpsertDao 同构):
+    · 消费 dcp.{逻辑表} 信封流(after = CdcRecord JSON: taskId/businessKey/rowKind/seq/fields);
+    · 写者 seq 裁判: 写者列 _s{taskId}_d{datasourceId}_{sourceDb}.{sourceTable}(同 writerColOf
+      规则, 与数据面表/批作业建湖表列名一致) —— 新事件 seq > 旧写者列值才应用, 防重放/乱序;
+    · 字段级部分更新(多表合并语义): 读旧行 → 新字段覆盖同名列、其余保留 → 整行写回
+      (与数据面 ODKU IF(writer<VALUES) 同构), DELETE 经裁判物理删行(防旧删除误删新行);
+    · 主键修改(beforeKey): 拆 DELETE 旧键 + INSERT/UPDATE 新键;
+    · 湖表不存在以信封 schema 建表(键列/字段列 string + seq/写者列 long), 新字段/新写者
+      缺列补列(schema evolution, 与批作业 ensureColumns 同向);
+    · Iceberg 写入: RewriteFiles.rewriteFiles(含 touched 键的旧文件集合, 新文件集合) 一次
+      commit —— touched 行替换/删除、未 touched 行原样写回, 湖表保持"每业务键一行"权威态
+      (与批作业 ON 业务键语义一致, 不做 append 多版本); 不用 overwriteByRowFilter:
+      其 deleteExpression 要求被删文件 metrics 严格证明全行匹配(业务键 OR 对多键文件
+      不成立), RewriteFiles 显式文件集合无此限制且天然覆盖批作业遗留的多键文件。
+
+  代码组织铁律(方案 §8.2/§8.3, 与 dcp-ingest-task/dcp-tag-task 同纪律):
+    - fat jar 自足: iceberg(core/data/parquet/aws + awssdk bundle) + mysql 驱动 + jackson
+      打入本 jar; 二级 SPI 契约(outlet-sdk)由父加载器(dcp-outlet-rt)提供;
+    - 无 Spring 装配: 全部手工组装; slf4j 由宿主提供(provided);
+    - 失败要抛: 湖写入主链路失败必须抛异常, 平台据此不提交→重试→死信;
+      DLT 落库失败仅告警(死信路径不阻断主链路)。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-lake-task</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>dcp-lake-task</name>
+    <description>湖增量底座任务:LakeLogic(@ConsumerLogicDef lake-sync) 消费 dcp.{表} 信封流 → seq 裁判/字段级合并 → Iceberg 湖表 overwrite(与批作业 MERGE 同语义)</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <iceberg.version>1.7.1</iceberg.version>
+        <jackson.version>2.17.2</jackson.version>
+        <mysql.version>8.3.0</mysql.version>
+    </properties>
+
+    <dependencies>
+        <!-- 二级 SPI 契约(父加载器提供: dcp-outlet-rt 的 ConsumerLogic 类加载器; 这里 compile 仅为单测可运行, shade 后父优先加载) -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-outlet-sdk</artifactId>
+            <version>2.0.0-SNAPSHOT</version>
+        </dependency>
+        <!-- Iceberg Java API: core(表/快照/RESTCatalog/HadoopCatalog) + data(GenericRecord/Appender/Generics) + parquet(读写) + aws(S3FileIO) -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-core</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-data</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-parquet</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <!-- parquet-column(MessageType; iceberg-parquet 只把 parquet-avro 声明为 runtime,
+             编译 GenericParquetReaders.buildReader(Schema, MessageType) 需显式引入) -->
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-column</artifactId>
+            <version>1.13.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-aws</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <!-- Parquet 写依赖 hadoop Configuration(iceberg-parquet 的 pom 不含 hadoop, 需自备;
+             hadoop-common 传递依赖 hadoop-shaded-guava/protobuf 均为隔离包, 无冲突) -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>3.3.6</version>
+        </dependency>
+        <!-- 元库(logical_table 业务键读 / dlt_message 落库) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>${mysql.version}</version>
+        </dependency>
+        <!-- JSON(信封解析 / DLT payload) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <!-- 日志门面(provided, 宿主统一管理日志后端) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- 测试(sdk testkit + TestTables 内存表真 Iceberg 写入语义) -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-core</artifactId>
+            <version>${iceberg.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-lake-task</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <!-- fat jar: 二级 SPI 服务声明合并 + 排除依赖 jar 签名文件(shade 改写
+                 Manifest 后 JarVerifier 校验 *.SF/*.DSA/*.RSA 会抛 SecurityException) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

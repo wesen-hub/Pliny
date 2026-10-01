@@ -10,7 +10,7 @@ import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 
-/** 真栈:进度口径(单元状态源 + 水位 + 分区末端)与死信落库。 */
+/** 真栈:进度口径(框架快照位点 + 水位 + 分区末端)与死信落库。 */
 public final class ProgressDlqCheck {
 
     private static final String BOOTSTRAP = "127.0.0.1:19092";
@@ -21,22 +21,12 @@ public final class ProgressDlqCheck {
 
     public static void main(String[] args) throws Exception {
         DriverManagerDataSource ds = new DriverManagerDataSource(JDBC, "root", "root123");
-        JdbcUnitStatusStore statuses = new JdbcUnitStatusStore(ds);
-        JdbcUnitStore units = new JdbcUnitStore(ds);
         JdbcWatermarkStore watermarks = new JdbcWatermarkStore(ds);
         JdbcDeadLetterSink dlq = new JdbcDeadLetterSink(ds);
 
-        // 造一个任务 + 单元(带分区归属与心跳时间)
-        String unitId = "u-" + TASK + "-0-1";
+        // 清理死信残留(彻底版无单元表)
         try (Connection c = ds.getConnection(); Statement st = c.createStatement()) {
-            st.executeUpdate("DELETE FROM consumer_unit_partition WHERE task_id='" + TASK + "'");
-            st.executeUpdate("DELETE FROM consumer_unit WHERE task_id='" + TASK + "'");
             st.executeUpdate("DELETE FROM consumer_dlq WHERE task_id='" + TASK + "'");
-            st.executeUpdate("INSERT INTO consumer_unit(unit_id,task_id,topic,stream,epoch,state,partitions,"
-                    + "last_offset,last_tso,last_seen_at,dispatched_at) VALUES('" + unitId + "','" + TASK + "','"
-                    + TOPIC + "','rt_sync_c',1,'RUNNING','2',3500,469104100000000000,NOW(),NOW())");
-            st.executeUpdate("INSERT INTO consumer_unit_partition(unit_id,task_id,topic,partition_,epoch) "
-                    + "VALUES('" + unitId + "','" + TASK + "','" + TOPIC + "',2,1)");
         }
 
         // 水位(真实写入)
@@ -45,26 +35,20 @@ public final class ProgressDlqCheck {
         watermarks.upsert(new Watermark(TOPIC, 2, 1, 469104200000000000L, latest0, 0));
 
         ProgressService progress = new ProgressService(reader, watermarks, () -> System.currentTimeMillis());
-        List<PlannedUnit> pu = units.byTask(TASK);
-        check("单元从库里读出", pu.size(), 1);
-        check("分区归属读出", pu.get(0).partitions(), List.of(2));
 
-        List<UnitStatusStore.UnitStatus> st = statuses.byTask(TASK);
-        check("单元状态读出", st.size(), 1);
-        check("心跳时间已读出(>0)", st.get(0).lastSeenAt > 0, true);
-        check("下发时间已读出(>0)", st.get(0).dispatchedAt > 0, true);
-
-        List<PartitionProgress> rows = progress.progressOfTask(TASK, pu, st, 1, true);
+        // 任务级进度:直接按分区列展开;分区状态/位点由框架快照派生,此处模拟框架快照的 committedOffset
+        List<PartitionProgress> rows = progress.progressOfTask(TASK, TOPIC, List.of(2), 1,
+                Map.of(2, 3500L), Map.of(2, "RUNNING"), true);
         check("进度按分区展开", rows.size(), 1);
         PartitionProgress r = rows.get(0);
         System.out.println("  进度: " + r);
-        check("滞后秒数已算出(>0)", r.lagSeconds() > 0, true);
+        check("框架口径:无 TSO → 滞后归 0", r.lagSeconds(), 0L);
         check("积压条数已算出(≥0)", r.lagRows() >= 0, true);
 
-        // 死信落库
+        // 死信落库(unit_id 语义已变:填 taskId)
         DecodedMessage msg = DecodedMessage.event(2, 3501L, 469104100000000000L, "rt_sync_c", Op.INSERT,
                 Map.of("id", "x"), Map.of(), Map.of("id", "x"));
-        dlq.record(TASK, unitId, TOPIC, 2, 3501L, 469104100000000000L, msg,
+        dlq.record(TASK, TASK, TOPIC, 2, 3501L, 469104100000000000L, msg,
                 new IllegalStateException("scripted sink failure"), 3);
         int dlqCount;
         try (Connection c = ds.getConnection(); Statement st2 = c.createStatement();

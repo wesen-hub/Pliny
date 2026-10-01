@@ -22,11 +22,11 @@ public class JdbcStreamRegistry implements StreamRegistry {
     @Override
     public Optional<StreamInfo> get(String stream) {
         try (Connection c = ds.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT topic,partitions FROM chg_stream WHERE stream=?")) {
+             PreparedStatement ps = c.prepareStatement("SELECT topic,kafka_bootstrap,partitions FROM chg_stream WHERE stream=?")) {
             ps.setString(1, stream);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return Optional.empty();
-                return Optional.of(new StreamInfo(stream, rs.getString(1), rs.getInt(2)));
+                return Optional.of(new StreamInfo(stream, rs.getString(1), emptyToNull(rs.getString(2)), rs.getInt(3)));
             }
         } catch (SQLException e) {
             throw new IllegalStateException("stream lookup failed", e);
@@ -37,9 +37,9 @@ public class JdbcStreamRegistry implements StreamRegistry {
     public List<StreamInfo> list() {
         List<StreamInfo> out = new ArrayList<>();
         try (Connection c = ds.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT stream,topic,partitions FROM chg_stream ORDER BY stream");
+             PreparedStatement ps = c.prepareStatement("SELECT stream,topic,kafka_bootstrap,partitions FROM chg_stream ORDER BY stream");
              ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) out.add(new StreamInfo(rs.getString(1), rs.getString(2), rs.getInt(3)));
+            while (rs.next()) out.add(new StreamInfo(rs.getString(1), rs.getString(2), emptyToNull(rs.getString(3)), rs.getInt(4)));
         } catch (SQLException e) {
             throw new IllegalStateException("stream list failed", e);
         }
@@ -48,15 +48,18 @@ public class JdbcStreamRegistry implements StreamRegistry {
 
     @Override
     public void register(StreamInfo info) {
-        String sql = "INSERT INTO chg_stream(stream,topic,partitions) VALUES(?,?,?) "
-                + "ON DUPLICATE KEY UPDATE topic=VALUES(topic), partitions=VALUES(partitions)";
+        String sql = "INSERT INTO chg_stream(stream,topic,kafka_bootstrap,partitions) VALUES(?,?,?,?) "
+                + "ON DUPLICATE KEY UPDATE topic=VALUES(topic), kafka_bootstrap=VALUES(kafka_bootstrap), partitions=VALUES(partitions)";
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, info.stream());
             ps.setString(2, info.topic());
-            ps.setInt(3, info.partitions());
+            ps.setString(3, info.kafkaBootstrap() == null ? "" : info.kafkaBootstrap());
+            ps.setInt(4, info.partitions());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("stream register failed", e);
         }
     }
+
+    private static String emptyToNull(String v) { return v == null || v.isEmpty() ? null : v; }
 }

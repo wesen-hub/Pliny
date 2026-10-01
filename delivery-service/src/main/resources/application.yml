@@ -1,0 +1,62 @@
+server:
+  port: 8096
+
+spring:
+  application:
+    name: delivery-service
+  # 元数据库(dcp 库: consumer/contract/snapshot_job 表 + 出口监控)
+  datasource:
+    url: ${DELIVERY_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${DELIVERY_META_USERNAME:root}
+    password: ${DELIVERY_META_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  # 变更流数据源(L1 内部流 cdc target 栈)与 AdminClient 栈指标
+  kafka:
+    bootstrap-servers: ${DELIVERY_KAFKA_BOOTSTRAP:127.0.0.1:9092}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+dcp:
+  outlet:
+    source: ${OUTLET_SOURCE:kafka}            # mock(内存) | kafka(消费 L1 内部流)
+    registry: ${OUTLET_REGISTRY:mapper}       # memory(种子) | mapper(元库 consumer/contract)
+    epoch: 1
+    retention-hours: 168
+    api:
+      mode: ${OUTLET_API_MODE:inprocess}      # inprocess(内部消费方直调) | http
+      base-url: ${OUTLET_API_BASE:http://localhost:8096}
+      consumer-id: ${OUTLET_API_CONSUMER:demo-tag}
+    kafka:
+      topics: ${OUTLET_KAFKA_TOPICS:dcp.cdc.target_db}
+      group-id: ${OUTLET_KAFKA_GROUP:dcp-outlet}
+      start-tso: ${OUTLET_START_TS:0}         # 生产应设为 changefeed.start_ts
+      buffer-max-events: 20000
+    tidb:                                     # 快照/回查的只读入口
+      url: ${OUTLET_TIDB_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      username: ${OUTLET_TIDB_USER:root}
+      password: ${OUTLET_TIDB_PASSWORD:root123}
+      pk-column: id
+    snapshot:
+      ttl-hours: 24
+      page-limit: 1000
+    # 出口监控: Spring 定时采集栈指标(chg_*)→ Gauge;阈值口径与 outlet/monitor-outlet-stack.sh 一致
+    monitor:
+      enabled: ${OUTLET_MONITOR_ENABLED:true}
+      interval-ms: ${OUTLET_MONITOR_INTERVAL_MS:20000}
+      initial-delay-ms: ${OUTLET_MONITOR_INITIAL_DELAY_MS:20000}
+      changefeed-id: ${OUTLET_MONITOR_CHANGEFEED:chg-target-db}
+      ticdc-url: ${OUTLET_MONITOR_TICDC_URL:http://ticdc1:8300}
+      topic: ${OUTLET_MONITOR_TOPIC:dcp.cdc.target_db}
+      kafka-bootstrap: ${OUTLET_MONITOR_KAFKA_BOOTSTRAP:}
+      lag-warn-seconds: ${OUTLET_LAG_WARN:300}
+      lag-crit-seconds: ${OUTLET_LAG_CRIT:3600}
+      gc-warn-seconds: ${OUTLET_GC_WARN:21600}
+      expected-brokers: ${OUTLET_MONITOR_EXPECTED_BROKERS:3}
+      batch-fail-window-minutes: ${OUTLET_BATCH_FAIL_WINDOW_MIN:10}
+
+logging:
+  level:
+    root: INFO
+    com.dcp: INFO

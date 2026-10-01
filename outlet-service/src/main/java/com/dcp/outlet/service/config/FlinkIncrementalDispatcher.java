@@ -25,21 +25,24 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
     private final String kafkaBootstrap;
     private final String flinkBaseUrl;   // 空 = 只落 job-json 不提交
     private final String jarPath;
+    private final int epoch;             // 全局规划代(彻底版:任务级 epoch 已删,统一配置 outlet.epoch)
 
     public FlinkIncrementalDispatcher(@Value("${outlet.kafka.bootstrap}") String kafkaBootstrap,
                                       @Value("${outlet.flink.base-url:}") String flinkBaseUrl,
                                       @Value("${outlet.flink.jar:}") String jarPath,
-                                      @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap) {
+                                      @Value("${outlet.flink.kafka-bootstrap:}") String flinkKafkaBootstrap,
+                                      @Value("${outlet.epoch:1}") int epoch) {
         // 下发给 Flink 作业的 Kafka 地址 = Flink 集群视角(容器内网/宿主可达地址);缺省回退控制面自身配置
         this.kafkaBootstrap = (flinkKafkaBootstrap == null || flinkKafkaBootstrap.isBlank())
                 ? kafkaBootstrap : flinkKafkaBootstrap;
         this.flinkBaseUrl = flinkBaseUrl;
         this.jarPath = jarPath;
+        this.epoch = epoch;
     }
 
     @Override
     public void dispatch(TaskRecord task, String topic, String stream, Map<Integer, Long> startOffsets) {
-        String jobJson = buildJobJson(kafkaBootstrap, task, topic, stream, startOffsets);
+        String jobJson = buildJobJson(kafkaBootstrap, task, topic, stream, startOffsets, epoch);
         org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("outlet-flink");
         log.info("Flink 增量段交接 task={} topic={} 起点分区={}",
                 task.taskId(), topic, startOffsets == null ? 0 : startOffsets.size());
@@ -107,14 +110,14 @@ public class FlinkIncrementalDispatcher implements ExternalIncrementalDispatcher
 
     /** 组装 tagstream job-json(与 StreamConfig 同构)。公开以便离线自检。 */
     public static String buildJobJson(String kafkaBootstrap, TaskRecord task, String topic, String stream,
-                                      Map<Integer, Long> startOffsets) {
+                                      Map<Integer, Long> startOffsets, int epoch) {
         Map<String, Object> p = task.params();
         ObjectNode cfg = OM.createObjectNode();
         // StreamConfig.taskId 是 long:优先取 params.taskId(平台数值任务 id);缺失才回退 v2 字符串 id
         Object platformId = p.get("taskId");
         if (platformId instanceof Number n) cfg.put("taskId", n.longValue());
         else cfg.put("taskId", task.taskId());
-        cfg.put("taskVer", task.epoch());
+        cfg.put("taskVer", epoch);
         cfg.put("entityKey", str(p.get("entityKey"), "id"));
 
         // datasetFields:params 已回填 {name, kind}(v2TaskParams);JsonNode / Map / List 统一转

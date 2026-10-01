@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-/** 内存锚点表(模拟 chg_anchor + 索引 (topic, partition, epoch, commit_ts))。 */
+/** 内存锚点表(模拟 chg_anchor + 索引 (topic, partition, epoch, fence, commit_ts))。 */
 public class InMemoryAnchorStore implements AnchorStore {
 
     private final Map<String, List<Anchor>> byKey = new ConcurrentHashMap<>();
@@ -27,10 +27,20 @@ public class InMemoryAnchorStore implements AnchorStore {
     }
 
     @Override
+    public Anchor lastFenceAtOrBefore(String topic, int partition, int epoch, long tso) {
+        return lastAtOrBefore0(topic, partition, epoch, tso, true);
+    }
+
+    @Override
     public Anchor lastAtOrBefore(String topic, int partition, int epoch, long tso) {
+        return lastAtOrBefore0(topic, partition, epoch, tso, false);
+    }
+
+    private Anchor lastAtOrBefore0(String topic, int partition, int epoch, long tso, boolean fenceOnly) {
         List<Anchor> list = byKey.get(key(topic, partition, epoch));
         if (list == null || list.isEmpty()) return null;
         List<Anchor> sorted = list.stream()
+                .filter(a -> !fenceOnly || a.fence())
                 .sorted(Comparator.comparingLong(Anchor::commitTs))
                 .collect(Collectors.toList());
         // 二分:最后一个 commitTs <= tso

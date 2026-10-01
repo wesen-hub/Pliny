@@ -1,57 +1,47 @@
 package com.dcp.sync.ingest;
 
-import com.dcp.sync.CdcRecord;
 import com.dcp.sync.LogicalTableConfigService;
-import com.dcp.sync.RouteUtil;
-import com.dcp.sync.BucketMapService;
-import com.dcp.sync.SeqAllocator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.OffsetSpec;
-import org.apache.kafka.clients.consumer.Consumer;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.BatchConsumerAwareMessageListener;
-import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
-import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
- * Kafka 接入引擎(2026-09-06 重新设计 — 应用/凭证模型):
+ * Kafka 接入引擎(2026-09-06 应用/凭证模型; 2026-10 P3 退役改造):
  *
  * <pre>
  *   页面: 新建「接入应用」→ 平台颁发 appKey(创建即启用, 白名单绑定逻辑表)
  *   对方: SDK/HTTP 携带 appKey 提交消息(op 在数据包内指定)
  *   HTTP: 401 key 无效/停用 → 403 未绑定该表 → 400 预检(op/字段/类型/业务键) → 200 入队
- *   dcp.in.{逻辑表}(削峰) → 消费: 验证 → DLT(source_table=appKey) / 通过: 领 seq + 信封 → dcp.{逻辑表}
- *   监控: 按应用聚合 ok/dlt(分表)、表级 lag; 应用停用=禁提交, 无启用应用的表自动停消费者
+ *   dcp.in.{逻辑表}(削峰) → 底座任务(kafka-ingest@1.0.0, dcp-outlet-rt 执行)
+ *     验证 → DLT(source_table=appKey) / 通过: 领 seq + 信封 → dcp.{逻辑表}
  * </pre>
+ *
+ * <p><b>退役改造</b>:入站消费段(容器/领号/打信封/提交)已迁出至底座任务,本引擎保留
+ * HTTP/SDK 提交面(鉴权 + 白名单 + 预检 + 入站 topic 管理)与应用管理面;
+ * 消费任务的部署登记/停用由 {@link IngestTaskDeployer} 桥接控制面(<b>只登记不激活</b>,
+ * 激活留到部署方案阶段统一解决执行栈归属与解码器后 resume 复活)。
+ * 监控指标口径随之切换:ok = seq_counter 累计发号(底座领号), lag/running = 底座任务进度/状态,
+ * 吞吐采样环随消费段退役(前端显示"暂无流量")。
  */
 @Slf4j
 @Component
@@ -59,41 +49,30 @@ public class KafkaIngestEngine {
 
     private static final ObjectMapper OM = new ObjectMapper();
     private static final SecureRandom RAND = new SecureRandom();
-    private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm:ss");
     public static final String IN_TOPIC_PREFIX = "dcp.in.";
 
     private final JdbcTemplate metaJdbc;
     private final KafkaProperties kafkaProperties;
     private final KafkaTemplate<String, String> kafka;
-    private final SeqAllocator seqAllocator;
     private final LogicalTableConfigService tableConfigService;
-    private final BucketMapService bucketMapService;
-
-    /** 逻辑表 → 运行容器(共享: 每逻辑表一个入站消费者) */
-    private final Map<String, Runtime> runtimes = new ConcurrentHashMap<>();
-    /** 指标: 应用 → 累计 ok/dlt + 每秒采样环; 细表: appKey|lt → {ok,dlt} */
-    private final Map<String, Metrics> metrics = new ConcurrentHashMap<>();
-    private final Map<String, long[]> tableOk = new ConcurrentHashMap<>();
+    private final IngestTaskDeployer deployer;
 
     @Autowired
     public KafkaIngestEngine(JdbcTemplate metaJdbc, KafkaProperties kafkaProperties,
-                             KafkaTemplate<String, String> kafka, SeqAllocator seqAllocator,
+                             KafkaTemplate<String, String> kafka,
                              LogicalTableConfigService tableConfigService,
-                             BucketMapService bucketMapService) {
+                             IngestTaskDeployer deployer) {
         this.metaJdbc = metaJdbc;
         this.kafkaProperties = kafkaProperties;
         this.kafka = kafka;
-        this.seqAllocator = seqAllocator;
         this.tableConfigService = tableConfigService;
-        this.bucketMapService = bucketMapService;
+        this.deployer = deployer;
     }
 
     // ────────────────────────── 表结构与启动 ──────────────────────────
 
     @PostConstruct
     public void ensureTable() {
-        // 重新设计换代: 旧"每逻辑表任务+默认op"模型废弃
-        metaJdbc.execute("DROP TABLE IF EXISTS kafka_ingest_task");
         metaJdbc.execute("CREATE TABLE IF NOT EXISTS kafka_app ("
                 + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 + "app_name VARCHAR(128) NOT NULL,"
@@ -111,25 +90,13 @@ public class KafkaIngestEngine {
     public void onReady() {
         for (String lt : activeTables()) {
             try {
-                start(lt);
+                ensureInTopic(lt);
+                deployer.deploy(lt, partitionCountOf(lt));
             } catch (Exception e) {
-                log.error("Kafka 接入入站消费启动失败: {} - {}", lt, e.getMessage());
+                log.error("Kafka 接入底座任务登记失败: {} - {}", lt, e.getMessage());
             }
         }
-        log.info("Kafka 接入引擎就绪(应用/凭证模型)");
-    }
-
-    @PreDestroy
-    public void stopAll() {
-        for (Runtime rt : new ArrayList<>(runtimes.values())) {
-            try {
-                if (rt.container != null) {
-                    rt.container.stop(true);
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        runtimes.clear();
+        log.info("Kafka 接入引擎就绪(应用/凭证模型; 消费段已迁出至底座 kafka-ingest)");
     }
 
     /** 有 ≥1 个启用应用绑定的逻辑表 */
@@ -166,7 +133,8 @@ public class KafkaIngestEngine {
             metaJdbc.update("INSERT IGNORE INTO kafka_app_logical (app_id, logical_table) VALUES (?, ?)", appId, lt);
         }
         for (String lt : logicalTables) {
-            start(lt);
+            ensureInTopic(lt);
+            deployer.deploy(lt, partitionCountOf(lt));
         }
         log.info("Kafka 接入应用创建: {} key={} tables={}", appName, appKey, logicalTables);
         return Map.of("appKey", appKey, "appName", appName, "logicalTables", logicalTables);
@@ -181,9 +149,9 @@ public class KafkaIngestEngine {
             List<String> tables = tablesOfApp(((Number) a.get("id")).longValue());
             Map<String, Object> row = new LinkedHashMap<>(a);
             row.put("logicalTables", tables);
-            row.put("ok", appOk(key));
+            row.put("ok", appOk(key, tables));
             row.put("dlt", dltCount(key, null));
-            row.put("running", tables.stream().anyMatch(runtimes::containsKey));
+            row.put("running", tables.stream().anyMatch(lt -> "RUNNING".equals(deployer.statusOf(lt))));
             out.add(row);
         }
         return out;
@@ -197,23 +165,22 @@ public class KafkaIngestEngine {
         }
         Map<String, Object> app = rows.get(0);
         long appId = ((Number) app.get("id")).longValue();
-        Metrics m = metrics.computeIfAbsent(appKey, k -> new Metrics());
         List<Map<String, Object>> tables = new ArrayList<>();
         for (String lt : tablesOfApp(appId)) {
-            long[] oklt = tableOk.getOrDefault(appKey + "|" + lt, new long[2]);
             Map<String, Object> t = new LinkedHashMap<>();
             t.put("logicalTable", lt);
-            t.put("ok", oklt[0]);
+            t.put("ok", seqOf(lt, appKey));
             t.put("dlt", dltCount(appKey, lt));
-            t.put("lag", lagOf("dcp-ingest-" + lt, IN_TOPIC_PREFIX + lt));
-            t.put("running", runtimes.containsKey(lt));
+            t.put("lag", deployer.lagOf(lt));
+            t.put("running", "RUNNING".equals(deployer.statusOf(lt)));
             tables.add(t);
         }
+        List<String> boundTables = tables.stream().map(t -> String.valueOf(t.get("logicalTable"))).toList();
         Map<String, Object> out = new LinkedHashMap<>(app);
         out.put("tables", tables);
-        out.put("ok", appOk(appKey));
+        out.put("ok", appOk(appKey, boundTables));
         out.put("dlt", dltCount(appKey, null));
-        out.put("samples", m.samples());
+        out.put("samples", List.of());   // 吞吐采样环已随消费段退役(底座指标由 outlet 侧采集)
         return out;
     }
 
@@ -235,7 +202,6 @@ public class KafkaIngestEngine {
                 String.class, appKey);
         metaJdbc.update("DELETE FROM kafka_app_logical WHERE app_id = (SELECT id FROM kafka_app WHERE app_key = ?)", appKey);
         metaJdbc.update("DELETE FROM kafka_app WHERE app_key = ?", appKey);
-        metrics.remove(appKey);
         reconcile(tables);
     }
 
@@ -266,16 +232,21 @@ public class KafkaIngestEngine {
                 "SELECT logical_table FROM kafka_app_logical WHERE app_id = ? ORDER BY logical_table", String.class, appId);
     }
 
-    /** 停用/删除/重绑后: 无启用应用的表停消费者, 有则确保在跑 */
+    /** 停用/删除/重绑后: 无启用应用的表停底座任务(保留登记), 有则确保已登记 */
     private void reconcile(List<String> tables) {
         for (String lt : new HashSet<>(tables)) {
             Long enabled = metaJdbc.queryForObject(
                     "SELECT COUNT(*) FROM kafka_app_logical l JOIN kafka_app a ON a.id = l.app_id "
                             + "WHERE l.logical_table = ? AND a.status = 'ENABLED'", Long.class, lt);
             if (enabled == null || enabled == 0) {
-                stop(lt);
+                deployer.stop(lt);
             } else {
-                start(lt);
+                try {
+                    ensureInTopic(lt);
+                    deployer.deploy(lt, partitionCountOf(lt));
+                } catch (Exception e) {
+                    log.warn("Kafka 接入底座任务登记失败: {} - {}", lt, e.getMessage());
+                }
             }
         }
     }
@@ -332,172 +303,7 @@ public class KafkaIngestEngine {
         }
     }
 
-    // ────────────────────────── 入站消费(每逻辑表共享) ──────────────────────────
-
-    public synchronized void start(String logicalTable) {
-        if (runtimes.containsKey(logicalTable)) {
-            return;
-        }
-        ensureInTopic(logicalTable);
-        String inTopic = IN_TOPIC_PREFIX + logicalTable;
-        DefaultKafkaConsumerFactory<String, String> factory =
-                new DefaultKafkaConsumerFactory<>(kafkaProperties.buildConsumerProperties(null));
-        ContainerProperties props = new ContainerProperties(inTopic);
-        props.setGroupId("dcp-ingest-" + logicalTable);
-        props.setAckMode(ContainerProperties.AckMode.MANUAL);
-        props.setMessageListener((BatchConsumerAwareMessageListener<String, String>) (records, consumer) -> {
-            handleBatch(logicalTable, records, consumer);
-        });
-        ConcurrentMessageListenerContainer<String, String> container =
-                new ConcurrentMessageListenerContainer<>(factory, props);
-        container.setConcurrency(1);
-        container.start();
-        runtimes.put(logicalTable, new Runtime(container));
-        log.info("Kafka 接入入站消费已启动: {} (group=dcp-ingest-{})", inTopic, logicalTable);
-    }
-
-    public synchronized void stop(String logicalTable) {
-        Runtime rt = runtimes.remove(logicalTable);
-        if (rt != null) {
-            try {
-                rt.container.stop(true);
-            } catch (Exception e) {
-                log.warn("停止入站消费异常: {} - {}", logicalTable, e.getMessage());
-            }
-        }
-    }
-
-    private void handleBatch(String logicalTable, List<ConsumerRecord<String, String>> records,
-                             Consumer<?, ?> consumer) {
-        if (records.isEmpty()) {
-            return;
-        }
-        // 按提交方(appKey)分组: 各自领号(写者 seq 列独立) + 各自计数
-        Map<String, List<Object[]>> byApp = new LinkedHashMap<>();
-        for (ConsumerRecord<String, String> record : records) {
-            String appKey;
-            String opDefault;
-            Map<String, Object> data;
-            try {
-                JsonNode node = OM.readTree(record.value());
-                if (node.has("submitter")) {
-                    appKey = node.get("submitter").asText("unknown");
-                } else {
-                    appKey = "unknown";
-                }
-                opDefault = "INSERT";
-                if (node.has("op")) {
-                    opDefault = node.get("op").asText();
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> dataMap = node.has("data") && node.get("data").isObject()
-                        ? OM.convertValue(node.get("data"), Map.class)
-                        : OM.convertValue(node, Map.class);
-                data = new LinkedHashMap<>(dataMap);
-                data.remove("submitter");
-                data.remove("op");
-                data.remove("ts");
-            } catch (Exception e) {
-                appKey = "unknown";
-                opDefault = "INSERT";
-                data = new LinkedHashMap<>();
-                dlt(logicalTable, appKey, record, "入站消息解析失败: " + e.getMessage());
-                mark(appKey, logicalTable, false);
-                continue;
-            }
-            Analysis a = analyze(logicalTable, opDefault, data);
-            if (a.error != null) {
-                dlt(logicalTable, appKey, record, a.error);
-                mark(appKey, logicalTable, false);
-                continue;
-            }
-            byApp.computeIfAbsent(appKey, k -> new ArrayList<>())
-                    .add(new Object[]{a.businessKey, a.op, a.fields});
-        }
-        LogicalTableConfigService.LogicalTableConfig cfg = tableConfigService.load(logicalTable);
-        String topic = cfg.getTopic();
-        int bucketCount = cfg.getBucketCount() > 0 ? cfg.getBucketCount() : 4096;
-        List<String> keyColumns = cfg.getKeyColumns() == null ? List.of() : cfg.getKeyColumns();
-        for (Map.Entry<String, List<Object[]>> e : byApp.entrySet()) {
-            String appKey = e.getKey();
-            List<Object[]> recs = e.getValue();
-            if (recs.isEmpty()) {
-                continue;
-            }
-            // 每 (应用×逻辑表) 独立 seq 计数行 → 写者列独立, 各比各的
-            long[] range = seqAllocator.allocate("kafka|" + logicalTable + "|" + appKey, recs.size());
-            long seq = range[0];
-            String taskId = "k" + appKey.replaceAll("[^A-Za-z0-9_]", "_");
-            for (Object[] rec : recs) {
-                String businessKey = (String) rec[0];
-                String rowKind = (String) rec[1];
-                @SuppressWarnings("unchecked")
-                Map<String, Object> fields = (Map<String, Object>) rec[2];
-                int bucket = Math.floorMod(RouteUtil.hash(businessKey), bucketCount);
-                int partition = bucketMapService.partitionOf(logicalTable, bucket);
-                CdcRecord cdc = CdcRecord.of(logicalTable, businessKey, keyColumns, rowKind, seq, fields);
-                cdc.setTaskId(taskId);
-                cdc.setSourceDb("kafka");
-                cdc.setSourceTable("ingest");
-                cdc.setDatasourceId("k");
-                try {
-                    kafka.send(topic, partition, businessKey, com.dcp.sync.SyncProducer.Json.toJson(cdc)).get();
-                } catch (Exception ex) {
-                    // 投递失败: 不提交 offset → 整批重投(at-least-once, 目标幂等); seq 重领新号段
-                    throw new IllegalStateException("Kafka 接入写 dcp 失败 topic=" + topic
-                            + " cause=" + ex.getMessage(), ex);
-                }
-                seq++;
-            }
-            mark(appKey, logicalTable, true, recs.size());
-        }
-        tick(logicalTable, records);
-        commit(consumer);
-    }
-
-    /** 指标: 应用级 ok/dlt + 分表 ok + 采样 */
-    private void mark(String appKey, String logicalTable, boolean ok, int... n) {
-        Metrics m = metrics.computeIfAbsent(appKey, k -> new Metrics());
-        if (ok) {
-            int cnt = n.length > 0 ? n[0] : 1;
-            m.ok += cnt;
-            long[] t = tableOk.computeIfAbsent(appKey + "|" + logicalTable, k -> new long[2]);
-            t[0] += cnt;
-        } else {
-            m.dlt++;
-            long[] t = tableOk.computeIfAbsent(appKey + "|" + logicalTable, k -> new long[2]);
-            t[1]++;
-        }
-    }
-
-    private void tick(String logicalTable, List<ConsumerRecord<String, String>> records) {
-        Set<String> apps = new HashSet<>();
-        for (ConsumerRecord<String, String> r : records) {
-            try {
-                apps.add(OM.readTree(r.value()).path("submitter").asText("unknown"));
-            } catch (Exception ignored) {
-                apps.add("unknown");
-            }
-        }
-        for (String appKey : apps) {
-            Metrics m = metrics.computeIfAbsent(appKey, k -> new Metrics());
-            m.tick();
-        }
-        // 未识别 submitter 的单独环(理论上不可达; 兜底)
-        if (apps.isEmpty()) {
-            metrics.computeIfAbsent("unknown", k -> new Metrics()).tick();
-        }
-    }
-
-    private void commit(Consumer<?, ?> consumer) {
-        try {
-            consumer.commitSync(java.time.Duration.ofSeconds(5));
-        } catch (Exception e) {
-            log.warn("Kafka 接入 offset 提交失败: {}", e.getMessage());
-        }
-    }
-
-    // ────────────────────────── 验证器(HTTP 预检与消费端同源) ──────────────────────────
+    // ────────────────────────── 验证器(HTTP 预检与底座消费端同源) ──────────────────────────
 
     public Analysis analyze(String logicalTable, String op, Map<String, Object> data) {
         String normOp = normalizeOp(op);
@@ -591,7 +397,7 @@ public class KafkaIngestEngine {
         }
     }
 
-    // ────────────────────────── 入站消息 / DLT / topic / lag / 计数 ──────────────────────────
+    // ────────────────────────── 入站消息 / topic / 指标口径 ──────────────────────────
 
     private String buildInbound(String op, String ts, String appKey, Map<String, Object> data) {
         ObjectNode node = OM.createObjectNode();
@@ -603,23 +409,10 @@ public class KafkaIngestEngine {
         return node.toString();
     }
 
-    private void dlt(String logicalTable, String appKey, ConsumerRecord<String, String> record, String error) {
-        try {
-            metaJdbc.update(
-                    "INSERT INTO dlt_message (logical_table, source_table, topic, partition_id, offset_id, "
-                            + "business_key, payload, error_msg, fail_count, status, first_fail_time, last_fail_time) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', NOW(), NOW())",
-                    logicalTable, appKey, record.topic(), record.partition(), record.offset(),
-                    record.key(), record.value(), error.length() > 2000 ? error.substring(0, 2000) : error);
-        } catch (Exception e) {
-            log.error("Kafka 接入 DLT 落库失败: {}", e.getMessage());
-        }
-    }
-
+    /** 确保入站 topic 存在且分区数达标(提交面职责; 底座消费方假定 topic 已就绪) */
     private void ensureInTopic(String logicalTable) {
-        LogicalTableConfigService.LogicalTableConfig cfg = tableConfigService.load(logicalTable);
         String topic = IN_TOPIC_PREFIX + logicalTable;
-        int partitions = cfg.getPartitionCount() > 0 ? cfg.getPartitionCount() : 8;
+        int partitions = partitionCountOf(logicalTable);
         try (AdminClient admin = AdminClient.create(kafkaProperties.buildAdminProperties(null))) {
             var existing = admin.describeTopics(List.of(topic)).allTopicNames()
                     .get(5, TimeUnit.SECONDS).get(topic);
@@ -639,8 +432,7 @@ public class KafkaIngestEngine {
                     break;
                 }
                 try {
-                    admin.createPartitions(Map.of(topic,
-                                    org.apache.kafka.clients.admin.NewPartitions.increaseTo(partitions)))
+                    admin.createPartitions(Map.of(topic, NewPartitions.increaseTo(partitions)))
                             .all().get(15, TimeUnit.SECONDS);
                     log.info("Kafka 接入 topic 扩分区: {} → {}", topic, partitions);
                 } catch (Exception e) {
@@ -654,37 +446,28 @@ public class KafkaIngestEngine {
         }
     }
 
-    private long lagOf(String group, String topic) {
-        try (AdminClient admin = AdminClient.create(kafkaProperties.buildAdminProperties(null))) {
-            Map<TopicPartition, OffsetAndMetadata> committed =
-                    admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata()
-                            .get(5, TimeUnit.SECONDS);
-            if (committed == null || committed.isEmpty()) {
-                return -1;
-            }
-            Map<TopicPartition, Long> ends = new HashMap<>();
-            admin.listOffsets(committed.keySet().stream()
-                            .collect(Collectors.toMap(tp -> tp, tp -> OffsetSpec.latest())))
-                    .all().get(5, TimeUnit.SECONDS)
-                    .forEach((tp, res) -> ends.put(tp, res.offset()));
-            long lag = 0;
-            boolean any = false;
-            for (Map.Entry<TopicPartition, OffsetAndMetadata> e : committed.entrySet()) {
-                Long end = ends.get(e.getKey());
-                if (end != null) {
-                    lag += Math.max(0, end - e.getValue().offset());
-                    any = true;
-                }
-            }
-            return any ? lag : -1;
+    private int partitionCountOf(String logicalTable) {
+        LogicalTableConfigService.LogicalTableConfig cfg = tableConfigService.load(logicalTable);
+        return cfg.getPartitionCount() > 0 ? cfg.getPartitionCount() : 8;
+    }
+
+    /** 分表 ok 口径: 底座消费领号(seq_counter)累计数 = 已消费行数 */
+    private long seqOf(String logicalTable, String appKey) {
+        try {
+            Long cur = metaJdbc.queryForObject("SELECT cur FROM seq_counter WHERE table_name = ?",
+                    Long.class, "kafka|" + logicalTable + "|" + appKey);
+            return cur == null ? 0 : cur;
         } catch (Exception e) {
-            return -1;
+            return 0;
         }
     }
 
-    private long appOk(String appKey) {
-        Metrics m = metrics.get(appKey);
-        return m == null ? 0 : m.ok;
+    private long appOk(String appKey, List<String> tables) {
+        long sum = 0;
+        for (String lt : tables) {
+            sum += seqOf(lt, appKey);
+        }
+        return sum;
     }
 
     private long dltCount(String appKey, String logicalTable) {
@@ -738,49 +521,6 @@ public class KafkaIngestEngine {
 
         Analysis(String error) {
             this(null, null, null, error);
-        }
-    }
-
-    private static final class Runtime {
-        final ConcurrentMessageListenerContainer<String, String> container;
-
-        Runtime(ConcurrentMessageListenerContainer<String, String> container) {
-            this.container = container;
-        }
-    }
-
-    private static final class Metrics {
-        volatile long ok;
-        volatile long dlt;
-        private final Deque<long[]> ring = new ArrayDeque<>();
-
-        synchronized void tick() {
-            long sec = System.currentTimeMillis() / 1000;
-            long[] last = ring.peekLast();
-            if (last != null && last[0] == sec) {
-                last[1] = ok;
-                last[2] = dlt;
-            } else {
-                ring.addLast(new long[]{sec, ok, dlt});
-                while (ring.size() > 61) {
-                    ring.removeFirst();
-                }
-            }
-        }
-
-        synchronized List<Map<String, Object>> samples() {
-            List<Map<String, Object>> out = new ArrayList<>();
-            long prevOk = 0;
-            long prevDlt = 0;
-            for (long[] e : ring) {
-                out.add(Map.of(
-                        "t", LocalDateTime.ofInstant(Instant.ofEpochSecond(e[0]), ZoneId.systemDefault()).format(HM),
-                        "ok", Math.max(0, e[1] - prevOk),
-                        "dlt", Math.max(0, e[2] - prevDlt)));
-                prevOk = e[1];
-                prevDlt = e[2];
-            }
-            return out;
         }
     }
 }

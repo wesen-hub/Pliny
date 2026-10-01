@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1080" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a90d9"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e67e22"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1e8449"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7f8c8d"/></marker>
+    <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#148f77"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8e44ad"/></marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="700" y="40" text-anchor="middle" font-size="28" font-weight="bold" fill="#1b2631">湖同步底座任务生命周期</text>
+  <text x="700" y="66" text-anchor="middle" font-size="13" fill="#7f8c8d">taskId = lake-inc-{logicalTable} · ns=lake · lake-sync@1.0.0 · startPolicy=latest · incrementalEngine=unit</text>
+
+  <!-- ═══════════ 行0 入口 ═══════════ -->
+  <rect x="36" y="88" width="620" height="54" rx="10" fill="#f4f6f7" stroke="#566573" stroke-width="2"/>
+  <text x="346" y="110" text-anchor="middle" font-size="15" font-weight="bold" fill="#2c3e50">入口：用户创建湖同步任务（LakeSyncService.createTask）</text>
+  <text x="346" y="131" text-anchor="middle" font-size="11.5" fill="#566573">落 lake_sync_task 行（批调度）→ 机会型 deploy 底座登记（失败不阻断批任务）</text>
+
+  <path d="M346 142 V170" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M660 115 H1346 V906 H1300" fill="none" stroke="#8e44ad" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#ap)"/>
+  <text x="1356" y="500" font-size="13" fill="#6c3483">批</text>
+  <text x="1356" y="518" font-size="13" fill="#6c3483">通</text>
+  <text x="1356" y="536" font-size="13" fill="#6c3483">道</text>
+  <text x="1356" y="554" font-size="13" fill="#6c3483">并</text>
+  <text x="1356" y="572" font-size="13" fill="#6c3483">行</text>
+  <text x="1356" y="590" font-size="13" fill="#6c3483">创</text>
+  <text x="1356" y="608" font-size="13" fill="#6c3483">建</text>
+
+  <!-- ═══════════ 行1 登记链 ═══════════ -->
+  <text x="36" y="165" font-size="14" font-weight="bold" fill="#2e6da4">登记链 · LakeTaskDeployer.deploy（五步幂等登记，不激活）</text>
+
+  <g>
+    <rect x="36" y="176" width="185" height="70" rx="10" fill="#d6eaf8" stroke="#2e86c1" stroke-width="2"/>
+    <text x="128" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b4f72">幂等检查</text>
+    <text x="128" y="220" text-anchor="middle" font-size="11" fill="#1b4f72">consumer_task 已存在？</text>
+    <text x="128" y="236" text-anchor="middle" font-size="11" fill="#1b4f72">→ 跳过（状态不变）</text>
+  </g>
+  <g>
+    <rect x="246" y="176" width="185" height="70" rx="10" fill="#e8f1fb" stroke="#4a90d9" stroke-width="2"/>
+    <text x="338" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f618d">① 流扫描登记</text>
+    <text x="338" y="220" text-anchor="middle" font-size="11" fill="#1f618d">POST /streams/scan</text>
+    <text x="338" y="236" text-anchor="middle" font-size="11" fill="#1f618d">chg_stream + 出口栈地址</text>
+  </g>
+  <g>
+    <rect x="456" y="176" width="185" height="70" rx="10" fill="#e8f1fb" stroke="#4a90d9" stroke-width="2"/>
+    <text x="548" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f618d">② logic 注册</text>
+    <text x="548" y="220" text-anchor="middle" font-size="11" fill="#1f618d">lake-sync@1.0.0</text>
+    <text x="548" y="236" text-anchor="middle" font-size="11" fill="#1f618d">consumer_logic</text>
+  </g>
+  <g>
+    <rect x="666" y="176" width="185" height="70" rx="10" fill="#e8f1fb" stroke="#4a90d9" stroke-width="2"/>
+    <text x="758" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f618d">③ 平台账号</text>
+    <text x="758" y="220" text-anchor="middle" font-size="11" fill="#1f618d">consumer: lake-platform</text>
+    <text x="758" y="236" text-anchor="middle" font-size="11" fill="#1f618d">internal 通道</text>
+  </g>
+  <g>
+    <rect x="876" y="176" width="185" height="70" rx="10" fill="#e8f1fb" stroke="#4a90d9" stroke-width="2"/>
+    <text x="968" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f618d">④ permissive 契约</text>
+    <text x="968" y="220" text-anchor="middle" font-size="11" fill="#1f618d">ct-lake-{lt}</text>
+    <text x="968" y="236" text-anchor="middle" font-size="11" fill="#1f618d">白名单 ["*"] 全放行</text>
+  </g>
+  <g>
+    <rect x="1086" y="176" width="185" height="70" rx="10" fill="#e8f1fb" stroke="#4a90d9" stroke-width="2"/>
+    <text x="1178" y="200" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f618d">⑤ 建任务 POST /tasks</text>
+    <text x="1178" y="220" text-anchor="middle" font-size="11" fill="#1f618d">ns=lake · latest</text>
+    <text x="1178" y="236" text-anchor="middle" font-size="11" fill="#1f618d">desiredState=stopped</text>
+  </g>
+
+  <path d="M221 211 H242" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M431 211 H452" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M641 211 H662" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M851 211 H872" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M1061 211 H1082" fill="none" stroke="#4a90d9" stroke-width="2" marker-end="url(#ab)"/>
+  <path d="M1178 246 V258 H205 V306" fill="none" stroke="#1e8449" stroke-width="2" marker-end="url(#ag)"/>
+  <path d="M128 246 V306" fill="none" stroke="#7f8c8d" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ay)"/>
+
+  <!-- ═══════════ 行2 状态机 ═══════════ -->
+  <text x="36" y="301" font-size="14" font-weight="bold" fill="#1e8449">状态机 · TasksController / TaskScheduler / 统一调度框架</text>
+
+  <g>
+    <rect x="100" y="310" width="210" height="130" rx="12" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+    <text x="205" y="338" text-anchor="middle" font-size="16" font-weight="bold" fill="#a04000">STOPPED（登记态）</text>
+    <text x="205" y="358" text-anchor="middle" font-size="11.5" fill="#a04000">desiredState=stopped</text>
+    <text x="205" y="376" text-anchor="middle" font-size="11.5" fill="#a04000">内核只登记不调度</text>
+    <text x="205" y="394" text-anchor="middle" font-size="11.5" fill="#a04000">前端任务列表可见</text>
+  </g>
+  <g>
+    <rect x="430" y="310" width="230" height="130" rx="12" fill="#eafaf1" stroke="#27ae60" stroke-width="2"/>
+    <text x="545" y="338" text-anchor="middle" font-size="16" font-weight="bold" fill="#145a32">STARTING（激活中）</text>
+    <text x="545" y="358" text-anchor="middle" font-size="11.5" fill="#145a32">resume → onCreated</text>
+    <text x="545" y="376" text-anchor="middle" font-size="11.5" fill="#145a32">handover：t0=latestOf</text>
+    <text x="545" y="394" text-anchor="middle" font-size="11.5" fill="#145a32">栅栏索引算起点 → activate</text>
+  </g>
+  <g>
+    <rect x="780" y="310" width="210" height="130" rx="12" fill="#d5f5e3" stroke="#1e8449" stroke-width="2"/>
+    <text x="885" y="338" text-anchor="middle" font-size="16" font-weight="bold" fill="#145a32">RUNNING（稳态）</text>
+    <text x="885" y="358" text-anchor="middle" font-size="11.5" fill="#145a32">worker lake ns 参选分配</text>
+    <text x="885" y="376" text-anchor="middle" font-size="11.5" fill="#145a32">dcp-outlet-rt + LakeLogic</text>
+    <text x="885" y="394" text-anchor="middle" font-size="11.5" fill="#145a32">消费 TiCDC 行事件</text>
+  </g>
+  <g>
+    <rect x="1100" y="310" width="210" height="130" rx="12" fill="#fef9e7" stroke="#f1c40f" stroke-width="2"/>
+    <text x="1205" y="338" text-anchor="middle" font-size="16" font-weight="bold" fill="#7d6608">PAUSED</text>
+    <text x="1205" y="358" text-anchor="middle" font-size="11.5" fill="#7d6608">追平后回收</text>
+    <text x="1205" y="376" text-anchor="middle" font-size="11.5" fill="#7d6608">spec 保留</text>
+    <text x="1205" y="394" text-anchor="middle" font-size="11.5" fill="#7d6608">resume 恢复消费</text>
+  </g>
+  <g>
+    <rect x="1100" y="490" width="210" height="120" rx="12" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+    <text x="1205" y="518" text-anchor="middle" font-size="16" font-weight="bold" fill="#7b241c">DEAD-LETTER</text>
+    <text x="1205" y="540" text-anchor="middle" font-size="11.5" fill="#7b241c">重试 ×5 仍失败</text>
+    <text x="1205" y="558" text-anchor="middle" font-size="11.5" fill="#7b241c">死信 consumer_dlq</text>
+    <text x="1205" y="576" text-anchor="middle" font-size="11.5" fill="#7b241c">巡检告警 · 人工介入</text>
+  </g>
+  <g>
+    <rect x="430" y="490" width="230" height="120" rx="12" fill="#ebedef" stroke="#7f8c8d" stroke-width="2"/>
+    <text x="545" y="518" text-anchor="middle" font-size="16" font-weight="bold" fill="#34495e">GONE（框架无 spec）</text>
+    <text x="545" y="540" text-anchor="middle" font-size="11.5" fill="#34495e">stop 后框架 spec 删除</text>
+    <text x="545" y="558" text-anchor="middle" font-size="11.5" fill="#34495e">内核无状态</text>
+    <text x="545" y="576" text-anchor="middle" font-size="11.5" fill="#34495e">resume → 重走创建流程</text>
+  </g>
+
+  <path d="M310 375 H426" fill="none" stroke="#1e8449" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="330" y="365" font-size="12" fill="#1e8449">resume（部署方案阶段激活）</text>
+  <path d="M660 375 H776" fill="none" stroke="#1e8449" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="670" y="365" font-size="12" fill="#1e8449">activate：TaskSpec 下发</text>
+  <path d="M990 375 H1096" fill="none" stroke="#e67e22" stroke-width="2" marker-end="url(#ao)"/>
+  <text x="1000" y="365" font-size="12" fill="#b9770e">pause：追平回收</text>
+  <path d="M1205 310 C1205 268 885 268 885 310" fill="none" stroke="#1e8449" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="1045" y="278" font-size="12" fill="#1e8449">resume：去 PAUSED 重新分配</text>
+  <path d="M885 440 V456 H1205 V486" fill="none" stroke="#c0392b" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="960" y="465" font-size="12" fill="#c0392b">失败重试 ×5 → 死信</text>
+  <path d="M885 440 V472 H205 V444" fill="none" stroke="#e67e22" stroke-width="2" marker-end="url(#ao)"/>
+  <text x="500" y="466" font-size="12" fill="#b9770e">stop action：停任务（登记保留，可复活）</text>
+  <path d="M180 440 V470 H430 V486" fill="none" stroke="#7f8c8d" stroke-width="2" marker-end="url(#ay)"/>
+  <text x="200" y="466" font-size="12" fill="#7f8c8d">stop 后框架 spec 删除</text>
+  <path d="M545 490 V444" fill="none" stroke="#1e8449" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="556" y="468" font-size="12" fill="#1e8449">resume 复活：重走创建流程</text>
+  <text x="1205" y="628" text-anchor="middle" font-size="11" fill="#c0392b">人工审计后重放</text>
+
+  <!-- ═══════════ 行3 执行循环 ═══════════ -->
+  <text x="36" y="655" font-size="14" font-weight="bold" fill="#148f77">执行循环 · dcp-outlet-rt（unit 轨道，稳态每批）</text>
+
+  <g>
+    <rect x="36" y="676" width="212" height="96" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="2"/>
+    <text x="142" y="702" text-anchor="middle" font-size="15" font-weight="bold" fill="#0b5345">① worker 分配</text>
+    <text x="142" y="722" text-anchor="middle" font-size="11.5" fill="#0b5345">lake ns 唯一 owner</text>
+    <text x="142" y="740" text-anchor="middle" font-size="11.5" fill="#0b5345">防双消费（归属键）</text>
+  </g>
+  <g>
+    <rect x="298" y="676" width="212" height="96" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="2"/>
+    <text x="404" y="702" text-anchor="middle" font-size="15" font-weight="bold" fill="#0b5345">② 起点 seek</text>
+    <text x="404" y="722" text-anchor="middle" font-size="11.5" fill="#0b5345">outlet-kafka:19092</text>
+    <text x="404" y="740" text-anchor="middle" font-size="11.5" fill="#0b5345">dcp.cdc.{库}.{表}</text>
+  </g>
+  <g>
+    <rect x="560" y="676" width="212" height="96" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="2"/>
+    <text x="666" y="702" text-anchor="middle" font-size="15" font-weight="bold" fill="#0b5345">③ 契约视图</text>
+    <text x="666" y="722" text-anchor="middle" font-size="11.5" fill="#0b5345">ct-lake-{lt}</text>
+    <text x="666" y="740" text-anchor="middle" font-size="11.5" fill="#0b5345">["*"] 全放行（带 stream）</text>
+  </g>
+  <g>
+    <rect x="822" y="676" width="212" height="96" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="2"/>
+    <text x="928" y="702" text-anchor="middle" font-size="15" font-weight="bold" fill="#0b5345">④ LakeLogic 行数据</text>
+    <text x="928" y="722" text-anchor="middle" font-size="11.5" fill="#0b5345">写者裁判 · 字段级合并</text>
+    <text x="928" y="740" text-anchor="middle" font-size="11.5" fill="#0b5345">DELETE 行级 seq 裁判</text>
+  </g>
+  <g>
+    <rect x="1084" y="676" width="212" height="96" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="2"/>
+    <text x="1190" y="702" text-anchor="middle" font-size="15" font-weight="bold" fill="#0b5345">⑤ Iceberg 写入</text>
+    <text x="1190" y="722" text-anchor="middle" font-size="11.5" fill="#0b5345">RESTCatalog</text>
+    <text x="1190" y="740" text-anchor="middle" font-size="11.5" fill="#0b5345">S3FileIO → minio</text>
+  </g>
+
+  <path d="M248 724 H294" fill="none" stroke="#148f77" stroke-width="2" marker-end="url(#at)"/>
+  <path d="M510 724 H556" fill="none" stroke="#148f77" stroke-width="2" marker-end="url(#at)"/>
+  <path d="M772 724 H818" fill="none" stroke="#148f77" stroke-width="2" marker-end="url(#at)"/>
+  <path d="M1034 724 H1080" fill="none" stroke="#148f77" stroke-width="2" marker-end="url(#at)"/>
+  <path d="M1190 772 V808 H142 V776" fill="none" stroke="#148f77" stroke-width="2" marker-end="url(#at)"/>
+  <text x="600" y="800" font-size="12" fill="#148f77">逐批循环：commit offset → 下一批（失败不提交，重试 ×5 → DLQ）</text>
+
+  <!-- ═══════════ 行4 批通道 ═══════════ -->
+  <rect x="36" y="846" width="1260" height="190" rx="12" fill="#fdfefe" stroke="#8e44ad" stroke-width="2" stroke-dasharray="8 5"/>
+  <text x="52" y="874" font-size="13" font-weight="bold" fill="#6c3483">并行通道（不同链路）：历史打底 —— lake_sync_task 批调度（游标驱动，与增量底座独立推进）</text>
+
+  <g>
+    <rect x="56" y="890" width="212" height="84" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="2"/>
+    <text x="162" y="916" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a235a">① tick 触发</text>
+    <text x="162" y="936" text-anchor="middle" font-size="11.5" fill="#4a235a">15s tick / 手动</text>
+    <text x="162" y="954" text-anchor="middle" font-size="11.5" fill="#4a235a">interval|cron 到期判定</text>
+  </g>
+  <g>
+    <rect x="318" y="890" width="212" height="84" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="2"/>
+    <text x="424" y="916" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a235a">② 组装 job-json</text>
+    <text x="424" y="936" text-anchor="middle" font-size="11.5" fill="#4a235a">seq 列 + 业务键探测</text>
+    <text x="424" y="954" text-anchor="middle" font-size="11.5" fill="#4a235a">数据面 JDBC 同源</text>
+  </g>
+  <g>
+    <rect x="580" y="890" width="212" height="84" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="2"/>
+    <text x="686" y="916" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a235a">③ 批作业执行</text>
+    <text x="686" y="936" text-anchor="middle" font-size="11.5" fill="#4a235a">dcp-lakesync</text>
+    <text x="686" y="954" text-anchor="middle" font-size="11.5" fill="#4a235a">simulate | spark-submit</text>
+  </g>
+  <g>
+    <rect x="842" y="890" width="212" height="84" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="2"/>
+    <text x="948" y="916" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a235a">④ 游标回写</text>
+    <text x="948" y="936" text-anchor="middle" font-size="11.5" fill="#4a235a">exit0 → cursor_json</text>
+    <text x="948" y="954" text-anchor="middle" font-size="11.5" fill="#4a235a">失败游标不推进</text>
+  </g>
+  <g>
+    <rect x="1104" y="890" width="212" height="84" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="2"/>
+    <text x="1210" y="916" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a235a">⑤ 湖表打底</text>
+    <text x="1210" y="936" text-anchor="middle" font-size="11.5" fill="#4a235a">RESTCatalog 写 Iceberg</text>
+    <text x="1210" y="954" text-anchor="middle" font-size="11.5" fill="#4a235a">与增量在湖表汇合</text>
+  </g>
+
+  <path d="M268 932 H314" fill="none" stroke="#8e44ad" stroke-width="2" marker-end="url(#ap)"/>
+  <path d="M530 932 H576" fill="none" stroke="#8e44ad" stroke-width="2" marker-end="url(#ap)"/>
+  <path d="M792 932 H838" fill="none" stroke="#8e44ad" stroke-width="2" marker-end="url(#ap)"/>
+  <path d="M1054 932 H1100" fill="none" stroke="#8e44ad" stroke-width="2" marker-end="url(#ap)"/>
+  <path d="M1210 974 V1006 H162 V978" fill="none" stroke="#8e44ad" stroke-width="2" marker-end="url(#ap)"/>
+  <text x="620" y="1014" font-size="12" fill="#6c3483">游标驱动循环：下轮 tick 从新游标续跑</text>
+</svg>

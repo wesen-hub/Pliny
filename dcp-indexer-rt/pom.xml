@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-indexer-rt —— 锚点采样执行 jar(微服务架构方案 N5, 维度③ 消费底座-索引器落位)。
+
+  代码组织铁律(方案 §8.2):
+    - 业务 jar fat jar 自足: kafka-clients 打入本 jar;
+    - provided 依赖契约: dcp-scheduler-api 与 slf4j 由宿主(dcp-worker/outlet-service 过渡宿主)提供, parent-first;
+    - 无 Spring 装配: 所有组件由 IndexerComponents 手工组装, 配置经 ExecutorEnvironment.env() 注入
+      (dcp.indexer.* 键, 元库连接走 env.metaDataSource(), 不新建连接池)。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-indexer-rt</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <kafka.version>3.6.1</kafka.version>
+    </properties>
+
+    <dependencies>
+        <!-- 契约(provided, 宿主提供): 一级 SPI 接口 + 零依赖契约模型 -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-scheduler-api</artifactId>
+            <version>0.1.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- 日志门面(provided, 宿主统一管理日志后端) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- fat jar 自足: Kafka 消费(assign 单分区, 位点显式提交) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+        <!-- 测试 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-indexer-rt</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <!-- fat jar: SPI 服务声明合并(与 dcp-synclink/tagengine-executor 项目惯例一致) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

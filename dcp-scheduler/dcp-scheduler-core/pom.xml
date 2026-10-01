@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-scheduler-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>dcp-scheduler-core</artifactId>
+  <name>dcp-scheduler-core</name>
+  <description>调度框架本体:骨架/选主/分派/租约(依赖 api 契约)</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.dcp</groupId>
+      <artifactId>dcp-scheduler-api</artifactId>
+    </dependency>
+    <!-- rest 管理 API(迁自 backend,方案 N2):由宿主(dcp-worker)提供 Spring MVC 运行时,
+         此处 provided 仅用于编译注解;宿主自行声明 spring-boot-starter-web。 -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-web</artifactId>
+      <version>6.1.6</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+      <version>6.1.6</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- etcd v3 客户端(lease/watch/txn/CAS)。注意:jetcd 0.8.5 强制 vertx-grpc 实现
+         (ClientImpl 构造器直接引用 VertxChannelBuilder),不可排除 vertx-grpc。 -->
+    <dependency>
+      <groupId>io.etcd</groupId>
+      <artifactId>jetcd-core</artifactId>
+    </dependency>
+    <!-- JSON 序列化(etcd value) -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <!-- Kafka Admin(框架对 Kafka 只读:仅查 endOffset 算 lag) -->
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+    </dependency>
+    <!-- 测试 -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.dcp.scheduler.smoke.SmokeMain</mainClass>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+              </transformers>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

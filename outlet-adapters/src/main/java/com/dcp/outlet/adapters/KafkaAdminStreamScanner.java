@@ -42,7 +42,8 @@ public class KafkaAdminStreamScanner {
                 if (stream == null) continue;
                 int partitions = admin.describeTopics(List.of(topic)).allTopicNames().get()
                         .get(topic).partitions().size();
-                registry.register(new StreamInfo(stream, topic, partitions));
+                // 登记时带上该流所在 Kafka 地址(扫描器连接的就是该流的集群), 供任务指令透传
+                registry.register(new StreamInfo(stream, topic, bootstrap, partitions));
                 touched++;
             }
             return touched;

@@ -19,6 +19,9 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- netty 固定 4.1.109 全套:历史修复(shaded dcp-scheduler 内嵌 netty 混搭致 HTTP/2 帧错位);
+             当前已迁走 core 依赖,显式声明保留防回归。 -->
+        <netty.version>4.1.109.Final</netty.version>
     </properties>
 
     <dependencies>
@@ -26,6 +29,20 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- ═══ netty 全套 4.1.109 显式置顶(顺序修复,见 properties 注释) ═══ -->
+        <dependency><groupId>io.netty</groupId><artifactId>netty-common</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-buffer</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-transport</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-codec</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-codec-http</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-codec-http2</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-codec-socks</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-codec-dns</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-handler</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-handler-proxy</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-resolver</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-resolver-dns</artifactId><version>${netty.version}</version></dependency>
+        <dependency><groupId>io.netty</groupId><artifactId>netty-transport-native-unix-common</artifactId><version>${netty.version}</version></dependency>
         <dependency>
             <groupId>com.dcp</groupId>
             <artifactId>dcp-outlet-control</artifactId>
@@ -37,10 +54,39 @@
             <version>2.0.0-SNAPSHOT</version>
         </dependency>
         <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-scheduler-api</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- ShedLock: 定时任务多实例互斥(锁表 shedlock 在元库, 与 backend 共用一份) -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>5.16.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>5.16.0</version>
+        </dependency>
+        <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <version>8.0.23</version>
             <scope>runtime</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

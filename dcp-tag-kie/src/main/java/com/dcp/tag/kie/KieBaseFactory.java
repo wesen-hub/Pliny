@@ -23,6 +23,10 @@ import java.util.logging.Logger;
  *    无需任何 TCCL 黑客。
  *  - 每个资产生成独立包 → 同一 KieBase 内多资产共存不冲突(包隔离; agenda 按包名过滤)。
  *  - 动作约定以 DRL function 声明实现(见 DrlGenerator.header), 调用静态 TagActions。
+ *  - 宿主自定义类加载器场景(如 dcp-outlet-rt 的 JarLogicLoader 从 logic-repo 加载 fat jar):
+ *    Drools 根类加载器(ProjectClassLoader)默认以 TCCL 为父, 需在编译期间临时把 TCCL
+ *    指向本类所在类加载器(含 drools 运行时), 否则报 ClassNotFoundException
+ *    (org.drools.base.*); finally 恢复原 TCCL, 不影响宿主。
  */
 public final class KieBaseFactory {
 
@@ -52,6 +56,24 @@ public final class KieBaseFactory {
      */
     public static KieBuildResult buildBase(List<AssetPlan> assets, String factJavaSource,
                                            String factFqcn, List<String> errs) {
+        // 编译期间 TCCL → 本类加载器: Drools ProjectClassLoader 默认以 TCCL 为父,
+        // 宿主自定义类加载器(底座 JarLogicLoader)下不切换会 ClassNotFoundException;
+        // 标准 classpath 场景(本类由应用加载器加载)切换后父加载器不变, 无副作用。
+        Thread current = Thread.currentThread();
+        ClassLoader prev = current.getContextClassLoader();
+        ClassLoader host = KieBaseFactory.class.getClassLoader();
+        if (host != null) {
+            current.setContextClassLoader(host);
+        }
+        try {
+            return doBuildBase(assets, factJavaSource, factFqcn, errs);
+        } finally {
+            current.setContextClassLoader(prev);
+        }
+    }
+
+    private static KieBuildResult doBuildBase(List<AssetPlan> assets, String factJavaSource,
+                                              String factFqcn, List<String> errs) {
         KieServices ks = kieServices();
         KieFileSystem kfs = ks.newKieFileSystem();
 

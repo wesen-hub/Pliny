@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1000" viewBox="0 0 1240 1000" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="1240" height="1000" fill="#f8fafc"/>
+  <text x="620" y="38" text-anchor="middle" font-size="24" font-weight="bold" fill="#0f172a">统一调度框架 · 任务接入(TaskSpec 契约 + 两种逻辑装载方式)</text>
+
+  <!-- ============ 任务源(业务外壳) ============ -->
+  <!-- 同步链路外壳 -->
+  <rect x="50" y="70" width="350" height="110" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="225" y="100" text-anchor="middle" font-size="17" font-weight="bold" fill="#1d4ed8">任务源 1:同步链路外壳</text>
+  <text x="225" y="126" text-anchor="middle" font-size="14" fill="#334155">触发事件:逻辑表保存</text>
+  <text x="225" y="148" text-anchor="middle" font-size="14" fill="#334155">(logical_table 落库 / 采集任务创建)</text>
+  <text x="225" y="168" text-anchor="middle" font-size="13" fill="#1d4ed8">handler = embedded 内嵌写库执行器</text>
+
+  <!-- 索引器外壳 -->
+  <rect x="445" y="70" width="350" height="110" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="620" y="100" text-anchor="middle" font-size="17" font-weight="bold" fill="#c2410c">任务源 2:索引器外壳</text>
+  <text x="620" y="126" text-anchor="middle" font-size="14" fill="#334155">触发事件:出口 topic 流扫描新表</text>
+  <text x="620" y="148" text-anchor="middle" font-size="14" fill="#334155">(TiCDC dispatcher 新 topic 自动纳入)</text>
+  <text x="620" y="168" text-anchor="middle" font-size="13" fill="#c2410c">handler = embedded 内嵌锚点采样执行器</text>
+
+  <!-- 计算面外壳 -->
+  <rect x="840" y="70" width="350" height="110" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="1015" y="100" text-anchor="middle" font-size="17" font-weight="bold" fill="#047857">任务源 3:数据消费(计算面)外壳</text>
+  <text x="1015" y="126" text-anchor="middle" font-size="14" fill="#334155">触发事件:单元规划结果</text>
+  <text x="1015" y="148" text-anchor="middle" font-size="14" fill="#334155">(UnitPlanner:分区子集 + 起点 + logic)</text>
+  <text x="1015" y="168" text-anchor="middle" font-size="13" fill="#047857">handler = spi 插件装载业务 logic</text>
+
+  <!-- 任务源 → TaskSpec 箭头 -->
+  <line x1="225" y1="180" x2="225" y2="245" stroke="#2563eb" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="620" y1="180" x2="620" y2="245" stroke="#ea580c" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <line x1="1015" y1="180" x2="1015" y2="245" stroke="#059669" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <!-- 参数示例标注(箭头旁) -->
+  <text x="235" y="215" font-size="12" fill="#2563eb">示例:topic=dcp.cdc.orders</text>
+  <text x="630" y="215" font-size="12" fill="#ea580c">示例:topic=dcp.cdc.target_db.orders</text>
+  <text x="1025" y="215" font-size="12" fill="#059669">示例:单元=分区子集+起点+logic 引用</text>
+
+  <!-- ============ TaskSpec 契约 ============ -->
+  <rect x="50" y="250" width="1140" height="230" rx="12" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="620" y="282" text-anchor="middle" font-size="20" font-weight="bold" fill="#0f172a">TaskSpec —— 新任务提交给框架的契约(业务外壳唯一需要提供的东西)</text>
+
+  <!-- 第一组:基础标识 -->
+  <rect x="75" y="300" width="255" height="160" rx="8" fill="#f1f5f9"/>
+  <text x="202" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#334155">① 基础标识(必填)</text>
+  <text x="90" y="352" font-size="13" fill="#475569">namespace  任务归属(sync/</text>
+  <text x="90" y="372" font-size="13" fill="#475569">            indexer/outlet)</text>
+  <text x="90" y="396" font-size="13" fill="#475569">topic      Kafka topic(任务唯一键)</text>
+  <text x="90" y="420" font-size="13" fill="#475569">partitions 初始分区数(初始并发度)</text>
+  <text x="90" y="444" font-size="13" fill="#475569">handlerRef 逻辑引用 {type, ref}</text>
+
+  <!-- 第二组:并发边界 -->
+  <rect x="345" y="300" width="255" height="160" rx="8" fill="#f1f5f9"/>
+  <text x="472" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#334155">② 并发边界(扩缩容决策域)</text>
+  <text x="360" y="352" font-size="13" fill="#475569">minPartitions 缩容下限</text>
+  <text x="360" y="376" font-size="13" fill="#475569">maxPartitions 扩容上限</text>
+  <text x="360" y="400" font-size="13" fill="#475569">             = 最大并发度</text>
+  <text x="360" y="428" font-size="13" fill="#475569">targetRps     单分区目标吞吐</text>
+  <text x="360" y="452" font-size="13" fill="#475569">(扩缩容算法基准)</text>
+
+  <!-- 第三组:执行契约 -->
+  <rect x="615" y="300" width="255" height="160" rx="8" fill="#f1f5f9"/>
+  <text x="742" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#334155">③ 执行契约</text>
+  <text x="630" y="352" font-size="13" fill="#475569">handlerRef:</text>
+  <text x="630" y="374" font-size="13" fill="#475569">  type=embedded 内嵌执行器</text>
+  <text x="630" y="394" font-size="13" fill="#475569">  type=spi      SPI 插件执行器</text>
+  <text x="630" y="420" font-size="13" fill="#475569">handover 交接模式:</text>
+  <text x="630" y="440" font-size="13" fill="#475569">  激进(幂等吸收)</text>
+  <text x="630" y="456" font-size="13" fill="#475569">  保守(租约确认)</text>
+
+  <!-- 第四组:协作与规则 -->
+  <rect x="885" y="300" width="280" height="160" rx="8" fill="#f1f5f9"/>
+  <text x="1025" y="326" text-anchor="middle" font-size="15" font-weight="bold" fill="#334155">④ 协作与规则(可选)</text>
+  <text x="900" y="352" font-size="13" fill="#475569">scaleDownHooks:</text>
+  <text x="900" y="372" font-size="13" fill="#475569">  缩容路由切换钩子</text>
+  <text x="900" y="392" font-size="13" fill="#475569">  (不实现 = 该任务只扩不缩)</text>
+  <text x="900" y="420" font-size="13" fill="#475569">scaleRules:</text>
+  <text x="900" y="440" font-size="13" fill="#475569">  阈值/连续周期/冷却/步长</text>
+  <text x="900" y="456" font-size="13" fill="#475569">  (缺省用框架默认)</text>
+
+  <!-- TaskSpec → namespace 箭头 -->
+  <line x1="225" y1="480" x2="225" y2="545" stroke="#2563eb" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="620" y1="480" x2="620" y2="545" stroke="#ea580c" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <line x1="1015" y1="480" x2="1015" y2="545" stroke="#059669" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <!-- ============ 三个 namespace ============ -->
+  <!-- ns=sync -->
+  <rect x="50" y="550" width="350" height="390" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="225" y="582" text-anchor="middle" font-size="18" font-weight="bold" fill="#1d4ed8">namespace = sync(同步链路)</text>
+  <text x="225" y="606" text-anchor="middle" font-size="13" fill="#475569">独立选主 | 实例池(如 10 台)| 分区级扩缩</text>
+  <rect x="65" y="620" width="320" height="96" rx="8" fill="#ffffff" stroke="#93c5fd"/>
+  <text x="225" y="644" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">执行器:embedded 写库执行器(内嵌)</text>
+  <text x="225" y="666" text-anchor="middle" font-size="12.5" fill="#334155">内部循环(业务自有,框架不感知):</text>
+  <text x="225" y="686" text-anchor="middle" font-size="12.5" fill="#334155">poll → 解析/路由/裁判 → 攒批写 TiDB</text>
+  <text x="225" y="706" text-anchor="middle" font-size="12.5" fill="#334155">→ 已写游标 + 1 提交</text>
+  <text x="225" y="732" text-anchor="middle" font-size="13" fill="#1d4ed8">handover = 激进(重复消费幂等吸收)</text>
+  <text x="225" y="754" text-anchor="middle" font-size="13" fill="#1d4ed8">扩缩:min=8 max=64 targetRps=1.5 万行/秒</text>
+  <text x="225" y="776" text-anchor="middle" font-size="13" fill="#1d4ed8">缩容钩子:支持(bucket_map 收缩)</text>
+  <text x="225" y="806" text-anchor="middle" font-size="12.5" fill="#64748b">任务来源:逻辑表保存 → 提交 TaskSpec</text>
+  <text x="225" y="826" text-anchor="middle" font-size="12.5" fill="#64748b">执行器随框架编译,handlerRef=embedded</text>
+
+  <!-- ns=indexer -->
+  <rect x="445" y="550" width="350" height="390" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="620" y="582" text-anchor="middle" font-size="18" font-weight="bold" fill="#c2410c">namespace = indexer(索引器)</text>
+  <text x="620" y="606" text-anchor="middle" font-size="13" fill="#475569">独立选主 | 实例池(如 3 台)| 分区级扩缩</text>
+  <rect x="460" y="620" width="320" height="96" rx="8" fill="#ffffff" stroke="#fdba74"/>
+  <text x="620" y="644" text-anchor="middle" font-size="14" font-weight="bold" fill="#c2410c">执行器:embedded 锚点采样执行器(内嵌)</text>
+  <text x="620" y="666" text-anchor="middle" font-size="12.5" fill="#334155">内部循环(业务自有,框架不感知):</text>
+  <text x="620" y="686" text-anchor="middle" font-size="12.5" fill="#334155">poll → 提取 commitTs → 单调判定</text>
+  <text x="620" y="706" text-anchor="middle" font-size="12.5" fill="#334155">→ 稀疏采样写锚点 → 污染兜底</text>
+  <text x="620" y="732" text-anchor="middle" font-size="13" fill="#c2410c">handover = 激进(锚点幂等:单调+唯一约束)</text>
+  <text x="620" y="754" text-anchor="middle" font-size="13" fill="#c2410c">扩缩:min=1 max=16 targetRps=10 万/秒</text>
+  <text x="620" y="776" text-anchor="middle" font-size="13" fill="#c2410c">缩容钩子:不实现(只扩不缩,路由随 TiCDC)</text>
+  <text x="620" y="806" text-anchor="middle" font-size="12.5" fill="#64748b">任务来源:流扫描新 topic → 提交 TaskSpec</text>
+  <text x="620" y="826" text-anchor="middle" font-size="12.5" fill="#64748b">执行器随框架编译,handlerRef=embedded</text>
+
+  <!-- ns=outlet -->
+  <rect x="840" y="550" width="350" height="390" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="1015" y="582" text-anchor="middle" font-size="18" font-weight="bold" fill="#047857">namespace = outlet(数据消费)</text>
+  <text x="1015" y="606" text-anchor="middle" font-size="13" fill="#475569">独立选主 | 实例池(如 20 台)| 单元级扩缩</text>
+  <rect x="855" y="620" width="320" height="96" rx="8" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="1015" y="644" text-anchor="middle" font-size="14" font-weight="bold" fill="#047857">执行器:spi 插件装载业务 logic</text>
+  <text x="1015" y="666" text-anchor="middle" font-size="12.5" fill="#334155">内部循环(业务自有,框架不感知):</text>
+  <text x="1015" y="686" text-anchor="middle" font-size="12.5" fill="#334155">assign + seek 注入起点 → 契约裁剪</text>
+  <text x="1015" y="706" text-anchor="middle" font-size="12.5" fill="#334155">→ logic.process → 提交位点</text>
+  <text x="1015" y="732" text-anchor="middle" font-size="13" fill="#047857">handover = 保守(租约过期确认死亡)</text>
+  <text x="1015" y="754" text-anchor="middle" font-size="13" fill="#047857">并发:单元分区子集固定(不自动扩缩)</text>
+  <text x="1015" y="776" text-anchor="middle" font-size="13" fill="#047857">扩缩 = 增删单元任务(规划驱动)</text>
+  <text x="1015" y="806" text-anchor="middle" font-size="12.5" fill="#64748b">任务来源:单元规划结果 → 提交 TaskSpec</text>
+  <text x="1015" y="826" text-anchor="middle" font-size="12.5" fill="#64748b">logic 由 SPI 插件装载,handlerRef=spi</text>
+
+  <!-- ============ 底部:两种装载方式说明 ============ -->
+  <rect x="50" y="955" width="1140" height="32" rx="8" fill="#e2e8f0"/>
+  <text x="620" y="976" text-anchor="middle" font-size="14" fill="#334155">两种逻辑装载方式:embedded(平台自有逻辑随框架编译,强类型) | spi(业务插件按接口打 jar 进 classpath,框架 ServiceLoader 发现)——框架只认 ExecutorProvider 接口</text>
+</svg>

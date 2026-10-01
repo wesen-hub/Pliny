@@ -100,6 +100,21 @@ export const statsOverview = () => request.get('/stats/overview')
 export const statsTrend = (days) => request.get('/stats/trend', { params: { days } })
 export const statsTaskRank = (limit) => request.get('/stats/task-rank', { params: { limit } })
 
+// ---------- 统一调度框架告警事件流(主写 /dcp/{ns}/alerts/, 后端 jetcd 只读透传) ----------
+export const listSchedulerAlerts = (ns) => request.get('/scheduler/alerts', { params: { ns } })
+
+// ---------- 统一调度框架运维大盘(四级监控下钻 + ops 指令通道) ----------
+export const listSchedulerMetrics = (ns, taskId) => request.get('/scheduler/metrics', { params: { ns, taskId } })
+export const listSchedulerOps = (ns) => request.get('/scheduler/ops', { params: { ns } })
+export const listSchedulerInstances = (ns) => request.get('/scheduler/instances', { params: { ns } })
+export const submitSchedulerOp = (data) => request.post('/scheduler/ops', data)
+
+// ---------- 统一调度框架 namespace 管理(创建/删除 ns、默认规则走 SET_RULES ops) ----------
+export const listSchedulerNamespaces = () => request.get('/scheduler/namespaces')
+export const createSchedulerNs = (data) => request.post('/scheduler/namespaces', data)
+export const deleteSchedulerNs = (ns) => request.delete(`/scheduler/namespaces/${ns}`)
+export const listSchedulerAudits = () => request.get('/scheduler/audits')
+
 // ---------- 告警 ----------
 export const listAlarms = (jobId) => request.get('/alarms', { params: { jobId } })
 export const createAlarm = (data) => request.post('/alarms', data)

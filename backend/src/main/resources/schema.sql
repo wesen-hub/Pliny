@@ -480,3 +480,12 @@ CREATE TABLE IF NOT EXISTS asset_tag_binding (
   UNIQUE KEY uk_asset_tag (asset_table, tag_path),
   KEY idx_tag (tag_path)
 ) ENGINE=InnoDB COMMENT='资产目录人工打标绑定';
+
+-- ============ ShedLock 分布式锁表(2026-10-01): 定时任务多实例互斥 ============
+CREATE TABLE IF NOT EXISTS shedlock (
+  name VARCHAR(64) NOT NULL,
+  lock_until TIMESTAMP(3) NOT NULL,
+  locked_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  locked_by VARCHAR(255) NOT NULL,
+  PRIMARY KEY (name)
+) ENGINE=InnoDB COMMENT='ShedLock 分布式锁(定时任务多实例互斥)';

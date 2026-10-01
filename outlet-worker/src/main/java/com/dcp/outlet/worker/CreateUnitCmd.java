@@ -17,10 +17,14 @@ public final class CreateUnitCmd {
     private String unitId;
     private String taskId;
     private String topic;
+    /** 该流所在 Kafka 地址(随任务指令透传, ns 与 Kafka 解耦); 缺 = 回退计算面 ns 环境 */
+    private String kafkaBootstrap;
     private String stream;          // 逻辑表名(batch.stream() 与契约白名单的键)
     private String contractRef;     // 契约引用:计算面据此从控制面拉契约视图(**缺 = 拒绝消费**)
     private List<Integer> partitions = List.of();
     private Map<Integer, Long> startOffsets = new LinkedHashMap<>();
+    /** 每分区会话过滤边界 T0(栅栏方案 §3.3:commitTs ≤ T0 由出口持续丢弃, 半开); 缺 = 不过滤 */
+    private Map<Integer, Long> startTsos = new LinkedHashMap<>();
     private String consumerGroup;
     private LogicRef logic;
     private Map<String, Object> params = new LinkedHashMap<>();
@@ -36,6 +40,8 @@ public final class CreateUnitCmd {
     public CreateUnitCmd taskId(String v) { this.taskId = v; return this; }
     public String topic() { return topic; }
     public CreateUnitCmd topic(String v) { this.topic = v; return this; }
+    public String kafkaBootstrap() { return kafkaBootstrap; }
+    public CreateUnitCmd kafkaBootstrap(String v) { this.kafkaBootstrap = v; return this; }
     public String stream() { return stream; }
     public CreateUnitCmd stream(String v) { this.stream = v; return this; }
     public String contractRef() { return contractRef; }
@@ -44,6 +50,8 @@ public final class CreateUnitCmd {
     public CreateUnitCmd partitions(List<Integer> v) { this.partitions = v; return this; }
     public Map<Integer, Long> startOffsets() { return startOffsets; }
     public CreateUnitCmd startOffsets(Map<Integer, Long> v) { this.startOffsets = v; return this; }
+    public Map<Integer, Long> startTsos() { return startTsos; }
+    public CreateUnitCmd startTsos(Map<Integer, Long> v) { this.startTsos = v; return this; }
     public String consumerGroup() { return consumerGroup; }
     public CreateUnitCmd consumerGroup(String v) { this.consumerGroup = v; return this; }
     public LogicRef logic() { return logic; }

@@ -11,7 +11,6 @@ import com.dcp.outlet.worker.CreateUnitCmd;
 import com.dcp.outlet.worker.DecodedMessage;
 import com.dcp.outlet.worker.DefaultContractFilter;
 import com.dcp.outlet.worker.DeadLetterSink;
-import com.dcp.outlet.worker.Heartbeat;
 import com.dcp.outlet.worker.RecordSource;
 import com.dcp.outlet.worker.RecordSourceFactory;
 import com.dcp.outlet.worker.UnitMetrics;
@@ -194,7 +193,7 @@ public final class ContractRefreshCheck {
 
         UnitRunner runner = new UnitRunner(new ClasspathLogicLoader(registry), new SdkEventDecoder(),
                 new DefaultContractFilter(new ExpressionRowConditionEvaluator(), new PlatformMasker(), null),
-                sources, unitId -> true, (unitId, partition, offset, tso) -> { },
+                sources,
                 new WatermarkProvider() {
                     @Override public void update(int partition, long watermarkTs) { }
                     @Override public long safeWatermark(int partition) { return 0L; }

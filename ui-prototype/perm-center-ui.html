@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>策略中心 · 数据权限统一控制(页面原型)</title>
+<style>
+:root{
+  --primary:#2563eb; --primary-bg:#eff6ff; --border:#e2e8f0; --text:#1e293b;
+  --text-2:#64748b; --bg:#f5f7fa; --card:#fff; --ok:#16a34a; --warn:#d97706; --danger:#dc2626;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
+.app{display:flex;height:100vh;}
+.side{width:200px;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;flex:none;}
+.side h1{font-size:14px;color:#fff;padding:18px 16px 6px;}
+.side .sub{font-size:11px;color:#64748b;padding:0 16px 12px;}
+.nav{flex:1;overflow:auto;}
+.nav-item{padding:11px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;border-left:3px solid transparent;}
+.nav-item:hover{background:#263449;color:#fff;}
+.nav-item.active{background:#263449;color:#fff;border-left-color:#3b82f6;}
+.nav-item .ic{width:18px;text-align:center;font-size:13px;}
+.main{flex:1;overflow:auto;padding:20px 24px;}
+.page{display:none;}
+.page.active{display:block;}
+.hd{display:flex;align-items:baseline;gap:10px;margin-bottom:16px;}
+.hd h2{font-size:17px;font-weight:650;}
+.hd .tip{color:var(--text-2);font-size:12px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
+.card h3{font-size:14px;margin-bottom:12px;font-weight:650;}
+.grid{display:grid;gap:12px;}
+.g4{grid-template-columns:repeat(4,1fr);}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.stat .n{font-size:24px;font-weight:700;}
+.stat .l{color:var(--text-2);font-size:12px;margin-top:2px;}
+table{width:100%;border-collapse:collapse;background:#fff;}
+th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;font-size:12.5px;}
+th{background:#f8fafc;color:var(--text-2);font-weight:600;white-space:nowrap;}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.b-grant{background:#dcfce7;color:#15803d;}
+.b-deny{background:#fee2e2;color:#b91c1c;}
+.b-l0{background:#fee2e2;color:#b91c1c;}
+.b-l1{background:#ffedd5;color:#c2410c;}
+.b-l2{background:#fef9c3;color:#a16207;}
+.b-l3{background:#dcfce7;color:#15803d;}
+.b-ok{background:#dbeafe;color:#1d4ed8;}
+.b-no{background:#f1f5f9;color:#94a3b8;}
+.btn{display:inline-block;padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.btn.sm{padding:4px 10px;font-size:12px;}
+.btn:hover{opacity:.9;}
+.row{display:flex;gap:12px;align-items:flex-start;}
+.col{flex:1;}
+label.fl{display:block;color:var(--text-2);font-size:12px;margin:10px 0 4px;}
+input[type=text],select,textarea{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;font-family:inherit;background:#fff;}
+textarea{min-height:64px;resize:vertical;}
+.radio-g{display:flex;gap:14px;margin-top:6px;}
+.radio-g label{display:flex;align-items:center;gap:5px;cursor:pointer;}
+.chk-g{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+.chk{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border:1px solid var(--border);border-radius:7px;cursor:pointer;background:#fff;font-size:12px;}
+.chk.on{background:var(--primary-bg);border-color:var(--primary);color:var(--primary);}
+.var-chip{display:inline-block;padding:3px 9px;border-radius:6px;background:#ede9fe;color:#6d28d9;font-size:11.5px;cursor:pointer;border:1px solid #ddd6fe;}
+.var-chip:hover{background:#ddd6fe;}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:12px 14px;line-height:1.7;white-space:pre-wrap;word-break:break-all;}
+.tree-item{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;}
+.tree-item:hover{background:#f1f5f9;}
+.tree-item.sel{background:var(--primary-bg);color:var(--primary);font-weight:600;}
+.tree-children{padding-left:18px;}
+.tree-caret{cursor:pointer;user-select:none;width:14px;display:inline-block;color:var(--text-2);}
+.lv-btns{display:flex;gap:6px;}
+.lv{flex:1;text-align:center;padding:8px 4px;border:1px solid var(--border);border-radius:7px;cursor:pointer;font-size:12px;background:#fff;}
+.lv.on{outline:2px solid var(--primary);}
+.hint{font-size:11.5px;color:var(--text-2);margin-top:6px;line-height:1.6;}
+.why-item{border-left:3px solid var(--border);padding:8px 12px;margin:8px 0;background:#fafbfc;border-radius:0 8px 8px 0;}
+.why-item.win{border-left-color:#16a34a;background:#f0fdf4;}
+.why-item .t{font-weight:600;font-size:12.5px;}
+.why-item .d{font-size:12px;color:var(--text-2);margin-top:2px;}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;border:1px solid var(--border);color:var(--text-2);margin-right:4px;}
+.mask-row{display:flex;gap:8px;align-items:center;margin-top:6px;}
+.notice{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-top:10px;}
+.notice.red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <h1>策略中心</h1>
+    <div class="sub">数据权限统一控制 · 原型 v0.1</div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-p="p1"><span class="ic">📊</span>策略总览</div>
+      <div class="nav-item" data-p="p2"><span class="ic">🔐</span>资源授权</div>
+      <div class="nav-item" data-p="p3"><span class="ic">📝</span>策略编辑器</div>
+      <div class="nav-item" data-p="p4"><span class="ic">🧩</span>行规则管理</div>
+      <div class="nav-item" data-p="p5"><span class="ic">📄</span>契约管理</div>
+      <div class="nav-item" data-p="p6"><span class="ic">🎭</span>密级与脱敏</div>
+      <div class="nav-item" data-p="p7"><span class="ic">👁️</span>有效权限预览</div>
+      <div class="nav-item" data-p="p8"><span class="ic">🕘</span>变更审计</div>
+    </nav>
+  </aside>
+
+  <main class="main">
+
+    <!-- P1 总览 -->
+    <section class="page active" id="p1">
+      <div class="hd"><h2>策略总览</h2><span class="tip">授权态势一眼看全:策略、资源、生效点、异常</span></div>
+      <div class="grid g4">
+        <div class="stat"><div class="n">128</div><div class="l">生效策略(资源级 96 · 行规则 24 · 脱敏 8)</div></div>
+        <div class="stat"><div class="n">41</div><div class="l">覆盖资源(流 18 / 文件 3 / 标签 20)</div></div>
+        <div class="stat"><div class="n">6 / 6</div><div class="l">出口已挂 PEP(全部生效)</div></div>
+        <div class="stat"><div class="n" style="color:var(--warn)">2</div><div class="l">待处理:收窄事件延迟 &gt; 5s(明细→变更审计)</div></div>
+      </div>
+      <div class="card">
+        <h3>生效点矩阵(策略 → 各出口是否已下发生效)</h3>
+        <table>
+          <tr><th>策略类</th><th>平台 REST</th><th>v2 计算面</th><th>Spark 批</th><th>Flink 流</th><th>订阅 PULL</th><th>文件下载</th></tr>
+          <tr><td>资源级(列/密级)</td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-ok">生效(注入)</span></td><td><span class="badge b-ok">生效(注入)</span></td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-ok">生效</span></td></tr>
+          <tr><td>行规则 cond</td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-ok">生效(注入)</span></td><td><span class="badge b-ok">生效(注入)</span></td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-no">不适用</span></td></tr>
+          <tr><td>行规则 tag_ref</td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-no">阶段二</span></td><td><span class="badge b-no">阶段二</span></td><td><span class="badge b-no">阶段二</span></td><td><span class="badge b-ok">生效</span></td><td><span class="badge b-no">不适用</span></td></tr>
+        </table>
+        <div class="hint">“不适用”= 该出口无对应资源语义(文件出口无行/标签概念);“阶段二”= 迁移计划中的接入排期。管理面如实标注,不配了不生效的策略。</div>
+      </div>
+    </section>
+
+    <!-- P2 资源授权 -->
+    <section class="page" id="p2">
+      <div class="hd"><h2>资源授权</h2><span class="tip">五粒度主操作面:选主体 → 选资源 → 定等级与效果</span></div>
+      <div class="card">
+        <div class="row">
+          <div class="col" style="flex:none;width:130px">
+            <label class="fl">主体类型</label>
+            <div class="radio-g" style="flex-direction:column;gap:8px">
+              <label><input type="radio" name="subjType" value="role" checked onchange="subjectType()"> 角色</label>
+              <label><input type="radio" name="subjType" value="user" onchange="subjectType()"> 用户</label>
+            </div>
+          </div>
+          <div class="col">
+            <label class="fl">主体</label>
+            <select id="subjSel" onchange="renderPolicies()">
+              <option value="risk-role">风控专员 (risk-role)</option>
+              <option value="analyst-role">数据分析师 (analyst-role)</option>
+              <option value="ops-role">运维 (ops-role)</option>
+              <option value="zhang">张工 (zhang)</option>
+            </select>
+            <label class="fl">资源树</label>
+            <div id="tree" style="border:1px solid var(--border);border-radius:8px;padding:8px;max-height:330px;overflow:auto"></div>
+          </div>
+          <div class="col">
+            <label class="fl">等级档(选中的资源)</label>
+            <div class="lv-btns" id="lvBtns"></div>
+            <label class="fl">效果</label>
+            <div class="radio-g">
+              <label><input type="radio" name="eff" value="grant" checked> 授予</label>
+              <label><input type="radio" name="eff" value="deny"> 拒绝</label>
+            </div>
+            <div class="notice">拒绝(deny)短路:一旦命中,无视其他任何授权。用于“绝密资产对某角色显式拉黑”。</div>
+            <button class="btn primary" style="margin-top:12px" onclick="savePolicy()">保存策略</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>该主体已有策略(稀疏矩阵:只显示非默认)</h3>
+        <table id="policyTable"></table>
+      </div>
+    </section>
+
+    <!-- P3 策略编辑器 -->
+    <section class="page" id="p3">
+      <div class="hd"><h2>策略编辑器</h2><span class="tip">一条策略 = 效果 + 主体 + 资源 + 动作 + 约束(列/行/标签/密级/环境)</span></div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label class="fl">效果 effect</label>
+            <div class="radio-g">
+              <label><input type="radio" name="eEff" value="grant" checked> grant 授予</label>
+              <label><input type="radio" name="eEff" value="deny"> deny 拒绝</label>
+            </div>
+            <label class="fl">主体 subject</label>
+            <select id="eSubj"><option>risk-role(角色)</option><option>analyst-role(角色)</option><option>zhang(用户)</option></select>
+            <label class="fl">资源 resource</label>
+            <select id="eRes" onchange="onRes()"><option>stream: rt_sync_c</option><option>stream: customer_wide</option><option>file: /data/out/**</option></select>
+            <label class="fl">动作 actions</label>
+            <div class="chk-g" id="eActs">
+              <span class="chk on" onclick="tgl(this)">read.snapshot</span>
+              <span class="chk on" onclick="tgl(this)">read.changes</span>
+              <span class="chk" onclick="tgl(this)">read.query</span>
+              <span class="chk" onclick="tgl(this)">export</span>
+              <span class="chk" onclick="tgl(this)">download</span>
+            </div>
+          </div>
+          <div class="col">
+            <label class="fl">列级 · 白名单(勾选可见列,不勾 = 不可见)</label>
+            <div class="chk-g" id="eCols">
+              <span class="chk on" onclick="tgl(this)">id (key)</span>
+              <span class="chk on" onclick="tgl(this)">v</span>
+              <span class="chk on" onclick="tgl(this)">seq</span>
+              <span class="chk" onclick="tgl(this)">phone</span>
+              <span class="chk" onclick="tgl(this)">_commit_ts</span>
+            </div>
+            <label class="fl">密级 · 列脱敏(选中的列套规则)</label>
+            <div class="mask-row">
+              <select style="width:150px"><option>phone</option><option>v</option></select>
+              <select><option>MASK_PHONE</option><option>MASK_FULL</option><option>无</option></select>
+              <span class="btn sm" onclick="addMask(this)">+ 加一行</span>
+            </div>
+          </div>
+          <div class="col">
+            <label class="fl">行级 · 谓词(支持会话变量,点击插入)</label>
+            <textarea id="eRow" oninput="renderStmt()">status = 'paid' AND region = ${subject.region}</textarea>
+            <div class="chk-g" style="margin-top:6px">
+              <span class="var-chip" onclick="insVar(this)">${subject.username}</span>
+              <span class="var-chip" onclick="insVar(this)">${subject.region}</span>
+              <span class="var-chip" onclick="insVar(this)">${env.channel}</span>
+              <span class="var-chip" onclick="insVar(this)">${env.time}</span>
+            </div>
+            <label class="fl">绑定变量白名单 bind_scope(谓词用到的变量必须声明)</label>
+            <div class="chk-g">
+              <span class="chk on" onclick="tgl(this)">subject.region</span>
+              <span class="chk" onclick="tgl(this)">subject.username</span>
+              <span class="chk" onclick="tgl(this)">env.channel</span>
+            </div>
+            <label class="fl">标签级 · 可见范围</label>
+            <select><option>prefix: 业务域/风控</option><option>prefix: 全部(继承)</option><option>set: 指定集合…</option></select>
+            <label class="fl">环境约束</label>
+            <select><option>channel: api</option><option>channel: internal</option><option>无环境约束</option></select>
+          </div>
+        </div>
+        <div class="notice" id="stmtNotice" hidden></div>
+      </div>
+      <div class="card">
+        <h3>策略语句预览(抽象语义 —— 引擎无关,这就是最终存进策略库的东西)</h3>
+        <div class="code" id="stmtPreview"></div>
+        <div class="hint">校验规则:行谓词出现的会话变量必须 ⊆ bind_scope;列白名单为空 = 该资源不可见;deny 时约束段失效(deny 短路语义)。</div>
+      </div>
+    </section>
+
+    <!-- P4 行规则管理 -->
+    <section class="page" id="p4">
+      <div class="hd"><h2>行规则管理</h2><span class="tip">cond / list / tag_ref 三类统一,每类标注生效点</span></div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label class="fl">资源</label>
+            <select><option>dataset: rt_sync_c</option><option>dataset: customer_wide</option><option>tag: 业务域/风控</option></select>
+            <label class="fl">类型 kind</label>
+            <div class="radio-g">
+              <label><input type="radio" name="rrKind" checked> cond 谓词</label>
+              <label><input type="radio" name="rrKind"> list 名单</label>
+              <label><input type="radio" name="rrKind"> tag_ref 标签引用</label>
+            </div>
+            <label class="fl">谓词(会话变量点击插入)</label>
+            <textarea>owner = ${subject.username}</textarea>
+            <div class="chk-g"><span class="var-chip" onclick="insVar(this)">${subject.username}</span><span class="var-chip" onclick="insVar(this)">${subject.region}</span></div>
+            <label class="fl">bind_scope 白名单</label>
+            <div class="chk-g"><span class="chk on" onclick="tgl(this)">subject.username</span></div>
+          </div>
+          <div class="col">
+            <label class="fl">生效点(如实标注)</label>
+            <table>
+              <tr><th>出口</th><th>状态</th></tr>
+              <tr><td>平台 REST</td><td><span class="badge b-ok">生效</span></td></tr>
+              <tr><td>v2 计算面</td><td><span class="badge b-ok">生效</span></td></tr>
+              <tr><td>Spark / Flink</td><td><span class="badge b-no">阶段二</span></td></tr>
+              <tr><td>订阅 PULL</td><td><span class="badge b-ok">生效</span></td></tr>
+            </table>
+            <div class="notice">tag_ref 型:标签变更将触发策略版本递增,收窄 &lt;1s 生效。</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>规则列表</h3>
+        <table>
+          <tr><th>规则</th><th>资源</th><th>类型</th><th>谓词</th><th>变量白名单</th><th>状态</th></tr>
+          <tr><td>仅本人订单</td><td>dw_order</td><td>cond</td><td><span class="code" style="padding:2px 8px">owner = ${subject.username}</span></td><td>subject.username</td><td><span class="badge b-ok">启用</span></td></tr>
+          <tr><td>华东白名单</td><td>rt_sync_c</td><td>list</td><td>region IN (华东,华北)</td><td>—</td><td><span class="badge b-ok">启用</span></td></tr>
+          <tr><td>风控标签可见</td><td>tag</td><td>tag_ref</td><td>tag IN (业务域/风控/**)</td><td>—</td><td><span class="badge b-ok">启用</span></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- P5 契约管理 -->
+    <section class="page" id="p5">
+      <div class="hd"><h2>契约管理</h2><span class="tip">对外承诺视图:入口合一,数据仍在 contract 表</span></div>
+      <div class="card">
+        <table>
+          <tr><th>契约</th><th>消费方</th><th>覆盖流</th><th>列白名单</th><th>密级上限</th><th>行条件</th><th>通道</th><th>契约视图预览</th></tr>
+          <tr><td>ct-sub-rt_sync_c</td><td>demo-sub</td><td>rt_sync_c</td><td>id, v</td><td>2</td><td>—</td><td>api</td><td><span class="btn sm" onclick="previewContract(this)">预览</span></td></tr>
+          <tr><td>ct-tag-rt_sync_c</td><td>tag-platform</td><td>rt_sync_c</td><td>id, v, seq</td><td>3</td><td>—</td><td>internal</td><td><span class="btn sm" onclick="previewContract(this)">预览</span></td></tr>
+          <tr><td>ct-risk-dw_order</td><td>risk-team</td><td>dw_order</td><td>order_id, amount, status, phone</td><td>2</td><td>status='paid'</td><td>api</td><td><span class="btn sm" onclick="previewContract(this)">预览</span></td></tr>
+        </table>
+      </div>
+      <div class="card" id="contractPreview" hidden>
+        <h3>契约视图预览(合算后 —— 平台下发给消费方的最终形态)</h3>
+        <div class="code" id="contractPreviewBody"></div>
+        <div class="hint">契约 ∩ 主体:若主体侧把某列设 HIDDEN,这里会被再收窄一层。</div>
+      </div>
+    </section>
+
+    <!-- P6 密级与脱敏 -->
+    <section class="page" id="p6">
+      <div class="hd"><h2>密级与脱敏</h2><span class="tip">敏感级字典 + 脱敏规则注册表(两端同源,不再两处硬编码)</span></div>
+      <div class="card">
+        <h3>敏感级字典(0-3)</h3>
+        <table>
+          <tr><th>级</th><th>名称</th><th>含义</th></tr>
+          <tr><td><span class="badge b-l0">0 HIDDEN</span></td><td>不可见</td><td>显式授权才可见;未授权即隐藏</td></tr>
+          <tr><td><span class="badge b-l1">1 META</span></td><td>元数据</td><td>可见结构,不可见数据</td></tr>
+          <tr><td><span class="badge b-l2">2 MASKED</span></td><td>脱敏可见</td><td>按规则脱敏后可见</td></tr>
+          <tr><td><span class="badge b-l3">3 FULL</span></td><td>全量</td><td>完全可见</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>脱敏规则注册表(mask_rule)</h3>
+        <table>
+          <tr><th>编码</th><th>参数</th><th>实现版本</th><th>平台侧</th><th>计算面</th></tr>
+          <tr><td>MASK_PHONE</td><td>保留前3后2</td><td>v3</td><td><span class="badge b-ok">v3</span></td><td><span class="badge b-ok">v3</span></td></tr>
+          <tr><td>MASK_FULL</td><td>—</td><td>v1</td><td><span class="badge b-ok">v1</span></td><td><span class="badge b-ok">v1</span></td></tr>
+          <tr><td>MASK_ID_CARD</td><td>保留前4后4</td><td>v2</td><td><span class="badge b-ok">v2</span></td><td><span class="badge b-no">待同步</span></td></tr>
+        </table>
+        <div class="notice red">新增/升级脱敏规则时,两端实现版本不一致 → 策略下发会被拒(fail-closed),直到版本对齐。</div>
+      </div>
+    </section>
+
+    <!-- P7 有效权限预览 -->
+    <section class="page" id="p7">
+      <div class="hd"><h2>有效权限预览</h2><span class="tip">看见最终结果:某主体到底能看什么、为什么</span></div>
+      <div class="card">
+        <div class="row">
+          <div class="col" style="flex:none;width:220px">
+            <label class="fl">主体</label>
+            <select id="pvSubj" onchange="previewWhy()"><option>risk-role(角色)</option><option>zhang(用户)</option></select>
+            <label class="fl">资源</label>
+            <select id="pvRes" onchange="previewWhy()"><option>stream: rt_sync_c</option><option>stream: dw_order</option></select>
+            <label class="fl">动作</label>
+            <select onchange="previewWhy()"><option>read.snapshot</option><option>read.changes</option></select>
+          </div>
+          <div class="col">
+            <label class="fl">最终结果(判定合成)</label>
+            <table id="pvResult"></table>
+          </div>
+          <div class="col">
+            <label class="fl">为什么 —— 判定链解释</label>
+            <div id="pvWhy"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- P8 变更审计 -->
+    <section class="page" id="p8">
+      <div class="hd"><h2>变更审计</h2><span class="tip">谁在何时把什么改成了什么</span></div>
+      <div class="card">
+        <table>
+          <tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>变更前 → 变更后</th></tr>
+          <tr><td>09-16 20:11</td><td>admin</td><td><span class="badge b-deny">删除</span></td><td>策略 #312</td><td>risk-role × rt_sync_c: L3 → (已删)</td></tr>
+          <tr><td>09-16 19:58</td><td>zhang</td><td><span class="badge b-grant">更新</span></td><td>行规则 #24</td><td>owner = ${subject.username} → owner = ${subject.username} AND status != 'closed'</td></tr>
+          <tr><td>09-16 19:40</td><td>admin</td><td><span class="badge b-grant">创建</span></td><td>契约 ct-tag-rt_sync_c</td><td>(新建) → 列 [id,v,seq] · 密级 3 · channel internal</td></tr>
+          <tr><td>09-16 15:02</td><td>admin</td><td><span class="badge b-deny">拒绝</span></td><td>策略 #298</td><td>ops-role × 密级/机密/** 的 grant → deny</td></tr>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ---------- 导航 ---------- */
+document.querySelectorAll('.nav-item').forEach(el=>{
+  el.onclick=()=>{
+    document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById(el.dataset.p).classList.add('active');
+  };
+});
+
+/* ---------- P2 资源树 ---------- */
+const RES_TREE = [
+  {name:'rt_sync_c',type:'stream',cols:['id (key)','v','seq','phone','_commit_ts']},
+  {name:'customer_wide',type:'stream',cols:['id_card_no','name','phone','level']},
+  {name:'dw_order',type:'stream',cols:['order_id','amount','status','phone']},
+  {name:'/data/out/**',type:'file',cols:[]},
+  {name:'业务域/风控/黑名单',type:'tag',cols:[]}
+];
+let selRes = 'rt_sync_c';
+function subjectType(){ document.getElementById('subjSel').innerHTML =
+  document.querySelector('input[name=subjType]:checked').value==='role'
+  ? '<option value="risk-role">风控专员 (risk-role)</option><option value="analyst-role">数据分析师 (analyst-role)</option><option value="ops-role">运维 (ops-role)</option>'
+  : '<option value="zhang">张工 (zhang)</option><option value="li">李工 (li)</option>'; renderPolicies(); }
+function buildTree(){
+  const t = document.getElementById('tree');
+  t.innerHTML = RES_TREE.map(r=>{
+    const cols = r.cols.map(c=>`<div class="tree-item" style="padding-left:34px" data-res="${r.name}.${c.split(' ')[0]}">${c}</div>`).join('');
+    return `<div class="tree-item ${selRes===r.name?'sel':''}" data-res="${r.name}" onclick="selTreeNode('${r.name}',this)">
+      <span class="tree-caret" onclick="event.stopPropagation();tglCaret(this)">▸</span> ${r.type==='file'?'📁':'📊'} ${r.name}</div>
+      <div class="tree-children">${cols}</div>`;
+  }).join('');
+  t.querySelectorAll('.tree-item').forEach(n=>n.onclick=()=>{selRes=n.dataset.res;buildTree();});
+}
+function tglCaret(c){ c.textContent = c.textContent==='▸'?'▾':'▸'; const ch=c.parentElement.nextElementSibling; if(ch) ch.style.display = ch.style.display==='none'?'':'none'; }
+function selTreeNode(){}
+buildTree();
+
+/* ---------- P2 等级档 ---------- */
+const LV=[['L0','不可见'],['L1','元数据'],['L2','脱敏'],['L3','全量']];
+const lvBtns=document.getElementById('lvBtns');
+LV.forEach(([k,v],i)=>{
+  const d=document.createElement('div');
+  d.className='lv'+(i===3?' on':''); d.dataset.lv=k; d.innerHTML=`<b>${k}</b><br><span style="font-size:10px;color:var(--text-2)">${v}</span>`;
+  d.onclick=()=>{lvBtns.querySelectorAll('.lv').forEach(x=>x.classList.remove('on'));d.classList.add('on');};
+  lvBtns.appendChild(d);
+});
+
+/* ---------- P2 策略表 ---------- */
+const SUBJ_POLICY={
+  'risk-role':[['stream: rt_sync_c','L2','grant'],['stream: dw_order','L3','grant'],['tag: 密级/机密','L0','deny']],
+  'analyst-role':[['stream: customer_wide','L2','grant'],['stream: rt_sync_c','L1','grant']],
+  'ops-role':[['file: /data/out/**','L3','grant']],
+  'zhang':[['stream: rt_sync_c','L3','grant'],['stream: dw_order','L2','grant']]
+};
+function renderPolicies(){
+  const s=document.getElementById('subjSel').value;
+  const rows=(SUBJ_POLICY[s]||[]).map(([r,lv,ef])=>
+    `<tr><td>${r}</td><td><span class="badge b-${lv.toLowerCase()}">${lv}</span></td>
+     <td><span class="badge ${ef==='grant'?'b-grant':'b-deny'}">${ef==='grant'?'授予':'拒绝'}</span></td>
+     <td><span class="btn sm">编辑</span></td></tr>`).join('');
+  document.getElementById('policyTable').innerHTML =
+    '<tr><th>资源</th><th>等级</th><th>效果</th><th></th></tr>'+rows;
+}
+renderPolicies();
+function savePolicy(){ alert('已保存(原型演示):策略写库 → 版本号 +1 → 收窄事件广播 → 各出口 PEP 失效旧 Plan。'); }
+
+/* ---------- P3 策略编辑器 ---------- */
+function onRes(){
+  const r=document.getElementById('eRes').value.split(': ')[1];
+  const node=RES_TREE.find(x=>x.name===r);
+  const box=document.getElementById('eCols');
+  if(node&&node.cols.length){
+    box.innerHTML=node.cols.map((c,i)=>`<span class="chk ${i<3?'on':''}" onclick="tgl(this)">${c}</span>`).join('');
+  } else box.innerHTML='<span class="hint">文件资源:列级不适用,由路径模式授权。</span>';
+}
+function tgl(el){el.classList.toggle('on');renderStmt();}
+function insVar(el){
+  const ta=document.getElementById('eRow');
+  const v=el.textContent;
+  const pos=ta.selectionStart||ta.value.length;
+  ta.value=ta.value.slice(0,pos)+v+ta.value.slice(ta.selectionEnd||pos);
+  renderStmt();
+}
+function addMask(btn){
+  const p=btn.parentElement.cloneNode(true);
+  btn.parentElement.after(p);
+}
+function renderStmt(){
+  const eff=document.querySelector('input[name=eEff]:checked').value;
+  const subj=document.getElementById('eSubj').value.split('(')[0];
+  const res=document.getElementById('eRes').value;
+  const acts=[...document.querySelectorAll('#eActs .chk.on')].map(x=>x.textContent);
+  const cols=[...document.querySelectorAll('#eCols .chk.on')].map(x=>x.textContent.split(' ')[0]);
+  const row=document.getElementById('eRow').value.trim();
+  const stmt=`effect:  ${eff}
+subject: ${subj}
+resource: ${res}
+actions:  ${acts.join(', ')}
+columns:  ${cols.join(', ') || '(空 = 资源不可见)'}
+rowExpr:  ${row || '(无)'}
+maskRules:{ phone: MASK_PHONE }
+tagScope: prefix:业务域/风控
+env:      { channel: api }`;
+  document.getElementById('stmtPreview').textContent=stmt;
+  // 校验:谓词变量 ⊆ 白名单
+  const vars=[...row.matchAll(/\$\{([^}]+)\}/g)].map(m=>m[1]);
+  const bound=[...document.querySelectorAll('#eCols ~ * .chk')].length;
+  const declared=[...document.querySelectorAll('.chk.on')].map(x=>x.textContent).filter(t=>t.includes('.'));
+  const miss=vars.filter(v=>!declared.includes(v));
+  const n=document.getElementById('stmtNotice');
+  if(miss.length){ n.hidden=false; n.className='notice red'; n.textContent='校验失败:谓词变量 '+miss.join(', ')+' 未在 bind_scope 声明 —— 策略拒绝发布(fail-closed)。'; }
+  else { n.hidden=false; n.className='notice'; n.textContent='校验通过:变量已声明;发布后版本号递增,收窄 <1s 生效。'; }
+}
+renderStmt();
+
+/* ---------- P5 契约预览 ---------- */
+function previewContract(btn){
+  const row=btn.closest('tr');
+  const cells=[...row.children].map(td=>td.textContent.trim());
+  document.getElementById('contractPreview').hidden=false;
+  document.getElementById('contractPreviewBody').textContent=
+`contractId    = ${cells[0]}
+consumerId    = ${cells[1]}
+stream        = ${cells[2]}
+allowedColumns = ${cells[3]}
+maxLevel      = ${cells[4]}
+rowCondition  = ${cells[5]||'(无)'}
+channel       = ${cells[6]}
+# 下发协议(扁平键值,可 curl):
+# allowedColumns=…&rowCondition=…&maxLevel=…`;
+}
+
+/* ---------- P7 有效权限预览 ---------- */
+function previewWhy(){
+  const s=document.getElementById('pvSubj').value;
+  const r=document.getElementById('pvRes').value.split(': ')[1];
+  const isZhang = s==='zhang(用户)';
+  const L3 = r==='rt_sync_c' && isZhang;
+  const result = L3
+    ? [['最终等级','<span class="badge b-l3">L3 全量</span>'],['可见列','id, v, seq, phone, _commit_ts'],['行规则','无'],['脱敏','无'],['标签','全部(继承)']]
+    : [['最终等级','<span class="badge b-l2">L2 脱敏</span>'],['可见列','id, v, seq'],['行规则','status=&#39;paid&#39; AND region=${subject.region}'],['脱敏','phone → MASK_PHONE'],['标签','prefix: 业务域/风控']];
+  document.getElementById('pvResult').innerHTML =
+    '<tr><th>项</th><th>结果</th></tr>'+result.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  const why = L3
+    ? [['契约','ct-tag-rt_sync_c 覆盖该流,grant 全部 5 列(通过)','win'],
+       ['主体显式(user)','张工 对该流有 user 级 L3 授权 —— **覆盖 role 级**','win'],
+       ['scope 前缀','无更细限制(通过)','win'],
+       ['敏感级兜底','phone 敏感级 2 ≤ L3(通过)','win'],
+       ['结论','L3 全量。注意:phone 的敏感级是 2,若后续降级到 L2 会触发脱敏。','win']]
+    : [['契约','ct-sub-rt_sync_c:列白名单 [id,v] ∩ 密级上限 2(收窄)','win'],
+       ['主体 role','risk-role 对该流 L2 —— 列交集 = 契约∩主体 = [id,v,seq]','win'],
+       ['scope 前缀','标签“业务域/风控”前缀继承 L2(收窄)','win'],
+       ['行规则','契约行条件 status=&#39;paid&#39; + 主体行规则 region=${subject.region} —— AND 合并','win'],
+       ['脱敏','phone 敏感级 2 → MASK_PHONE','win'],
+       ['结论','L2 脱敏可见;越权列(如 _commit_ts)连 key 都不出现。','win']];
+  document.getElementById('pvWhy').innerHTML = why.map(([t,d,c])=>
+    `<div class="why-item ${c}"><div class="t">${t}</div><div class="d">${d}</div></div>`).join('');
+}
+previewWhy();
+</script>
+</body>
+</html>

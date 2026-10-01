@@ -1,0 +1,48 @@
+server:
+  port: 8098
+
+spring:
+  application:
+    name: subscription-service
+  # 元数据库(dcp 库: data_contract/data_sub_delivery/data_sub_export_task 表 + sys_role/sys_role_permission)
+  datasource:
+    url: ${SUBSCRIPTION_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${SUBSCRIPTION_META_USERNAME:root}
+    password: ${SUBSCRIPTION_META_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /api/actuator
+
+dcp:
+  # 管理面 JWT 验证(与 backend 同 secret, 只验证不签发)
+  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
+  # 目标库(视图解析/快照/changes 查询的只读入口, 与 backend dcp.sync.target 同源)
+  sync:
+    target:
+      url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      username: ${SYNC_TARGET_USERNAME:root}
+      password: ${SYNC_TARGET_PASSWORD:root123}
+  # 订阅推送底座任务登记桥(P3): 实时/流式档 push 契约 → sub-push 底座任务(只登记不激活)
+  subscription:
+    outlet-control-url: ${DCP_OUTLET_CONTROL_URL:http://127.0.0.1:8095}
+    # 底座容器内可达的元库(tag 契约 exclude 剔除回查 tag_fact_view)
+    meta-jdbc-url: ${DCP_SUB_PUSH_META_JDBC_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    meta-user: ${DCP_SUB_PUSH_META_USER:root}
+    meta-password: ${DCP_SUB_PUSH_META_PASSWORD:root123}
+    # kafka 推送通道(与现 deliver 同源平台栈)
+    push-kafka-bootstrap: ${DCP_SUB_PUSH_KAFKA_BOOTSTRAP:dcp-kafka:9092}
+
+logging:
+  level:
+    root: INFO
+    com.dcp: INFO

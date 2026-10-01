@@ -12,6 +12,8 @@
         <el-menu-item index="/dict"><el-icon><Collection /></el-icon><span>字典管理</span></el-menu-item>
         <el-menu-item index="/monitor/execution"><el-icon><List /></el-icon><span>执行历史</span></el-menu-item>
         <el-menu-item index="/monitor/stats"><el-icon><TrendCharts /></el-icon><span>统计报表</span></el-menu-item>
+        <el-menu-item index="/monitor/alerts"><el-icon><Bell /></el-icon><span>调度告警</span></el-menu-item>
+        <el-menu-item index="/monitor/board"><el-icon><Platform /></el-icon><span>调度大盘</span></el-menu-item>
         <el-sub-menu index="sync">
           <template #title><el-icon><DataLine /></el-icon><span>数据同步</span></template>
           <el-menu-item index="/sync/overview">同步总览</el-menu-item>

@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 计算面单元运行器自检(**内存桩,不需要 Kafka**):把"提交语义 / 失败语义 / 单线程 / 停机 / 租约"验穿。
+ * 计算面单元运行器自检(**内存桩,不需要 Kafka**):把"提交语义 / 失败语义 / 单线程 / 停机"验穿。
  */
 public final class SelfCheck {
 
@@ -33,20 +33,17 @@ public final class SelfCheck {
         final InMemoryLogicRegistry registry = new InMemoryLogicRegistry();
         final StubDecoder decoder = new StubDecoder();
         final StubRecordSource source = new StubRecordSource();
-        final StubHeartbeat heartbeat = new StubHeartbeat();
         final InMemoryWatermarkProvider watermarks = new InMemoryWatermarkProvider();
         final InMemoryDeadLetterSink dlq = new InMemoryDeadLetterSink();
         final SimpleUnitMetrics metrics = new SimpleUnitMetrics();
-        final StubLease lease;
         final UnitRunner runner;
         final ScriptedLogic logic;
 
-        Harness(ScriptedLogic logic, int leaseSuccesses, ContractFilter filter, FailurePolicy failure, long startOffset) {
+        Harness(ScriptedLogic logic, ContractFilter filter, FailurePolicy failure, long startOffset) {
             this.logic = logic;
-            this.lease = new StubLease(leaseSuccesses);
             registry.register("es-sync", "1.0.0", logic);
             runner = new UnitRunner(new ClasspathLogicLoader(registry), decoder, filter, cmd -> source,
-                    lease, heartbeat, watermarks, dlq, metrics, id -> SILENT);
+                    watermarks, dlq, metrics, id -> SILENT);
             this.failure = failure;
             this.startOffset = startOffset;
         }
@@ -88,7 +85,6 @@ public final class SelfCheck {
         testSkipPolicyCommitsAndContinues();
         testSingleThreadSerial();
         testGracefulStop();
-        testLeaseLostStopsPolling();
         testStartOffsetInjected();
         testDuplicateCreateUnitIsIdempotent();
         testRowConditionUsesRawRow();
@@ -103,7 +99,7 @@ public final class SelfCheck {
     // ---------- 1. 正常批:process 返回即提交,提交"下一条要读的位置" ----------
     private static void testNormalBatchCommits() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 100);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 100);
         h.decoder.put(100, event(100, 1000, Map.of("id", "u-1", "v", "a")));
         h.decoder.put(101, event(101, 1001, Map.of("id", "u-2", "v", "b")));
         h.decoder.put(102, event(102, 1002, Map.of("id", "u-3", "v", "c")));
@@ -115,13 +111,12 @@ public final class SelfCheck {
         check("T1 逻辑收到记录数", logic.received().size(), 3);
         check("T1 提交位置 = 末条 offset+1", h.source.committed().get(0), 103L);
         check("T1 提交次数(批后一次)", h.source.commitCalls(), 1);
-        check("T1 心跳已发出", h.heartbeat.count() > 0, true);
     }
 
     // ---------- 2. 空批:起点提交一次,之后不重复提交 ----------
     private static void testEmptyBatchDoesNotReCommit() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 10, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 500);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 500);
         h.start();
         h.awaitExit(5000);
         check("T2 无数据时 process 未被调用", logic.processCount(), 0);
@@ -133,7 +128,7 @@ public final class SelfCheck {
     // ---------- 3. 水位:不进逻辑,但推进 safeWatermark ----------
     private static void testWatermarkNotDeliveredButAdvances() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 50);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 50);
         h.decoder.put(50, DecodedMessage.watermark(0, 50, 7777));
         h.decoder.put(51, event(51, 8000, Map.of("id", "u-1")));
         h.decoder.put(52, event(52, 8001, Map.of("id", "u-2")));
@@ -149,7 +144,7 @@ public final class SelfCheck {
     // ---------- 4. 契约裁剪:越权列在进逻辑前被丢弃 ----------
     private static void testContractFiltering() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, DefaultContractFilter.ofColumns("u_id", "v"),
+        Harness h = new Harness(logic, DefaultContractFilter.ofColumns("u_id", "v"),
                 FailurePolicy.defaults(), 10);
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("u_id", "u-1"); row.put("v", "a"); row.put("secret", "S3CR3T"); row.put("phone", "138xxxx");
@@ -165,7 +160,7 @@ public final class SelfCheck {
     // ---------- 5. 失败:不提交 → 重试 → 死信 → STOP(数据不丢,需人工介入) ----------
     private static void testFailureDoesNotCommitThenDeadLetters() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(99);          // 永远失败
-        Harness h = new Harness(logic, 5, DefaultContractFilter.permissive(),
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(),
                 new FailurePolicy(1, 1L, FailurePolicy.OnFailure.STOP), 200);
         h.decoder.put(200, event(200, 1000, Map.of("id", "u-1")));
         h.source.script(List.of(raw(200)));
@@ -183,7 +178,7 @@ public final class SelfCheck {
     // ---------- 6. SKIP 策略:跳过并提交,继续消费后续 ----------
     private static void testSkipPolicyCommitsAndContinues() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(1);           // 只失败第一次
-        Harness h = new Harness(logic, 3, DefaultContractFilter.permissive(),
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(),
                 new FailurePolicy(0, 1L, FailurePolicy.OnFailure.SKIP), 300);
         h.decoder.put(300, event(300, 1000, Map.of("id", "u-bad")));
         h.decoder.put(301, event(301, 1001, Map.of("id", "u-1")));
@@ -202,7 +197,7 @@ public final class SelfCheck {
     // ---------- 7. 单线程串行:同一实例、同一线程、无并发 ----------
     private static void testSingleThreadSerial() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 5, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 0);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 0);
         for (int i = 0; i < 5; i++) {
             h.decoder.put(i, event(i, 1000 + i, Map.of("id", "u-" + i)));
             h.source.script(List.of(raw(i)));
@@ -219,7 +214,7 @@ public final class SelfCheck {
     // ---------- 8. 优雅停机:停止消费 → 收尾 → close ----------
     private static void testGracefulStop() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, Integer.MAX_VALUE, DefaultContractFilter.permissive(),
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(),
                 FailurePolicy.defaults(), 0);
         h.decoder.put(0, event(0, 1000, Map.of("id", "u-1")));
         h.source.script(List.of(raw(0)));
@@ -236,24 +231,10 @@ public final class SelfCheck {
         check("T8 消费源被唤醒/关闭", h.source.woken(), true);
     }
 
-    // ---------- 9. 租约失效:自停,不再消费(防双消费) ----------
-    private static void testLeaseLostStopsPolling() throws Exception {
-        ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 2, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 0);
-        h.start();
-        h.awaitExit(5000);
-        int polls = h.source.pollCount();
-
-        check("T9 状态为 LEASE_LOST", h.runner.state("u-test-0-1"), UnitRunner.State.LEASE_LOST);
-        check("T9 轮询次数有界(=2)", polls, 2);
-        Thread.sleep(50);
-        check("T9 之后不再轮询", h.source.pollCount(), polls);
-    }
-
-    // ---------- 10. 起点注入:单元从控制面给的 offset 开始,而不是 0 ----------
+    // ---------- 9. 起点注入:单元从控制面给的 offset 开始,而不是 0 ----------
     private static void testStartOffsetInjected() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 31785);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 31785);
         h.start();
         h.awaitExit(5000);
 
@@ -263,7 +244,7 @@ public final class SelfCheck {
     // ---------- 11. 幂等:同 unitId 重复下发只跑一个单元 ----------
     private static void testDuplicateCreateUnitIsIdempotent() throws Exception {
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 0);
+        Harness h = new Harness(logic, DefaultContractFilter.permissive(), FailurePolicy.defaults(), 0);
         h.decoder.put(0, event(0, 1000, Map.of("id", "u-1")));
         h.source.script(List.of(raw(0)));
         h.start();
@@ -290,7 +271,7 @@ public final class SelfCheck {
                 (col, v, rule, lvl) -> v, view);
 
         ScriptedLogic logic = new ScriptedLogic(0);
-        Harness h = new Harness(logic, 3, filter, FailurePolicy.defaults(), 10);
+        Harness h = new Harness(logic, filter, FailurePolicy.defaults(), 10);
         h.decoder.put(10, event(10, 1000, Map.of("u_id", "u-1", "status", "OK")));
         h.decoder.put(11, event(11, 1001, Map.of("u_id", "u-2", "status", "BLOCKED")));
         h.source.script(List.of(raw(10), raw(11)));

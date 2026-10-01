@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 本地构建 Maven 配置: 腾讯云镜像(与 backend/settings-docker.xml 同源,项目惯例) -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>tencent</id>
+      <mirrorOf>central</mirrorOf>
+      <name>Tencent Cloud Maven Mirror</name>
+      <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public</url>
+    </mirror>
+  </mirrors>
+</settings>

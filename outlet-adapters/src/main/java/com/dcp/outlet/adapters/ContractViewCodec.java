@@ -16,7 +16,7 @@ import java.util.Set;
  * <p>与指令协议同风格:**扁平键值**,零 JSON 依赖、可 curl 联调。
  * <pre>
  *   contractId / stream / rowCondition / maxLevel / consumerId
- *   allowedColumns = a,b,c              (已是"契约 ∩ 主体"的结果)
+ *   allowedColumns = a,b,c | *          (已是"契约 ∩ 主体"的结果; * = 全放行, 内部平台任务用)
  *   maskRules      = phone=MASK_PHONE,v=MASK_FULL
  * </pre>
  *
@@ -35,7 +35,7 @@ public final class ContractViewCodec {
         m.put("stream", stream == null ? "" : stream);
         m.put("maxLevel", String.valueOf(maxLevel));
         m.put("rowCondition", rowCondition == null ? "" : rowCondition);
-        m.put("allowedColumns", allowedColumns == null ? "" : String.join(",", allowedColumns));
+        m.put("allowedColumns", allowedColumns == null ? "*" : String.join(",", allowedColumns));
         StringBuilder masks = new StringBuilder();
         if (maskRules != null) {
             maskRules.forEach((k, v) -> {
@@ -72,11 +72,12 @@ public final class ContractViewCodec {
         String stream = kv.getOrDefault("stream", "");
         Set<String> cols = new LinkedHashSet<>();
         String csv = kv.getOrDefault("allowedColumns", "");
-        if (!csv.isBlank()) {
+        if (!csv.isBlank() && !"*".equals(csv)) {
             for (String c : csv.split(",")) if (!c.isBlank()) cols.add(c.trim());
         }
         Map<String, Set<String>> whitelist = new LinkedHashMap<>();
-        whitelist.put(stream, cols);
+        // "*" = 全放行(null → DefaultContractFilter 不裁剪; 内部平台任务整行透传形态)
+        whitelist.put(stream, "*".equals(csv) ? null : cols);
 
         Map<String, String> masks = new LinkedHashMap<>();
         String mr = kv.getOrDefault("maskRules", "");

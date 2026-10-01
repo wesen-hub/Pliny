@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dcp-sub-push —— 订阅推送底座任务(微服务架构方案 P3, 维度⑤ 数据订阅)。
+
+  定位: subscription-service 轮询式 push 投递(deliver/PushScheduler)的替代形态 ——
+  PushLogic(@ConsumerLogicDef("sub-push@1.0.0")) 实现二级 SPI ConsumerLogic,
+  由 dcp-outlet-rt 的 JarLogicLoader 从逻辑仓库(logic-repo/sub-push/1.0.0.jar)
+  加载运行。每生效 push 契约一个底座任务(freq=实时/流式; 定时档保留管理面轮询,
+  manual 保留手动 deliver), 事件驱动实时推送。
+
+  两类契约语义对齐(与切流前 DataSubService.deliver 增量段同构):
+    · logical 视图: 消费信封流 dcp.{表}(CdcRecord) → 引用表过滤 + conds 内存求值
+      (组内 AND/组间 AND, = != > >= < <= in like null) + 交付列裁剪(merge 加
+      source_table) → 推送 rows; DELETE 记录不推(与轮询语义一致: 订阅方只看
+      "当前存在的行");
+    · tag 视图: 消费打标事件流 dcp.tag.events(TagLogic 发射 {taskId,entity,
+      tagPath,tagDictId,tagValue,ts}) → 圈选(paths/value 匹配) + exclude 剔除
+      (查元库 tag_fact_view 当前标签态) → 推送 events {entity,tag,value,ts};
+    · 推送通道: webhook(HMAC-SHA256 验签: X-Dcp-Contract/X-Dcp-Timestamp/
+      X-Dcp-Sign, 与 DataSubService.hmac 同款) / kafka(契约 topic, 缺省
+      dcp.sub.{subscriber}.{contractId});
+    · payload 形状与现状同构: {contract, mode:"stream", count, rows|events}。
+
+  代码组织铁律(方案 §8.2/§8.3):
+    - fat jar 自足: kafka-clients + mysql 驱动 + jackson 打入本 jar;
+      二级 SPI 契约(outlet-sdk)由父加载器(dcp-outlet-rt 的 ConsumerLogic 类加载器)提供;
+    - 无 Spring 装配: 全部手工组装; slf4j 由宿主提供(provided);
+    - 失败要抛: 推送主链路失败必须抛异常, 平台据此不提交→重试→死信
+      (at-least-once, 订阅方与现状"失败重放同范围"语义一致);
+    - 不开线程池: 单线程串行 process。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.dcp</groupId>
+    <artifactId>dcp-sub-push</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>dcp-sub-push</name>
+    <description>订阅推送底座任务:PushLogic(@ConsumerLogicDef sub-push) 消费信封流/打标事件流 → 圈选/裁剪 → webhook/kafka 推送</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- 二级 SPI 契约(父加载器提供: dcp-outlet-rt 的 ConsumerLogic 类加载器; 这里 compile 仅为单测可运行, shade 后父优先加载) -->
+        <dependency>
+            <groupId>com.dcp</groupId>
+            <artifactId>dcp-outlet-sdk</artifactId>
+            <version>2.0.0-SNAPSHOT</version>
+        </dependency>
+        <!-- kafka 推送通道生产者(契约 topic) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.7.0</version>
+        </dependency>
+        <!-- 元库(tag 契约 exclude 剔除: 查 tag_fact_view 当前标签态) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.3.0</version>
+        </dependency>
+        <!-- JSON(payload 序列化 / 信封与打标事件解析) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.17.2</version>
+        </dependency>
+        <!-- 日志门面(provided, 宿主统一管理日志后端) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- 测试(sdk testkit: FakeBatch/FakeInitContext/FakeConsumerContext/FakeRecord) -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>dcp-sub-push</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <!-- fat jar: 二级 SPI 服务声明合并 + 排除依赖 jar 签名文件(shade 改写
+                 Manifest 后 JarVerifier 校验 *.SF/*.DSA/*.RSA 会抛 SecurityException) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

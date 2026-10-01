@@ -1,0 +1,71 @@
+server:
+  port: 8097
+
+spring:
+  application:
+    name: dcp-worker
+
+dcp:
+  etcd:
+    endpoints: ${DCP_ETCD:http://localhost:2379}
+  worker:
+    instance-id: ${DCP_WORKER_INSTANCE_ID:dcp-worker-1}
+    # 归属 ns 声明:ns:capacity:campaign(逗号分隔)。按池部署时每池只声明自己的 ns
+    # filesync 为一次性任务池(虚拟 topic 无 Kafka, 起 rclone 子进程)
+    # tag/lake/sub/ingest = 消费底座多 ns 拆分(底座任务按部署器归 ns; ingest 消费平台栈, 其余出口栈)
+    namespaces: ${DCP_WORKER_NAMESPACES:sync:64:true,indexer:32:true,outlet:16:true,filesync:16:true,tag:32:true,lake:32:true,sub:32:true,ingest:64:true}
+    # 业务 jar(ns@artifactId:version 走 MinIO jar-release;ns@/path 走本地文件,逗号分隔)
+    bundles: ${DCP_WORKER_BUNDLES:filesync@/opt/dcp/bundles/dcp-filesync-rt.jar}
+    # MinIO jar_release 仓库(方案 §8.2:拉取 + sha256 校验)
+    minio:
+      endpoint: ${DCP_WORKER_MINIO_ENDPOINT:http://127.0.0.1:9000}
+      access-key: ${DCP_WORKER_MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${DCP_WORKER_MINIO_SECRET_KEY:minioadmin}
+      bucket: ${DCP_WORKER_MINIO_BUCKET:jar-release}
+    # 本地 bundle 缓存目录
+    bundle-cache: ${DCP_WORKER_BUNDLE_CACHE:./bundles}
+    # 元库(env.metaDataSource 供业务 jar 使用;sync/indexer 需要,outlet 无感)
+    meta:
+      jdbc-url: ${DCP_WORKER_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      username: ${DCP_WORKER_META_USERNAME:root}
+      password: ${DCP_WORKER_META_PASSWORD:root123}
+    # 每 ns 的 Kafka bootstrap(平台栈 9092 / 出口栈 19092)
+    kafka:
+      sync: ${DCP_WORKER_KAFKA_SYNC:127.0.0.1:9092}
+      indexer: ${DCP_WORKER_KAFKA_INDEXER:127.0.0.1:19092}
+      outlet: ${DCP_WORKER_KAFKA_OUTLET:127.0.0.1:19092}
+      tag: ${DCP_WORKER_KAFKA_TAG:127.0.0.1:19092}
+      lake: ${DCP_WORKER_KAFKA_LAKE:127.0.0.1:19092}
+      sub: ${DCP_WORKER_KAFKA_SUB:127.0.0.1:19092}
+      ingest: ${DCP_WORKER_KAFKA_INGEST:127.0.0.1:9092}
+    # 业务 jar 环境键(dcp.sync.*/dcp.indexer.*/dcp.outlet.*,全透传给 Factory.init)
+    env:
+      dcp.sync.target.url: ${DCP_WORKER_SYNC_TARGET_URL:jdbc:mysql://127.0.0.1:3306/dcp_target?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      dcp.sync.target.username: ${DCP_WORKER_SYNC_TARGET_USERNAME:root}
+      dcp.sync.target.password: ${DCP_WORKER_SYNC_TARGET_PASSWORD:root123}
+      dcp.sync.buffer.queue-capacity: "2000"
+      dcp.sync.buffer.batch-size: "500"
+      dcp.sync.buffer.batch-timeout-ms: "100"
+      dcp.sync.buffer.write-threads: "4"
+      dcp.sync.buffer.commit-interval-ms: "5000"
+      dcp.sync.buffer.flush-wait-ms: "15000"
+      dcp.sync.buffer.drain-per-queue: "200"
+      dcp.sync.demo.table-count: "50"
+      dcp.sync.demo.table-prefix: "t_order"
+      dcp.indexer.epoch: "1"
+      dcp.indexer.group-id: "dcp-outlet-indexer"
+      dcp.indexer.from-beginning: "false"
+      dcp.outlet.logic-repo: ${DCP_WORKER_OUTLET_LOGIC_REPO:./logic-repo}
+      dcp.outlet.control-url: ${DCP_WORKER_OUTLET_CONTROL_URL:http://127.0.0.1:8095}
+      dcp.outlet.contract-refresh-ms: "30000"
+      dcp.outlet.contract-timeout-ms: "3000"
+      # 文件同步(与 backend dcp.enc-key / dcp.filecopy.target-* 同源)
+      dcp.filesync.enc-key: ${DCP_FILESYNC_ENC_KEY:}
+      dcp.filesync.target.endpoint: ${DCP_FILESYNC_TARGET_ENDPOINT:http://127.0.0.1:9000}
+      dcp.filesync.target.access-key: ${DCP_FILESYNC_TARGET_ACCESS_KEY:minioadmin}
+      dcp.filesync.target.secret-key: ${DCP_FILESYNC_TARGET_SECRET_KEY:minioadmin}
+
+logging:
+  level:
+    root: INFO
+    com.dcp.worker: INFO

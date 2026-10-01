@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1470" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5f6368"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a73e8"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e07b1f"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="1280" height="1470" fill="#f7f9fc"/>
+
+  <!-- 标题 -->
+  <text x="640" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#1f2937">统一消费底座(Outlet)流程设计</text>
+  <text x="640" y="68" text-anchor="middle" font-size="12" fill="#6b7280">控制面决策 · 计算面执行 · 锚点索引 · 批流衔接(T0)· 租约与巡检</text>
+
+  <!-- ============ 左栏:控制面 ============ -->
+  <rect x="40" y="92" width="600" height="956" rx="12" fill="#ffffff" stroke="#dbe3ef" stroke-width="1.5"/>
+  <text x="62" y="118" font-size="15" font-weight="bold" fill="#1a73e8">控制面(单实例决策)</text>
+
+  <!-- N1 任务创建 -->
+  <rect x="80" y="132" width="520" height="48" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="154" font-size="13" font-weight="bold" fill="#1a3a6b">① 任务创建(校验入口)</text>
+  <text x="100" y="171" font-size="10.5" fill="#3c5a8c">taskId · streams · logic · 契约 · instances · 消费组</text>
+
+  <!-- N2 六项校验 -->
+  <rect x="80" y="212" width="520" height="64" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="236" font-size="13" font-weight="bold" fill="#1a3a6b">② 六项校验(TaskKernelService)</text>
+  <text x="100" y="254" font-size="10.5" fill="#3c5a8c">taskId 必填未占用 · 流全部已登记 · logic 已注册</text>
+  <text x="100" y="270" font-size="10.5" fill="#3c5a8c">契约 active 且覆盖全部流 · instances∈[1, Σ分区] · 消费组唯一</text>
+
+  <!-- N3 落库+单元规划 -->
+  <rect x="80" y="306" width="520" height="48" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="328" font-size="13" font-weight="bold" fill="#1a3a6b">③ 落库 + 单元规划(UnitPlanner)</text>
+  <text x="100" y="345" font-size="10.5" fill="#3c5a8c">instances == Σ分区 → 一单元一分区;小于 → 轮询均分;大于 → 拒绝</text>
+
+  <!-- N4 菱形 startPolicy -->
+  <polygon points="340,378 490,420 340,462 190,420" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="340" y="417" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1a3a6b">startPolicy ?</text>
+  <text x="340" y="433" text-anchor="middle" font-size="10" fill="#3c5a8c">snapshot / latest</text>
+
+  <!-- N5a 批阶段 -->
+  <rect x="80" y="500" width="240" height="64" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="200" y="524" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1a3a6b">批阶段执行(快照)</text>
+  <text x="200" y="542" text-anchor="middle" font-size="10" fill="#3c5a8c">BatchPhaseRunner · AS OF T0</text>
+  <text x="200" y="557" text-anchor="middle" font-size="10" fill="#3c5a8c">完成回调 → onBatchDone(t0)</text>
+
+  <!-- N5b 跳过批 -->
+  <rect x="360" y="500" width="240" height="64" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="480" y="524" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1a3a6b">跳过批阶段(latest)</text>
+  <text x="480" y="545" text-anchor="middle" font-size="10" fill="#3c5a8c">直接 handover(t0 = 最新)</text>
+
+  <!-- N6 T0 选择(高亮) -->
+  <rect x="80" y="604" width="520" height="92" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="100" y="628" font-size="13" font-weight="bold" fill="#92400e">★ T0 选择(T0Selector)—— 批流衔接锚点,三规则</text>
+  <text x="100" y="649" font-size="10.5" fill="#8a5a0b">R1  T0 ≥ changefeed.start_ts — 否则 T0 前的变更从未进 Kafka</text>
+  <text x="100" y="667" font-size="10.5" fill="#8a5a0b">R2  T0 ≥ GC safe point — 否则 AS OF T0 版本已被 GC,读不出来</text>
+  <text x="100" y="685" font-size="10.5" fill="#8a5a0b">R3  T0 ≤ latest — 不能取未来时刻;调整过程记录标记(可排障)</text>
+
+  <!-- N7 handover -->
+  <rect x="80" y="736" width="520" height="48" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="758" font-size="13" font-weight="bold" fill="#1a3a6b">④ handover(T0):逐单元算起点</text>
+  <text x="100" y="775" font-size="10.5" fill="#3c5a8c">external → 播种下游引擎;内置引擎 → 逐分区定位</text>
+
+  <!-- N8 起点计算 -->
+  <rect x="80" y="812" width="520" height="64" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="836" font-size="13" font-weight="bold" fill="#1a3a6b">⑤ 起点计算(StartOffsetService)</text>
+  <text x="100" y="854" font-size="10.5" fill="#3c5a8c">锚点二分 lastAtOrBefore → Kafka 时间索引 → 从头回扫</text>
+  <text x="100" y="870" font-size="10.5" fill="#3c5a8c">短扫找第一条 commitTs &gt; T0;超限抛 StartTooOldException</text>
+
+  <!-- N9 租约 -->
+  <rect x="80" y="904" width="520" height="48" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="926" font-size="13" font-weight="bold" fill="#1a3a6b">⑥ 租约授予(LeaseManager)</text>
+  <text x="100" y="943" font-size="10.5" fill="#3c5a8c">单元 = 分区 · 同任务同分区同一时刻唯一执行者</text>
+
+  <!-- N10 下发 -->
+  <rect x="80" y="976" width="520" height="56" rx="8" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <text x="100" y="1000" font-size="13" font-weight="bold" fill="#1a3a6b">⑦ HTTP 下发 CreateUnitCmd</text>
+  <text x="100" y="1018" font-size="10.5" fill="#3c5a8c">指令 = 单元(分区)+ 起点(offset)+ 消费组 + 租约凭据</text>
+
+  <!-- ============ 右栏:计算面 ============ -->
+  <rect x="680" y="92" width="560" height="560" rx="12" fill="#ffffff" stroke="#cfe8d8" stroke-width="1.5"/>
+  <text x="702" y="118" font-size="15" font-weight="bold" fill="#188038">计算面(1..N 实例)</text>
+
+  <!-- M1 接收指令 -->
+  <rect x="720" y="132" width="480" height="48" rx="8" fill="#e6f4ea" stroke="#188038" stroke-width="1.5"/>
+  <text x="740" y="154" font-size="13" font-weight="bold" fill="#0d652d">① 接收指令(UnitsController)</text>
+  <text x="740" y="171" font-size="10.5" fill="#2e6b46">POST /units — 单元级下发,幂等启动(compareAndSet)</text>
+
+  <!-- M2 启动序列 -->
+  <rect x="720" y="212" width="480" height="72" rx="8" fill="#e6f4ea" stroke="#188038" stroke-width="1.5"/>
+  <text x="740" y="236" font-size="13" font-weight="bold" fill="#0d652d">② 启动序列(UnitRunner.start)</text>
+  <text x="740" y="256" font-size="10.5" fill="#2e6b46">加载 logic → 契约预取(fail-closed)→ logic.init(线程内)</text>
+  <text x="740" y="274" font-size="10.5" fill="#2e6b46">创建消费源(此刻才实例化 Kafka 消费者)</text>
+
+  <!-- M3 seek -->
+  <rect x="720" y="316" width="480" height="48" rx="8" fill="#e6f4ea" stroke="#188038" stroke-width="1.5"/>
+  <text x="740" y="338" font-size="13" font-weight="bold" fill="#0d652d">③ assign + seek(分区, 起点) → RUNNING</text>
+  <text x="740" y="356" font-size="10.5" fill="#2e6b46">刻意不用 subscribe(防 rebalance 覆盖算好的起点)</text>
+
+  <!-- M4 poll 循环 -->
+  <rect x="720" y="396" width="480" height="140" rx="8" fill="#e6f4ea" stroke="#188038" stroke-width="1.5"/>
+  <text x="740" y="422" font-size="13" font-weight="bold" fill="#0d652d">④ poll 循环(流式消费)</text>
+  <text x="740" y="446" font-size="10.5" fill="#2e6b46">拉取 poll → 解码 + 更新水位(WatermarkStore)</text>
+  <text x="740" y="468" font-size="10.5" fill="#2e6b46">契约裁剪(按订阅契约过滤字段,越界即拒)</text>
+  <text x="740" y="490" font-size="10.5" fill="#2e6b46">调用业务逻辑(1 单元 = 1 logic 实例,串行处理)</text>
+  <text x="740" y="512" font-size="10.5" fill="#2e6b46">提交位点 commitSync(处理成功后)</text>
+
+  <!-- M5 心跳 -->
+  <rect x="720" y="568" width="480" height="56" rx="8" fill="#e6f4ea" stroke="#188038" stroke-width="1.5"/>
+  <text x="740" y="592" font-size="13" font-weight="bold" fill="#0d652d">⑤ 心跳续租(LeaseGuard, 独立循环)</text>
+  <text x="740" y="610" font-size="10.5" fill="#2e6b46">续约失败 → 单元自停并让出(双保险,不双跑)</text>
+
+  <!-- ============ 连线:控制面内部 ============ -->
+  <line x1="340" y1="180" x2="340" y2="212" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="276" x2="340" y2="306" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="354" x2="340" y2="378" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="462" x2="340" y2="480" stroke="#5f6368" stroke-width="1.5"/>
+  <polyline points="340,480 200,480 200,500" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="340,480 480,480 480,500" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="252" y="474" font-size="10" fill="#6b7280">snapshot</text>
+  <text x="492" y="474" font-size="10" fill="#6b7280">latest</text>
+  <polyline points="200,564 200,588 340,588 340,604" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="480,564 480,588 340,588" fill="none" stroke="#5f6368" stroke-width="1.5"/>
+  <line x1="340" y1="696" x2="340" y2="736" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="784" x2="340" y2="812" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="876" x2="340" y2="904" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="952" x2="340" y2="976" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ============ 连线:下发(控制面→计算面) ============ -->
+  <polyline points="600,1004 648,1004 648,156 720,156" fill="none" stroke="#1a73e8" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <text x="656" y="436" font-size="10.5" fill="#1a73e8" transform="rotate(90 656 436)">单元下发(HTTP)</text>
+
+  <!-- ============ 连线:起点计算读锚点/水位 ============ -->
+  <polyline points="600,844 620,844 620,1096" fill="none" stroke="#e07b1f" stroke-width="1.8" marker-end="url(#arrow-orange)"/>
+  <text x="626" y="888" font-size="10.5" fill="#b45309" transform="rotate(90 626 888)">读锚点 / 水位</text>
+
+  <!-- ============ 存储条 ============ -->
+  <rect x="40" y="1096" width="1200" height="48" rx="10" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+  <line x1="560" y1="1096" x2="560" y2="1144" stroke="#fdba74" stroke-width="1"/>
+  <text x="60" y="1118" font-size="12" font-weight="bold" fill="#9a3412">Kafka 变更流(dcp.cdc.{schema}.{table})</text>
+  <text x="60" y="1134" font-size="10" fill="#b45309">物理分区保序 · 订阅侧不重排</text>
+  <text x="580" y="1118" font-size="12" font-weight="bold" fill="#9a3412">元数据表</text>
+  <text x="580" y="1134" font-size="10" fill="#b45309">锚点(起点定位读)· 水位 · 单元 · 租约 · 心跳 · 契约 · changefeed 起点 · GC 边界</text>
+
+  <!-- ============ 常驻服务三卡片 ============ -->
+  <!-- P1 锚点索引器 -->
+  <rect x="40" y="1180" width="380" height="250" rx="10" fill="#f3e8fd" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="60" y="1208" font-size="13.5" font-weight="bold" fill="#6b21a8">锚点索引器(常驻 · 旁路订阅)</text>
+  <text x="60" y="1236" font-size="10.5" fill="#7e22ce">采样:每 5000 条或 10s 落一条稀疏锚点</text>
+  <text x="60" y="1256" font-size="10.5" fill="#7e22ce">锚点键:(topic, partition, epoch, offset)</text>
+  <text x="60" y="1276" font-size="10.5" fill="#7e22ce">锚点值:commitTs(保留 7 天,支撑回放窗口)</text>
+  <text x="60" y="1296" font-size="10.5" fill="#7e22ce">单调守护:commitTs 回退 → 该分区 tainted</text>
+  <text x="60" y="1316" font-size="10.5" fill="#7e22ce">tainted 分区起点计算强制回扫(不信索引)</text>
+  <text x="60" y="1336" font-size="10.5" fill="#7e22ce">水位:每分区 commitTs 持续 upsert</text>
+
+  <!-- P2 巡检 -->
+  <rect x="450" y="1180" width="380" height="250" rx="10" fill="#f3e8fd" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="470" y="1208" font-size="13.5" font-weight="bold" fill="#6b21a8">巡检 Supervisor(只告警不补齐)</text>
+  <text x="470" y="1236" font-size="10.5" fill="#7e22ce">租约过期 → LEASE_EXPIRED</text>
+  <text x="470" y="1258" font-size="10.5" fill="#7e22ce">批阶段失败 → BATCH_FAILED</text>
+  <text x="470" y="1280" font-size="10.5" fill="#7e22ce">期望单元缺失 → UNIT_MISSING</text>
+  <text x="470" y="1302" font-size="10.5" fill="#7e22ce">单元停滞 &gt; 5min → UNIT_STALLED</text>
+  <text x="470" y="1324" font-size="10.5" fill="#7e22ce">下发超时无心跳 / 任务未运行 → 告警</text>
+  <text x="470" y="1346" font-size="10.5" fill="#7e22ce">(external 引擎交接任务跳过单元巡检)</text>
+
+  <!-- P3 进度与新表感知 -->
+  <rect x="860" y="1180" width="380" height="250" rx="10" fill="#f3e8fd" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="880" y="1208" font-size="13.5" font-weight="bold" fill="#6b21a8">进度 与 新表感知</text>
+  <text x="880" y="1236" font-size="10.5" fill="#7e22ce">lagSeconds =(水位 TSO − 已处理 TSO)</text>
+  <text x="884" y="1252" font-size="10.5" fill="#7e22ce">&gt;&gt; 18 / 1000(高 48 位毫秒)</text>
+  <text x="880" y="1274" font-size="10.5" fill="#7e22ce">lagRows = 分区末端位点 − 已提交位点</text>
+  <text x="880" y="1290" font-size="10.5" fill="#7e22ce">(两档查询:不查 Kafka / 查分区末端)</text>
+  <text x="880" y="1316" font-size="10.5" fill="#7e22ce">新表感知:扫描 dcp.cdc.* 主题形态</text>
+  <text x="880" y="1332" font-size="10.5" fill="#7e22ce">→ 登记 StreamRegistry(逻辑表唯一入口)</text>
+
+  <!-- 索引器 ↔ 存储条 双向箭头 -->
+  <line x1="200" y1="1144" x2="200" y2="1180" stroke="#e07b1f" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <text x="208" y="1168" font-size="10" fill="#b45309">订阅变更流</text>
+  <line x1="88" y1="1180" x2="88" y2="1144" stroke="#e07b1f" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <text x="30" y="1168" font-size="10" fill="#b45309">写锚点/水位</text>
+
+  <!-- Kafka → 消费源(变更流进入计算面) -->
+  <line x1="1080" y1="1096" x2="1080" y2="652" stroke="#e07b1f" stroke-width="1.8" marker-end="url(#arrow-orange)"/>
+  <text x="1090" y="860" font-size="10.5" fill="#b45309" transform="rotate(90 1090 860)">消费变更流(按分区 · 从起点 seek)</text>
+
+  <!-- 底部说明 -->
+  <text x="40" y="1458" font-size="10" fill="#9ca3af">说明:蓝色=控制面,绿色=计算面,紫色=常驻服务,橙色=存储与数据流。T0 选择详见《T0 三规则》;起点定位详见《锚点索引》章节。</text>
+</svg>

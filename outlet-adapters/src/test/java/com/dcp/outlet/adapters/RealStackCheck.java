@@ -75,10 +75,11 @@ public final class RealStackCheck {
         }
 
         int partitions = 3;
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
         AnchorIndexer indexer = new AnchorIndexer(anchors, new JdbcWatermarkStore(
                 new DriverManagerDataSource(JDBC, "root", "root123")),
                 new AnchorIndexPolicy(5, 1000L, 7L * 24 * 3600 * 1000, 200),
-                new MonotonicityGuard(), () -> System.currentTimeMillis());
+                new MonotonicityGuard(), clock::get);
 
         List<List<Long>> tsByPartition = new ArrayList<>();
         int totalSamples = 0;
@@ -91,6 +92,7 @@ public final class RealStackCheck {
                 List<TsoSample> batch = reader.readFrom(TOPIC, p, pos, 500);
                 if (batch.isEmpty()) break;
                 for (TsoSample s : batch) {
+                    clock.addAndGet(1000L);      // 每事件 +1s:1s 窗口 → 每个刷新点落一个栅栏(真实时钟下快回放会漏采)
                     indexer.onEvent(TOPIC, p, EPOCH, s.offset(), s.commitTs());
                     totalSamples++;
                     dmlTs.add(s.commitTs());
@@ -107,8 +109,7 @@ public final class RealStackCheck {
         check("锚点已落到 MySQL(>0)", anchorRows > 0, true);
         System.out.println("  锚点行数=" + anchorRows + " 采样条数=" + totalSamples);
 
-        StartOffsetService svc = new StartOffsetService(anchors, reader,
-                new AnchorIndexPolicy(5, 1000L, 7L * 24 * 3600 * 1000, 200), null, 200_000);
+        StartOffsetService svc = new StartOffsetService(anchors, reader);
 
         int fastPath = 0;
         for (int p = 0; p < partitions; p++) {
@@ -117,30 +118,34 @@ public final class RealStackCheck {
             Collections.sort(ts);
             long t0 = ts.get(ts.size() / 2);                 // ★ 按分区取 T0(落在数据中间)
             StartOffset so = svc.startOffset(TOPIC, p, EPOCH, t0);
-            if (so.source() == StartOffset.Source.ANCHOR) fastPath++;
+            if (so.source() == StartOffset.Source.FENCE) fastPath++;
             System.out.println("  p" + p + " T0=" + t0 + " → " + so + " (latest=" + reader.latestOffset(TOPIC, p) + ")");
 
-            if (so.source() == StartOffset.Source.TAIL) {
-                check("P" + p + " 无更新事件 → 起点=末尾", so.offset(), reader.latestOffset(TOPIC, p));
-                continue;
-            }
-            // 属性 1:从起点读到的第一条 commitTs > T0
-            List<TsoSample> at = reader.readFrom(TOPIC, p, so.offset(), 1);
-            if (at.isEmpty()) {
-                check("P" + p + " 起点处可读到消息", false, true);
-            } else {
-                check("P" + p + " 起点第一条 commitTs > T0", at.get(0).commitTs() > t0, true);
-            }
-            // 属性 2:前一条(若存在且能读到)commitTs ≤ T0
-            if (so.offset() > 0) {
-                List<TsoSample> prev = reader.readFrom(TOPIC, p, so.offset() - 1, 1);
-                if (!prev.isEmpty()) {
-                    check("P" + p + " 起点前一条 commitTs ≤ T0", prev.get(0).commitTs() <= t0, true);
+            // 栅栏语义:起点是"过滤起点"(栅栏自身 commitTs ≤ T0);
+            // 向后扫出第一条 commitTs > T0 为真实消费边界, 验证其前一条 ≤ T0(半开, 不越不漏)
+            long latest = reader.latestOffset(TOPIC, p);
+            long cur = so.offset();
+            long firstAbove = -1L;
+            while (cur < latest) {
+                List<TsoSample> batch = reader.readFrom(TOPIC, p, cur, 500);
+                if (batch.isEmpty()) break;
+                boolean found = false;
+                for (TsoSample s : batch) {
+                    if (s.commitTs() > t0) { firstAbove = s.offset(); found = true; break; }
                 }
+                if (found) break;
+                cur = batch.get(batch.size() - 1).offset() + 1;
+                if (batch.size() < 500) break;
+            }
+            if (firstAbove < 0) {
+                check("P" + p + " 栅栏之后无 >T0 事件(起点即在末尾)", so.offset() <= latest, true);
+            } else {
+                List<TsoSample> prev = reader.readFrom(TOPIC, p, firstAbove - 1, 1);
+                check("P" + p + " 首条 >T0 的前一条 ≤T0(半开边界)", prev.isEmpty() || prev.get(0).commitTs() <= t0, true);
             }
         }
-        check("至少一个分区走了锚点快路径(能力被真正压到)", fastPath > 0, true);
-        System.out.println("  快路径(ANCHOR)命中分区数 = " + fastPath);
+        check("至少一个分区走了栅栏快路径(能力被真正压到)", fastPath > 0, true);
+        System.out.println("  快路径(FENCE)命中分区数 = " + fastPath);
     }
 
     // ---------- ④ 水位落库 ----------

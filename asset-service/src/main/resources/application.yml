@@ -1,0 +1,44 @@
+server:
+  port: 8099
+
+spring:
+  application:
+    name: asset-service
+  # 元数据库(dcp 库: asset_tag_binding + 血缘重建读 sync_task/field_mapping/data_contract/datasource_config/cdc_st_task)
+  datasource:
+    url: ${ASSET_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${ASSET_META_USERNAME:root}
+    password: ${ASSET_META_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /api/actuator
+
+dcp:
+  # 管理面 JWT 验证(与 backend 同 secret, 只验证不签发)
+  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
+  # 目标库(血缘重建时 schema/存量解析的只读入口, 与 backend dcp.sync.target 同源)
+  sync:
+    target:
+      url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      username: ${SYNC_TARGET_USERNAME:root}
+      password: ${SYNC_TARGET_PASSWORD:root123}
+  lineage:
+    neo4j:
+      uri: ${LINEAGE_NEO4J_URI:bolt://neo4j:7687}
+      user: ${LINEAGE_NEO4J_USER:neo4j}
+      password: ${LINEAGE_NEO4J_PASSWORD:neo4j123}
+
+logging:
+  level:
+    root: INFO
+    com.dcp: INFO

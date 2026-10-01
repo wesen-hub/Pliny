@@ -58,16 +58,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agents/*/tasks/expected").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agents/*/tasks/*/resend").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agents/*/runs").permitAll()
-                        // 数据订阅中心: 订阅方 PULL 数据服务 API(X-Dcp-Token 在 Controller 自校验; 管理面仍走 JWT+isAdmin)
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/*/schema").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/*/snapshot").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/*/changes").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/data-sub/*/export").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/data-sub/export-task/*/download").permitAll()
-                        // 变更流出口数据面: 机器消费方 PULL/提交(consumerId+契约在 ChangeOutletService 自校验,
-                        // 同 data-sub 模式; v2 批/增量执行体与出口消费者都不持用户 JWT)
-                        .requestMatchers("/api/chg/**").permitAll()
+                        // 数据订阅中心已迁出至 subscription-service(N11), 不再承载 /api/data-sub 路由
+                        // 变更流出口已迁出至 delivery-service(N10), 不再承载 /api/chg 路由
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

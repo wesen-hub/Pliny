@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import com.dcp.schedulerbridge.SchedulerRuntime;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,11 +45,12 @@ public class LogicalTableConfigService {
 
     private final JdbcTemplate metaJdbc;
     private final Map<String, LogicalTableConfig> cache = new ConcurrentHashMap<>();
-    private final SyncTopicRegistry registry;
+    private final SchedulerRuntime schedulerRuntime;
 
-    public LogicalTableConfigService(JdbcTemplate metaJdbc, SyncTopicRegistry registry) {
+    public LogicalTableConfigService(JdbcTemplate metaJdbc,
+                                     SchedulerRuntime schedulerRuntime) {
         this.metaJdbc = metaJdbc;
-        this.registry = registry;
+        this.schedulerRuntime = schedulerRuntime;
     }
 
     /** 加载(带缓存); 未配置时返回默认配置并告警日志 */
@@ -111,7 +114,7 @@ public class LogicalTableConfigService {
 
     /** 保存配置(幂等 upsert; bucket_map 单独更新走 BucketMapService) */
     public void save(LogicalTableConfig cfg) {
-        // 消费组缺省 = dcp-sync-{逻辑表}(与 SyncTopicRegistry 注册规则一致; 缺省会导致
+        // 消费组缺省 = dcp-sync-{逻辑表}(与 sync-writer 执行器约定一致; 缺省会导致
         // lag 查询/监控误查默认组 dcp-sync-demo 而虚高)
         if (cfg.getConsumerGroup() == null || cfg.getConsumerGroup().isBlank()) {
             cfg.setConsumerGroup("dcp-sync-" + cfg.getTableName());
@@ -134,9 +137,8 @@ public class LogicalTableConfigService {
                 cfg.getCronExpr(), cfg.getStartMode() == null ? "earliest" : cfg.getStartMode(),
                 cfg.getStartValue());
         cache.remove(cfg.getTableName());
-        // 消费端动态注册该逻辑表的 topic(无需重启即可被监听)
-        registry.register(cfg.getTableName(), cfg.getTopic(), cfg.getConsumerGroup(),
-                cfg.getPartitionCount() > 0 ? cfg.getPartitionCount() : 8);
+        // 消费端已由统一调度框架收编:逻辑表保存/变更 → 提交 TaskSpec(重复提交 = 更新)
+        schedulerRuntime.submitSyncTask(cfg);
     }
 
     /** 更新分区数与桶映射(扩容时由 BucketMapService 调用) */

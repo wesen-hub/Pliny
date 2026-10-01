@@ -53,8 +53,9 @@ public class HttpContractProviderFactory implements ContractProviderFactory {
                         "单元 " + unitId + " 未携带 contractRef —— 拒绝消费(fail-closed)");
             };
         }
-        LOG.info(() -> "unit " + cmd.unitId() + " 契约视图来源:" + ref
+        LOG.info(() -> "unit " + cmd.unitId() + " 契约视图来源:" + ref + " stream=" + cmd.stream()
                 + "(刷新周期 " + refreshMillis + "ms)");
-        return new HttpContractProvider(controlBaseUrl, ref, cmd.consumerGroup(), timeout, refreshMillis);
+        return new HttpContractProvider(controlBaseUrl, ref, cmd.consumerGroup(), cmd.stream(),
+                timeout, refreshMillis);
     }
 }

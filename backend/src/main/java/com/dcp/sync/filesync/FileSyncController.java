@@ -94,7 +94,7 @@ public class FileSyncController {
         return ApiResponse.ok(out);
     }
 
-    /** 停止: rclone 无常驻会话, 仅 agent 任务可下发 task_stop(否则无可停对象) */
+    /** 停止: platform 任务注销 worker 侧一次性任务(杀 rclone); agent 任务下发 task_stop */
     @PostMapping("/{id}/stop")
     @PreAuthorize("@perm.has('sync:task:run')")
     public ApiResponse<Map<String, Object>> stop(@PathVariable long id) {
@@ -102,10 +102,12 @@ public class FileSyncController {
         if (d == null) {
             return ApiResponse.error(404, "任务不存在: " + id);
         }
-        if (!"agent".equals(String.valueOf(d.get("exec_host")))) {
-            return ApiResponse.error(400, "平台任务为一次性执行(rclone 无常驻会话), 无可停对象");
+        boolean stopped;
+        if ("agent".equals(String.valueOf(d.get("exec_host")))) {
+            stopped = service.stopAgentWatch(id);
+        } else {
+            stopped = service.stopPlatformTask(id);
         }
-        boolean stopped = service.stopAgentWatch(id);
         return ApiResponse.ok(Map.of("stopped", stopped, "id", id, "dispatchedToAgent", stopped));
     }
 

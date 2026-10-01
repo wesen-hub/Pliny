@@ -1,0 +1,71 @@
+server:
+  port: 8100
+
+spring:
+  application:
+    name: tagengine-service
+  # 元数据库(dcp 库: tag_task/tag_rule/tag_dict/tag_fact/tag_notify/sys_* 等)
+  datasource:
+    url: ${TAGENGINE_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${TAGENGINE_META_USERNAME:root}
+    password: ${TAGENGINE_META_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${TAGENGINE_REDIS_HOST:127.0.0.1}
+      port: ${TAGENGINE_REDIS_PORT:6379}
+  # 在线事件源(dcp.in.* 订阅)
+  kafka:
+    bootstrap-servers: ${TAGENGINE_KAFKA_BOOTSTRAP:127.0.0.1:9092}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /api/actuator
+
+dcp:
+  # 管理面 JWT 验证(与 backend 同 secret, 只验证不签发)
+  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
+  # 目标库(数据集字段探测/批快照只读入口, 与 backend dcp.sync.target 同源)
+  sync:
+    target:
+      url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      username: ${SYNC_TARGET_USERNAME:root}
+      password: ${SYNC_TARGET_PASSWORD:root123}
+  tagengine:
+    runner-mode: ${DCP_TAGENGINE_RUNNER_MODE:simulate}
+    executor-jar: ${DCP_TAGENGINE_EXECUTOR_JAR:}
+    spark-submit: ${DCP_TAGENGINE_SPARK_SUBMIT:spark-submit}
+    runs-dir: ${DCP_TAGENGINE_RUNS_DIR:/tmp/dcp-tagengine}
+    auto-run: ${DCP_TAGENGINE_AUTO_RUN:false}
+    # 增量双轨切流开关(N8): external=Flink 流执行(默认) | unit=底座 TagLogic(dcp-tag-task)
+    incremental-engine: ${DCP_TAGENGINE_INCREMENTAL_ENGINE:external}
+  # 流作业平台化(Flink REST 提交; 双轨: 切流 unit 后仅保留作业管理, 新启被守卫拦截)
+  tagstream:
+    flink-url: ${DCP_TAGSTREAM_FLINK_URL:http://flink-jobmanager:8081}
+    jar: ${DCP_TAGSTREAM_JAR:/opt/dcp-tagstream.jar}
+    kafka: ${DCP_TAGSTREAM_KAFKA:dcp.in.}
+    jdbc-url: ${DCP_TAGSTREAM_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    jdbc-user: ${DCP_TAGSTREAM_JDBC_USER:root}
+    jdbc-password: ${DCP_TAGSTREAM_JDBC_PASSWORD:root123}
+    redis-host: ${DCP_TAGSTREAM_REDIS_HOST:127.0.0.1}
+    redis-port: ${DCP_TAGSTREAM_REDIS_PORT:6379}
+    # 打标事件流(tag 契约订阅推送 dcp-sub-push 数据源; 底座运行时=dcp-worker outlet ns → outlet-kafka)
+    tag-events-enabled: ${DCP_TAGSTREAM_TAG_EVENTS_ENABLED:false}
+    tag-events-kafka-bootstrap: ${DCP_TAGSTREAM_TAG_EVENTS_KAFKA_BOOTSTRAP:outlet-kafka:19092}
+    tag-events-topic: ${DCP_TAGSTREAM_TAG_EVENTS_TOPIC:dcp.tag.events}
+  # 出口控制面(outlet-service REST; v2 任务登记走此地址)
+  outlet:
+    control-url: ${DCP_OUTLET_CONTROL_URL:http://127.0.0.1:8095}
+
+logging:
+  level:
+    root: INFO
+    com.dcp: INFO

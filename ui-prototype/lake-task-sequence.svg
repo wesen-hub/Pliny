@@ -1,0 +1,255 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 1580" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a90d9"/></marker>
+    <marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1e8449"/></marker>
+    <marker id="mt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#148f77"/></marker>
+    <marker id="mp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8e44ad"/></marker>
+    <marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <marker id="my" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7f8c8d"/></marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="810" y="30" text-anchor="middle" font-size="26" font-weight="bold" fill="#1b2631">湖同步底座任务时序图：流经的服务与各服务内动作</text>
+
+  <!-- 阶段色带(先画,垫底) -->
+  <rect x="12" y="128" width="1594" height="404" fill="#f2f8fd" opacity="0.55"/>
+  <rect x="12" y="558" width="1594" height="274" fill="#f0fbf4" opacity="0.55"/>
+  <rect x="12" y="858" width="1594" height="404" fill="#f0faf8" opacity="0.55"/>
+  <rect x="1455" y="588" width="152" height="200" fill="#faf5fd" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="6 4" rx="8"/>
+
+  <!-- 阶段标签 -->
+  <rect x="18" y="136" width="196" height="22" fill="#ffffff" rx="4"/>
+  <text x="24" y="152" font-size="13" font-weight="bold" fill="#2e6da4">P1 创建登记（只登记不激活）</text>
+  <rect x="18" y="566" width="286" height="22" fill="#ffffff" rx="4"/>
+  <text x="24" y="582" font-size="13" font-weight="bold" fill="#1e8449">P2 激活（resume → onCreated → handover → activate）</text>
+  <rect x="18" y="866" width="160" height="22" fill="#ffffff" rx="4"/>
+  <text x="24" y="882" font-size="13" font-weight="bold" fill="#148f77">P3 执行稳态（逐批循环）</text>
+  <text x="1472" y="612" font-size="12" font-weight="bold" fill="#6c3483">P4</text>
+  <text x="1472" y="628" font-size="12" font-weight="bold" fill="#6c3483">批</text>
+  <text x="1472" y="644" font-size="12" font-weight="bold" fill="#6c3483">通</text>
+  <text x="1472" y="660" font-size="12" font-weight="bold" fill="#6c3483">道</text>
+  <text x="1472" y="676" font-size="12" font-weight="bold" fill="#6c3483">并</text>
+  <text x="1472" y="692" font-size="12" font-weight="bold" fill="#6c3483">行</text>
+  <text x="1472" y="708" font-size="12" font-weight="bold" fill="#6c3483">·</text>
+  <text x="1472" y="724" font-size="12" font-weight="bold" fill="#6c3483">历</text>
+  <text x="1472" y="740" font-size="12" font-weight="bold" fill="#6c3483">史</text>
+  <text x="1472" y="756" font-size="12" font-weight="bold" fill="#6c3483">打</text>
+  <text x="1472" y="772" font-size="12" font-weight="bold" fill="#6c3483">底</text>
+
+  <!-- ═══════════ 泳道 ═══════════ -->
+  <!-- 泳道线 -->
+  <g stroke="#bdc3c7" stroke-width="1.4" stroke-dasharray="4 4">
+    <line x1="70"  y1="136" x2="70"  y2="1500"/>
+    <line x1="230" y1="136" x2="230" y2="1500"/>
+    <line x1="390" y1="136" x2="390" y2="1500"/>
+    <line x1="550" y1="136" x2="550" y2="1500"/>
+    <line x1="710" y1="136" x2="710" y2="1500"/>
+    <line x1="870" y1="136" x2="870" y2="1500"/>
+    <line x1="1030" y1="136" x2="1030" y2="1500"/>
+    <line x1="1190" y1="136" x2="1190" y2="1500"/>
+    <line x1="1350" y1="136" x2="1350" y2="1500"/>
+    <line x1="1510" y1="136" x2="1510" y2="1500"/>
+  </g>
+
+  <!-- 泳道头 -->
+  <g text-anchor="middle">
+    <rect x="12" y="40" width="116" height="86" rx="10" fill="#eaf2f8" stroke="#2e86c1" stroke-width="1.6"/>
+    <text x="70" y="62" font-size="13" font-weight="bold" fill="#1b4f72">前端</text>
+    <text x="70" y="82" font-size="10.5" fill="#1b4f72">用户界面</text>
+    <text x="70" y="98" font-size="10.5" fill="#1b4f72">创建·列表·进度</text>
+    <text x="70" y="114" font-size="10.5" fill="#1b4f72">resume/stop</text>
+
+    <rect x="172" y="40" width="116" height="86" rx="10" fill="#d6eaf8" stroke="#2e86c1" stroke-width="1.6"/>
+    <text x="230" y="62" font-size="13" font-weight="bold" fill="#1b4f72">backend</text>
+    <text x="230" y="82" font-size="10.5" fill="#1b4f72">LakeSyncService</text>
+    <text x="230" y="98" font-size="10.5" fill="#1b4f72">(批调度+游标)</text>
+    <text x="230" y="114" font-size="10.5" fill="#1b4f72">LakeTaskDeployer</text>
+
+    <rect x="332" y="40" width="116" height="86" rx="10" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.6"/>
+    <text x="390" y="62" font-size="13" font-weight="bold" fill="#145a32">控制面</text>
+    <text x="390" y="82" font-size="10.5" fill="#145a32">outlet-service</text>
+    <text x="390" y="98" font-size="10.5" fill="#145a32">TasksController</text>
+    <text x="390" y="114" font-size="10.5" fill="#145a32">TaskScheduler</text>
+
+    <rect x="492" y="40" width="116" height="86" rx="10" fill="#f4f6f7" stroke="#566573" stroke-width="1.6"/>
+    <text x="550" y="62" font-size="13" font-weight="bold" fill="#2c3e50">元库 MySQL</text>
+    <text x="550" y="82" font-size="10.5" fill="#2c3e50">chg_stream</text>
+    <text x="550" y="98" font-size="10.5" fill="#2c3e50">contract/logic</text>
+    <text x="550" y="114" font-size="10.5" fill="#2c3e50">consumer_task</text>
+
+    <rect x="652" y="40" width="116" height="86" rx="10" fill="#d6eaf8" stroke="#2e86c1" stroke-width="1.6"/>
+    <text x="710" y="62" font-size="13" font-weight="bold" fill="#1b4f72">dcp-worker</text>
+    <text x="710" y="82" font-size="10.5" fill="#1b4f72">统一调度框架</text>
+    <text x="710" y="98" font-size="10.5" fill="#1b4f72">ns 参选/归属</text>
+    <text x="710" y="114" font-size="10.5" fill="#1b4f72">防双消费</text>
+
+    <rect x="812" y="40" width="116" height="86" rx="10" fill="#e8f8f5" stroke="#148f77" stroke-width="1.6"/>
+    <text x="870" y="62" font-size="13" font-weight="bold" fill="#0b5345">dcp-outlet-rt</text>
+    <text x="870" y="82" font-size="10.5" fill="#0b5345">Kafka 源 seek</text>
+    <text x="870" y="98" font-size="10.5" fill="#0b5345">契约视图过滤</text>
+    <text x="870" y="114" font-size="10.5" fill="#0b5345">JarLogicLoader</text>
+
+    <rect x="972" y="40" width="116" height="86" rx="10" fill="#fdebd0" stroke="#e67e22" stroke-width="1.6"/>
+    <text x="1030" y="62" font-size="13" font-weight="bold" fill="#a04000">出口栈 Kafka</text>
+    <text x="1030" y="82" font-size="10.5" fill="#a04000">outlet-kafka</text>
+    <text x="1030" y="98" font-size="10.5" fill="#a04000">:19092</text>
+    <text x="1030" y="114" font-size="10.5" fill="#a04000">dcp.cdc.{库}.{表}</text>
+
+    <rect x="1132" y="40" width="116" height="86" rx="10" fill="#ebedef" stroke="#7f8c8d" stroke-width="1.6"/>
+    <text x="1190" y="62" font-size="13" font-weight="bold" fill="#34495e">TiCDC·TiDB</text>
+    <text x="1190" y="82" font-size="10.5" fill="#34495e">变更源</text>
+    <text x="1190" y="98" font-size="10.5" fill="#34495e">EnableOldValue</text>
+    <text x="1190" y="114" font-size="10.5" fill="#34495e">after/before</text>
+
+    <rect x="1292" y="40" width="116" height="86" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="1.6"/>
+    <text x="1350" y="62" font-size="13" font-weight="bold" fill="#4a235a">Polaris</text>
+    <text x="1350" y="82" font-size="10.5" fill="#4a235a">RESTCatalog</text>
+    <text x="1350" y="98" font-size="10.5" fill="#4a235a">Iceberg 目录</text>
+    <text x="1350" y="114" font-size="10.5" fill="#4a235a">S3FileIO→minio</text>
+
+    <rect x="1452" y="40" width="116" height="86" rx="10" fill="#f4ecf7" stroke="#8e44ad" stroke-width="1.6"/>
+    <text x="1510" y="62" font-size="13" font-weight="bold" fill="#4a235a">dcp-lakesync</text>
+    <text x="1510" y="82" font-size="10.5" fill="#4a235a">批作业</text>
+    <text x="1510" y="98" font-size="10.5" fill="#4a235a">历史打底</text>
+    <text x="1510" y="114" font-size="10.5" fill="#4a235a">游标驱动</text>
+  </g>
+
+  <!-- ═══════════ 激活条 ═══════════ -->
+  <rect x="228" y="160" width="4" height="352" fill="#d6eaf8"/>
+  <rect x="388" y="230" width="4" height="247" fill="#d5f5e3"/>
+  <rect x="388" y="585" width="4" height="142" fill="#d5f5e3"/>
+  <rect x="708" y="725" width="4" height="72" fill="#d6eaf8"/>
+  <rect x="868" y="795" width="4" height="352" fill="#a3e4d7"/>
+  <rect x="1348" y="1065" width="4" height="37" fill="#d2b4de"/>
+  <rect x="1508" y="600" width="4" height="166" fill="#d2b4de"/>
+  <rect x="1188" y="880" width="4" height="380" fill="#e5e8e8"/>
+
+  <!-- ═══════════ P1 创建登记 ═══════════ -->
+  <g font-size="11" fill="#1f618d">
+    <path d="M70 160 H226" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="150">POST 创建湖同步任务（logicalTable / interval / 键列）</text>
+
+    <path d="M230 195 H546" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="185">INSERT lake_sync_task（批调度行, cursor=NULL 待全量首载）</text>
+
+    <path d="M230 230 H386" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="220">POST /api/outlet/streams/scan</text>
+
+    <path d="M390 265 H1026" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="560" y="255">AdminClient 列 TiCDC topics（dcp.cdc.* 扫描发现）</text>
+
+    <path d="M390 300 H546" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="290">INSERT chg_stream（stream / 真实分区数 / 出口栈 bootstrap）</text>
+
+    <path d="M390 335 H234" stroke="#7f8c8d" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#my)"/>
+    <text x="90" y="325">scan 完成</text>
+
+    <path d="M230 370 H546" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="360">INSERT consumer_logic(lake-sync@1.0.0) + consumer(lake-platform) + contract(["*"])</text>
+
+    <path d="M230 405 H386" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="395">POST /api/outlet/tasks（ns=lake · latest · desiredState=stopped）</text>
+
+    <path d="M390 440 H546" stroke="#4a90d9" stroke-width="1.8" fill="none" marker-end="url(#mb)"/>
+    <text x="90" y="430">INSERT consumer_task（namespace=lake, 落库即 STOPPED 登记态）</text>
+
+    <path d="M390 475 H234" stroke="#7f8c8d" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#my)"/>
+    <text x="90" y="465">created: STOPPED</text>
+
+    <path d="M230 510 H74" stroke="#7f8c8d" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#my)"/>
+    <text x="90" y="500">创建成功（批任务 + 底座登记结果）</text>
+  </g>
+
+  <!-- ═══════════ P2 激活 ═══════════ -->
+  <g font-size="11" fill="#145a32">
+    <path d="M70 585 H386" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="575">POST /tasks/lake-inc-{lt}/actions/resume（部署方案阶段）</text>
+
+    <path d="M390 620 H546" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="610">UPDATE desiredState=running</text>
+
+    <path d="M390 655 H1026" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="645">latestOf：读各分区最新 TSO 水位 → t0（latest 无批阶段）</text>
+
+    <path d="M390 690 H546" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="680">栅栏索引查起点（每分区第一个 commitTs &gt; T0；缺失 fallback earliest）</text>
+
+    <path d="M390 725 H706" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="713">REST 下发 TaskSpec</text>
+    <text x="90" y="727">ns=lake · bizMeta(起点表+contractRef+kafkaBootstrap) · CONSERVATIVE</text>
+
+    <path d="M710 752 H802 V762 H712" stroke="#1e8449" stroke-width="1.6" fill="none" marker-end="url(#mg)"/>
+    <text x="810" y="744">InstanceSkeleton lake ns 参选</text>
+    <text x="810" y="758">归属唯一 owner（防双消费）</text>
+
+    <path d="M710 795 H866" stroke="#1e8449" stroke-width="1.8" fill="none" marker-end="url(#mg)"/>
+    <text x="90" y="785">启动执行器 handlerRef={SPI, outlet-task}</text>
+  </g>
+
+  <!-- ═══════════ P3 执行稳态 ═══════════ -->
+  <g font-size="11" fill="#0b5345">
+    <path d="M1190 890 H1034" stroke="#7f8c8d" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#my)"/>
+    <text x="1040" y="880">TiCDC 行事件持续流（背景）</text>
+
+    <path d="M870 912 H962 V922 H872" stroke="#148f77" stroke-width="1.6" fill="none" marker-end="url(#mt)"/>
+    <text x="972" y="906">JarLogicLoader 装载 dcp-lake-task</text>
+    <text x="972" y="920">（LakeLogic, lake-sync@1.0.0）</text>
+
+    <path d="M870 960 H1026" stroke="#148f77" stroke-width="1.8" fill="none" marker-end="url(#mt)"/>
+    <text x="90" y="950">按起点表 seek 各分区 + 拉批次（group=task-lake-inc-{lt}）</text>
+
+    <path d="M870 995 H554" stroke="#148f77" stroke-width="1.8" fill="none" marker-end="url(#mt)"/>
+    <text x="90" y="985">HttpContractProvider 拉契约视图 ct-lake-{lt}?stream=（["*"] 全放行）</text>
+
+    <path d="M870 1022 H962 V1032 H872" stroke="#148f77" stroke-width="1.6" fill="none" marker-end="url(#mt)"/>
+    <text x="972" y="1016">LakeLogic 逐行解析：写者裁判(_s 列/seq)</text>
+    <text x="972" y="1030">字段级合并 · DELETE 行级 seq 裁判</text>
+
+    <path d="M870 1065 H1346" stroke="#148f77" stroke-width="1.8" fill="none" marker-end="url(#mt)"/>
+    <text x="90" y="1055">RESTCatalog 覆盖写 Iceberg（namespace=dcp, table={lt}）</text>
+
+    <path d="M1350 1092 H1442 V1102 H1352" stroke="#8e44ad" stroke-width="1.6" fill="none" marker-end="url(#mp)"/>
+    <text x="90" y="1098" fill="#4a235a">S3FileIO → minio 落盘（manifest + data 文件）</text>
+
+    <path d="M870 1135 H1026" stroke="#148f77" stroke-width="1.8" fill="none" marker-end="url(#mt)"/>
+    <text x="90" y="1125">commit offset（失败不提交 → 重试 ×5）</text>
+
+    <path d="M866 1145 V1230 H40 V960 H866" stroke="#148f77" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#mt)"/>
+    <text x="50" y="1200" font-size="12" font-weight="bold" fill="#148f77">逐批循环：下一批拉取</text>
+
+    <path d="M870 1175 H554" stroke="#c0392b" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#mr)"/>
+    <text x="90" y="1165" fill="#c0392b">重试 ×5 后死信 consumer_dlq</text>
+    <text x="90" y="1179" fill="#c0392b">巡检告警 · 人工介入</text>
+  </g>
+
+  <!-- ═══════════ P4 批通道(并行) ═══════════ -->
+  <g font-size="11" fill="#4a235a">
+    <path d="M230 605 H1506" stroke="#8e44ad" stroke-width="1.8" fill="none" stroke-dasharray="6 4" marker-end="url(#mp)"/>
+    <text x="240" y="597">15s tick / 手动触发 → 组装 job-json（seq 列 + 业务键探测）</text>
+
+    <path d="M1510 645 H1194" stroke="#8e44ad" stroke-width="1.8" fill="none" marker-end="url(#mp)"/>
+    <text x="90" y="637">按游标读 TiDB 增量批（数据面 JDBC 同源）</text>
+
+    <path d="M1510 685 H1354" stroke="#8e44ad" stroke-width="1.8" fill="none" marker-end="url(#mp)"/>
+    <text x="90" y="677">RESTCatalog 写湖打底（与增量在湖表汇合）</text>
+
+    <path d="M1510 725 H554" stroke="#8e44ad" stroke-width="1.8" fill="none" marker-end="url(#mp)"/>
+    <text x="90" y="717">exit0 → 回写 cursor_json（失败游标不推进）</text>
+
+    <path d="M1510 757 V790 H1476 V665 H1506" stroke="#8e44ad" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#mp)"/>
+    <text x="1280" y="745" fill="#6c3483">下轮 tick 从新游标续跑</text>
+  </g>
+
+  <!-- 图例 -->
+  <g font-size="12" fill="#34495e">
+    <line x1="500" y1="1535" x2="560" y2="1535" stroke="#4a90d9" stroke-width="2" marker-end="url(#mb)"/>
+    <text x="570" y="1539">同步调用</text>
+    <line x1="660" y1="1535" x2="720" y2="1535" stroke="#7f8c8d" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#my)"/>
+    <text x="730" y="1539">返回 / 背景流 / 回流</text>
+    <line x1="900" y1="1535" x2="960" y2="1535" stroke="#8e44ad" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#mp)"/>
+    <text x="970" y="1539">批通道（并行链路）</text>
+    <line x1="1130" y1="1535" x2="1190" y2="1535" stroke="#c0392b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#mr)"/>
+    <text x="1200" y="1539">失败路径</text>
+    <text x="1350" y="1539" fill="#7f8c8d">激活条 = 服务处理中（内部动作见自反箭头与消息标注）</text>
+  </g>
+</svg>

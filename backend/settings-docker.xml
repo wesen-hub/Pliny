@@ -1,14 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Docker 构建专用 Maven 配置: 腾讯云镜像加速(实测快于阿里云) -->
+<!-- Docker 构建专用 Maven 配置: 腾讯云镜像优先, central 兜底
+     (腾讯 nexus 缺少部分 artifact, 如 drools-wiring-static 8.44.1.Final) -->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-  <mirrors>
-    <mirror>
-      <id>tencent</id>
-      <mirrorOf>central</mirrorOf>
-      <name>Tencent Cloud Maven Mirror</name>
-      <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public</url>
-    </mirror>
-  </mirrors>
+  <profiles>
+    <profile>
+      <id>cn-first</id>
+      <repositories>
+        <repository>
+          <id>tencent</id>
+          <name>Tencent Cloud Maven Mirror</name>
+          <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+        <repository>
+          <id>central-fallback</id>
+          <name>Maven Central</name>
+          <url>https://repo.maven.apache.org/maven2</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>tencent-plugins</id>
+          <name>Tencent Cloud Maven Mirror</name>
+          <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+        <pluginRepository>
+          <id>central-plugins-fallback</id>
+          <name>Maven Central</name>
+          <url>https://repo.maven.apache.org/maven2</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>cn-first</activeProfile>
+  </activeProfiles>
 </settings>

@@ -53,7 +53,7 @@ public class ScaleService {
     /** 逻辑表当前各分区 lag(消费组位点 vs 分区末端) */
     public Map<String, Object> lagOf(String logicalTable) {
         LogicalTableConfigService.LogicalTableConfig cfg = tableConfigService.load(logicalTable);
-        // 消费组: 逻辑表配置优先; 缺省用 dcp-sync-{逻辑表}(与 SyncTopicRegistry 注册规则一致,
+        // 消费组: 逻辑表配置优先; 缺省用 dcp-sync-{逻辑表}(与 sync-writer 执行器约定一致,
         // 避免误查 spring.kafka.consumer.group-id 默认组导致 lag 虚高)
         String group = cfg.getConsumerGroup();
         if (group == null || group.isBlank()) {

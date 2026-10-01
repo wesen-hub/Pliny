@@ -41,6 +41,8 @@ public class CdcRecord {
     private String rowKind;
     /** 全局 seq(记录级, 目标侧裁判新旧) */
     private long seq;
+    /** 快照标志(true=批阶段快照行, 写入端据此选批模板; 补丁落地前为 null → 默认走流模板) */
+    private Boolean snapshot;
     /** 业务字段 */
     private Map<String, Object> fields = new LinkedHashMap<>();
 

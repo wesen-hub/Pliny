@@ -2,6 +2,7 @@ package com.dcp.outlet.control;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.LongSupplier;
 
 /**
@@ -53,23 +54,19 @@ public class ProgressService {
                 p.watermarkTs(), latest, lagRows, p.lagSeconds(), lastSeenAt);
     }
 
-    /** 任务级:逐单元逐分区展开。 */
-    public List<PartitionProgress> progressOfTask(String taskId, List<PlannedUnit> units,
-                                                  List<UnitStatusStore.UnitStatus> statuses,
-                                                  int epoch, boolean queryKafka) {
+    /** 任务级:逐分区展开。任务 = 框架一个 TaskSpec(partitions = 真实分区数),
+     *  每分区状态/位点由框架快照派生(调用方注入 committed/state 映射);
+     *  框架快照无 TSO,故业务延迟(lagSeconds)不可算、归 0,积压条数(lagRows)由 offset 与分区末端得出。 */
+    public List<PartitionProgress> progressOfTask(String taskId, String topic, List<Integer> partIds,
+                                                  int epoch, Map<Integer, Long> committed,
+                                                  Map<Integer, String> states, boolean queryKafka) {
         List<PartitionProgress> out = new ArrayList<>();
-        for (PlannedUnit pu : units) {
-            UnitStatusStore.UnitStatus st = statuses.stream()
-                    .filter(s -> s.unitId.equals(pu.unitId())).findFirst().orElse(null);
-            String state = st == null ? "MISSING" : st.state;
-            long offset = st == null ? 0L : st.lastOffset;
-            long tso = st == null ? 0L : st.lastTso;
-            long seen = st == null ? 0L : st.lastSeenAt;
-            for (int p : pu.partitions()) {
-                out.add(queryKafka
-                        ? fullProgressOfUnit(pu.unitId(), pu.topic(), p, epoch, state, offset, tso, seen)
-                        : progressOfUnit(pu.unitId(), pu.topic(), p, epoch, state, offset, tso, seen));
-            }
+        for (int p : partIds) {
+            String state = states.getOrDefault(p, "SCHEDULED");
+            long offset = committed.getOrDefault(p, 0L);
+            out.add(queryKafka
+                    ? fullProgressOfUnit(taskId, topic, p, epoch, state, offset, 0L, 0L)
+                    : progressOfUnit(taskId, topic, p, epoch, state, offset, 0L, 0L));
         }
         return out;
     }

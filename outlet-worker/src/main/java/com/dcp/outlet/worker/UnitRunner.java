@@ -21,11 +21,12 @@ import java.util.function.Function;
 /**
  * 单元运行器(v2 计算面核心)。
  *
- * <p><b>单元</b> = 1 个消费源 + 1 个线程 + 1 个 logic 实例 + 1 份租约(D9)。本类负责:
+ * <p><b>单元</b> = 1 个消费源 + 1 个线程 + 1 个 logic 实例。本类负责:
  * <pre>
  *   poll → 解析 → 水位更新 → 契约裁剪 → process() → commitSync
  *         ↘ 异常:不提交 → 退避重试 N 次 → 死信 + 告警(D11)
- *   每轮:续租(失败即自停)、心跳(平台据此判 RUNNING / 停滞)
+ *   租约/心跳已由统一调度框架收编(归属唯一性 + 双窗口判死 + 快照上报),
+ *   停止由框架 stop() 回调控制(UnitTaskExecutor.stop)。
  * </pre>
  *
  * <p><b>提交语义</b>:{@code process()} 正常返回才提交;提交的是"下一条要读的位置"。
@@ -34,7 +35,7 @@ import java.util.function.Function;
 public class UnitRunner {
 
     /** 单元状态机。 */
-    public enum State { INIT, RUNNING, STOPPED, FAILED, LEASE_LOST, STOPPING }
+    public enum State { INIT, RUNNING, STOPPED, FAILED, STOPPING }
 
     private static final class Unit {
         final java.util.concurrent.atomic.AtomicBoolean started = new java.util.concurrent.atomic.AtomicBoolean();
@@ -53,8 +54,6 @@ public class UnitRunner {
     private final MessageDecoder decoder;
     private final ContractFilter filter;
     private final RecordSourceFactory sourceFactory;
-    private final LeaseGuard leaseGuard;
-    private final Heartbeat heartbeat;
     private final WatermarkProvider watermarks;
     private final DeadLetterSink deadLetterSink;
     private final UnitMetrics metrics;
@@ -65,20 +64,20 @@ public class UnitRunner {
 
     /** 兼容构造器:契约提供者缺省为无限制视图(仅骨架/自检用)。 */
     public UnitRunner(LogicLoader loader, MessageDecoder decoder, ContractFilter filter,
-                      RecordSourceFactory sourceFactory, LeaseGuard leaseGuard, Heartbeat heartbeat,
+                      RecordSourceFactory sourceFactory,
                       WatermarkProvider watermarks, DeadLetterSink deadLetterSink,
                       UnitMetrics metrics, Function<String, SdkLogger> logFactory) {
-        this(loader, decoder, filter, sourceFactory, leaseGuard, heartbeat, watermarks, deadLetterSink,
+        this(loader, decoder, filter, sourceFactory, watermarks, deadLetterSink,
                 metrics, logFactory, ContractProviderFactory.permissive());
     }
 
     public UnitRunner(LogicLoader loader, MessageDecoder decoder, ContractFilter filter,
-                      RecordSourceFactory sourceFactory, LeaseGuard leaseGuard, Heartbeat heartbeat,
+                      RecordSourceFactory sourceFactory,
                       WatermarkProvider watermarks, DeadLetterSink deadLetterSink,
                       UnitMetrics metrics, Function<String, SdkLogger> logFactory,
                       ContractProviderFactory contractProviders) {
         this.loader = loader; this.decoder = decoder; this.filter = filter;
-        this.sourceFactory = sourceFactory; this.leaseGuard = leaseGuard; this.heartbeat = heartbeat;
+        this.sourceFactory = sourceFactory;
         this.watermarks = watermarks; this.deadLetterSink = deadLetterSink; this.metrics = metrics;
         this.logFactory = logFactory;
         this.contractProviders = contractProviders == null
@@ -100,13 +99,13 @@ public class UnitRunner {
     /**
      * 优雅停机:停止消费 → 提交 → close()。
      *
-     * <p>幂等且**不覆盖已终结状态**(STOPPED/FAILED/LEASE_LOST)—— 否则已退出的单元会被改写成 STOPPING。
+     * <p>幂等且**不覆盖已终结状态**(STOPPED/FAILED)—— 否则已退出的单元会被改写成 STOPPING。
      */
     public void stop(String unitId) {
         Unit u = units.get(unitId);
         if (u == null) return;
         State cur = u.state;
-        if (cur == State.STOPPED || cur == State.FAILED || cur == State.LEASE_LOST) return;
+        if (cur == State.STOPPED || cur == State.FAILED) return;
         u.state = State.STOPPING;
         if (u.rt != null) u.rt.stop();
         if (u.source != null) u.source.wakeup();
@@ -116,6 +115,29 @@ public class UnitRunner {
     public boolean awaitTermination(String unitId, long millis) throws InterruptedException {
         Unit u = units.get(unitId);
         return u != null && u.done.await(millis, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 框架收编用:优雅停机并遗忘(接入设计 §6.3 ⑩)。
+     * 旧链路幂等语义是"同 unitId 只启一次",但框架的单元迁移可能回到同一 worker ——
+     * 停机完成后把单元从登记表移除,同 unitId 可重新 {@link #start(CreateUnitCmd)}。
+     *
+     * @return 是否在 millis 内完成停机(超时仍会移除登记,由执行器侧判重)
+     */
+    public boolean stopAndForget(String unitId, long millis) {
+        Unit u = units.get(unitId);
+        if (u == null) return true;
+        stop(unitId);
+        boolean done = false;
+        try {
+            done = u.done.await(millis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+        if (done || u.state == State.STOPPED || u.state == State.FAILED) {
+            units.remove(unitId);
+        }
+        return done;
     }
 
     public State state(String unitId) {
@@ -170,17 +192,9 @@ public class UnitRunner {
                     cmd.taskId(), cmd.topic(), cmd.partitions(), cmd.logic());
 
             while (rt.running()) {
-                if (!leaseGuard.renew(cmd.unitId())) {                         // ④ 续租失败 → 自停(防双消费)
-                    u.state = State.LEASE_LOST;
-                    u.lastError = "lease lost";
-                    log.warn("lease lost, unit stops consuming");
-                    break;
-                }
-
                 List<RawMessage> raw = source.poll(cmd.pollMillis());
                 if (raw.isEmpty()) {                               // ⑤ 空批:位置没动就不提交
                     commitIfAdvanced(rt, u, source, log);
-                    heartbeat.send(cmd.unitId(), firstPartition(cmd), u.lastCommitOffset, u.lastTso);
                     continue;
                 }
 
@@ -190,7 +204,13 @@ public class UnitRunner {
                     if (d.kind() == DecodedMessage.Kind.WATERMARK) {
                         watermarks.update(d.partition(), d.tso()); // ⑥ 水位不进入业务逻辑
                     } else if (d.kind() == DecodedMessage.Kind.EVENT) {
-                        events.add(d);
+                        // ⑥' 会话级持续过滤(栅栏方案 §3.3):commitTs ≤ T0 丢弃(半开, 等号归快照)。
+                        //     每批都判、全程生效 —— 乱序迟到的小 tso 在后续批次仍被持续丢弃;
+                        //     被过滤事件照常推进 offset 位点(扫到哪算哪, 不卡死、不回退)。
+                        Long t0 = cmd.startTsos().get(d.partition());
+                        if (t0 == null || d.tso() > t0) {
+                            events.add(d);
+                        }
                     }
                     u.lastTso = Math.max(u.lastTso, d.tso());
                     u.position.put(m.partition(), m.offset() + 1);
@@ -201,7 +221,6 @@ public class UnitRunner {
 
                 if (records.isEmpty()) {
                     commitIfAdvanced(rt, u, source, log);
-                    heartbeat.send(cmd.unitId(), firstPartition(cmd), u.lastCommitOffset, u.lastTso);
                     continue;
                 }
 
@@ -215,8 +234,6 @@ public class UnitRunner {
                     rt.stop();
                     break;
                 }
-
-                heartbeat.send(cmd.unitId(), firstPartition(cmd), u.lastCommitOffset, u.lastTso);
             }
         } catch (Throwable t) {
             u.state = State.FAILED;

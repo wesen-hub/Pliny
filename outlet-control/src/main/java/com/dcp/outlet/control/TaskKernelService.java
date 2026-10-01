@@ -7,7 +7,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 任务内核服务:接收(任意来源的)任务定义 → **六项校验** → 落库 → 规划单元 → 交给调度器。
+ * 任务内核服务:接收(任意来源的)任务定义 → **五项校验** → 落库(纯业务登记)→ 交给调度器
+ * (调度状态/防双消费/规划代/并发全部由统一调度框架承担,元库不再存调度状态)。
  *
  * <p>业务参数的校验**不在这里**(由任务类型的垂直模块负责,ADR-9)—— 内核只保证通用参数正确。
  */
@@ -17,14 +18,12 @@ public class TaskKernelService {
     private final LogicCatalog logicCatalog;
     private final ContractLookup contracts;
     private final TaskStore tasks;
-    private final UnitStore units;
-    private final UnitPlanner planner;
     private final TaskScheduler scheduler;
 
     public TaskKernelService(StreamRegistry streams, LogicCatalog logicCatalog, ContractLookup contracts,
-                             TaskStore tasks, UnitStore units, UnitPlanner planner, TaskScheduler scheduler) {
+                             TaskStore tasks, TaskScheduler scheduler) {
         this.streams = streams; this.logicCatalog = logicCatalog; this.contracts = contracts;
-        this.tasks = tasks; this.units = units; this.planner = planner; this.scheduler = scheduler;
+        this.tasks = tasks; this.scheduler = scheduler;
     }
 
     /** 创建任务(幂等由调用方用 {@link #exists} 或唯一 taskId 保证)。 */
@@ -77,28 +76,20 @@ public class TaskKernelService {
             }
         }
 
-        // ⑤ 并发上限(Σ 各 stream 分区数)
-        int totalPartitions = resolved.values().stream().mapToInt(StreamInfo::partitions).sum();
-        if (draft.instances() < 1) {
-            errs.add("instances 必须 ≥ 1");
-        } else if (totalPartitions > 0 && draft.instances() > totalPartitions) {
-            errs.add("instances 必须在 1.." + totalPartitions + "(当前 " + draft.instances() + ")");
-        }
-
-        // ⑥ 消费组唯一(一任务一组)
+        // ⑤ 消费组唯一(一任务一组)
         String group = "task-" + draft.taskId();
         if (tasks.groupExists(group)) errs.add("消费组已存在:" + group);
 
         if (!errs.isEmpty()) throw new TaskValidationException(errs);
 
-        draft.consumerGroup(group).status(TaskStatus.CREATED);
+        draft.consumerGroup(group);
         tasks.insert(draft);
 
-        List<PlannedUnit> planned = planner.plan(draft.taskId(), List.copyOf(resolved.values()),
-                draft.instances(), draft.epoch());
-        units.insert(draft.taskId(), planned);
-
-        scheduler.onCreated(draft.withPlanned(planned));
+        // desiredState=stopped = 只登记不调度(P3 底座任务先登记后激活: 执行栈归属/解码器
+        // 就绪前不拉起消费; 后续 resume 经 scheduler.onCreated 复活, TasksController.action 已支持)
+        if (!"stopped".equalsIgnoreCase(draft.desiredState())) {
+            scheduler.onCreated(draft);
+        }
         return draft;
     }
 
