@@ -8,6 +8,8 @@ frontend/dist/
 agent/target/
 dist/
 seatunnel/dist/
+seatunnel/*/target/
+seatunnel-plugin/*/target/
 dcp-tag-kie/target/
 
 # v2 消费通道模块(outlet-*)
@@ -17,6 +19,29 @@ outlet-worker/target/
 outlet-adapters/target/
 outlet-service/target/
 outlet-worker-service/target/
+
+# 微服务拆分后的独立服务模块
+asset-service/target/
+subscription-service/target/
+tagengine-service/target/
+delivery-service/target/
+dcp-worker/target/
+dcp-scheduler/target/
+dcp-scheduler/*/target/
+dcp-filesync-rt/target/
+dcp-indexer-rt/target/
+dcp-ingest-task/target/
+dcp-lake-task/target/
+dcp-outlet-rt/target/
+dcp-sub-push/target/
+dcp-synclink/target/
+dcp-tag-task/target/
+scheduler-console/dist/
+scheduler-console/node_modules/
+
+# SeaTunnel 补丁源码的本地编译产物(源码在 seatunnel/ 根与 classes/, 构建进镜像时编译)
+seatunnel/*.class
+seatunnel/classes/
 
 # 演示挂载目录(容器运行期数据; 仅保留目录骨架)
 demo-agent-dir/*
