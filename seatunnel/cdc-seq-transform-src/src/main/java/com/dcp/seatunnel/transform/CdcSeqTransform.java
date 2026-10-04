@@ -39,7 +39,9 @@ import java.util.Map;
  * <p>要点:
  * <ul>
  *   <li>CDC 无 before image(2.3.12), 主键修改无法自动拆解 → 按拍板策略暂停告警人工介入;</li>
- *   <li>UPDATE_BEFORE(若引擎发出)也按 UPDATE 处理: 序号小于 AFTER, 目标侧 seq 裁判天然收敛;</li>
+ *   <li>缺陷 7(2026-10-05 实测): UPDATE_BEFORE 旧值行与 UPDATE 新值行位点相同 → seq 相同,
+ *       消费端同号裁判会拒新值行(变更丢失)且写旧值行破坏全程正确性 → UPDATE_BEFORE 行直接丢弃
+ *       (before 主键检测由补丁透传 __src_before 列承担, 该行无信息量);</li>
  *   <li>严格位点模式不连 seq_counter(位点即序号); 告警落库 sync_alert 为独立职责(可选配置);</li>
  *   <li>字段值统一字符串化(目标分表 VARCHAR 承载, 与 AtomicUpsertDao.str 一致)。</li>
  * </ul>
@@ -119,6 +121,12 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
     public SeaTunnelRow map(SeaTunnelRow row) {
         try {
             RowKind rk = row.getRowKind();
+            // 缺陷 7(实测): UPDATE_BEFORE(旧值行)与 UPDATE(新值行)同 source record → 位点透传相同
+            // → seq 相同, 消费端写者列裁判同号拒写会导致新值丢失, 且写旧值行破坏全程正确性(中间态回退)。
+            // before 主键检测由补丁透传的 __src_before 列承担, UPDATE_BEFORE 行无信息量 → 丢弃(不进 Kafka)
+            if (rk == RowKind.UPDATE_BEFORE) {
+                return null;
+            }
             String rowKind = rk == RowKind.DELETE ? "DELETE"
                     : (rk == RowKind.INSERT ? "INSERT" : "UPDATE");
 
