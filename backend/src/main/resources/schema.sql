@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS sync_alert (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   logical_table VARCHAR(128) NOT NULL COMMENT '逻辑表',
   task_id       BIGINT NULL COMMENT '采集任务 id(cdc_st_task.task_id, 可空)',
-  alert_type    VARCHAR(32)  NOT NULL COMMENT '告警类型: missing_column=映射引用源列缺失, primary_key_change=主键值修改',
+  alert_type    VARCHAR(32)  NOT NULL COMMENT '告警类型: missing_column=映射引用源列缺失, primary_key_change=主键值修改, ddl_change=源表 TRUNCATE/DROP/ALTER(N6, DBA 登记)',
   detail        VARCHAR(1024) NULL COMMENT '详情: 缺失列名与映射 / beforeKey→businessKey',
   status        VARCHAR(16)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=未处理, CLOSED=已处理',
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

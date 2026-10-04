@@ -83,6 +83,13 @@ public final class SyncMappingRules {
                 issues.add("字段 " + modelField + " 未定义来源(kind)");
                 continue;
             }
+            // N2(B1'): 源列名与补丁保留列冲突——__src_pos/__src_snapshot/__src_before
+            // 是系统行尾透传列, 源列同名会导致位点/快照标志/before 行读取错位
+            if (srcField.startsWith("__src_")) {
+                issues.add("srcField " + srcField + " 与补丁保留列前缀 __src_ 冲突"
+                        + "(__src_pos/__src_snapshot/__src_before 为系统透传列), 请改源表列名或排除该列");
+                continue;
+            }
             if ("field-map".equals(kind) && srcField.isBlank()) {
                 issues.add("字段 " + modelField + " 为 field-map 但缺少 srcField");
                 continue;
@@ -114,5 +121,38 @@ public final class SyncMappingRules {
 
     private static String trim(Object v) {
         return v == null ? "" : String.valueOf(v).trim();
+    }
+
+    /**
+     * 写者 seq 列名(与 dcp-synclink AtomicUpsertDao.writerColOf 同算法, 两模块无共享依赖需同步维护):
+     * 同一(任务实例 × 数据源 × 库 × 表)流共用一列, 各自比各自的 → 跨任务/跨源互不压制。
+     * N8: 超长截断后缀 md5 截前 16 hex 字符(与文档 md5(16) 对齐, 总长 ≤ 60 ≤ MySQL 列名上限 64)。
+     */
+    public static String writerColOf(String taskId, String datasourceId, String sourceDb, String sourceTable) {
+        if (taskId == null || taskId.isBlank() || sourceDb == null || sourceDb.isBlank()
+                || sourceTable == null || sourceTable.isBlank()) {
+            return null;
+        }
+        String raw = "_s" + taskId + "_d" + (datasourceId == null ? "" : datasourceId)
+                + "_" + sourceDb + "." + sourceTable;
+        String col = raw.replaceAll("[^A-Za-z0-9_]", "_");
+        if (col.length() > 60) {
+            col = col.substring(0, 43) + "_" + md5Hex(raw);
+        }
+        return col;
+    }
+
+    private static String md5Hex(String s) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("MD5")
+                    .digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder h = new StringBuilder();
+            for (byte b : d) {
+                h.append(String.format("%02x", b & 0xff));
+            }
+            return h.substring(0, 16);
+        } catch (Exception e) {
+            return Integer.toHexString(s.hashCode());
+        }
     }
 }

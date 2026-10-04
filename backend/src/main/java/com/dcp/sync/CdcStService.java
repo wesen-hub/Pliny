@@ -124,8 +124,59 @@ public class CdcStService {
                         + "row_chain=VALUES(row_chain)",
                 logicalTable, datasourceId, sourceDb, sourceTable, topic,
                 toJson(businessKeyFields), toJson(keyColumns), fieldMapping, rowChain, syncTaskId);
+        // N3/N8: 写者列名校验——任务落库后拿 taskId 生成写者列名, 与业务列/其他任务写者列查重 fail-fast
+        Long taskId = metaJdbc.queryForObject(
+                "SELECT task_id FROM cdc_st_task WHERE logical_table = ? AND source_db = ? AND source_table = ?",
+                Long.class, logicalTable, sourceDb, sourceTable);
+        validateWriterCol(logicalTable, String.valueOf(taskId), String.valueOf(datasourceId),
+                sourceDb, sourceTable, SyncMappingRules.parseMapping(fieldMapping));
         log.info("SeaTunnel CDC 任务已注册: {} ← {}.{} topic={} syncTaskId={}", logicalTable,
                 sourceDb, sourceTable, topic, syncTaskId);
+    }
+
+    /**
+     * N3(B2')/N8: 写者列名注册查重——
+     * ① 写者列名不得与本任务映射输出列(modelField)重名(否则写库 ODKU 撞业务列);
+     * ② 写者列名不得与库内其他(任务×源)实例清洗后同名(md5 截断碰撞);
+     * ③ ID 永不复用由 task_id/datasource_id AUTO_INCREMENT 不回退天然保证(治理纪律: 禁止重置自增)。
+     */
+    private void validateWriterCol(String logicalTable, String taskId, String datasourceId,
+                                   String sourceDb, String sourceTable, List<Map<String, Object>> fieldMapping) {
+        String writer = SyncMappingRules.writerColOf(taskId, datasourceId, sourceDb, sourceTable);
+        if (writer == null) {
+            return;
+        }
+        List<String> modelFields = new ArrayList<>();
+        for (Map<String, Object> row : fieldMapping) {
+            Object mf = row.get("modelField");
+            if (mf != null && !String.valueOf(mf).isBlank()) {
+                modelFields.add(String.valueOf(mf));
+            }
+        }
+        if (modelFields.contains(writer)) {
+            throw new IllegalArgumentException("写者列名 " + writer
+                    + " 与业务列重名(写者列 = 目标表 seq 裁判列, 业务列禁止同名): " + logicalTable);
+        }
+        List<Map<String, Object>> others = metaJdbc.queryForList(
+                "SELECT task_id, datasource_id, source_db, source_table FROM cdc_st_task WHERE logical_table = ?",
+                logicalTable);
+        for (Map<String, Object> other : others) {
+            if (String.valueOf(other.get("task_id")).equals(taskId)
+                    && String.valueOf(other.getOrDefault("datasource_id", "")).equals(datasourceId)
+                    && String.valueOf(other.getOrDefault("source_db", "")).equals(sourceDb)
+                    && String.valueOf(other.getOrDefault("source_table", "")).equals(sourceTable)) {
+                continue;
+            }
+            String otherWriter = SyncMappingRules.writerColOf(String.valueOf(other.get("task_id")),
+                    String.valueOf(other.getOrDefault("datasource_id", "")),
+                    String.valueOf(other.getOrDefault("source_db", "")),
+                    String.valueOf(other.getOrDefault("source_table", "")));
+            if (writer.equals(otherWriter)) {
+                throw new IllegalArgumentException("写者列名碰撞(md5 截断同号): " + writer
+                        + " 与逻辑表 " + logicalTable + " 内另一任务(源 " + other.get("source_db") + "."
+                        + other.get("source_table") + ")冲突, 请调整任务/数据源 ID");
+            }
+        }
     }
 
     /** 记录任务执行历史 */
@@ -378,6 +429,32 @@ public class CdcStService {
                 log.warn("更新 sync_task 运行状态失败: {}", e.getMessage());
             }
         }
+    }
+
+    /**
+     * N6(D1/D2): 源表 DDL 变更(TRUNCATE/DROP/ALTER)告警登记。
+     * SeaTunnel CDC 2.3.12 不输出 Debezium TRUNCATE/schema-change 事件(反编译取证:
+     * 反序列化链路无 op=t 处理), 采集端无法自动检测 → 按拍板语义「不自动同步 + sync_alert
+     * 告警 + 人工处置目标表」, 由 DBA/运维在执行 DDL 后登记告警, watchdog 告警闭环处置。
+     */
+    public void alertDdlChange(String logicalTable, String ddlKind, String detail) {
+        String kind = ddlKind == null ? "DDL" : ddlKind.toUpperCase();
+        if (!java.util.Set.of("TRUNCATE", "DROP", "ALTER").contains(kind)) {
+            throw new IllegalArgumentException("ddlKind 仅支持 TRUNCATE/DROP/ALTER, 实际: " + ddlKind);
+        }
+        Long taskId = null;
+        try {
+            taskId = metaJdbc.queryForObject(
+                    "SELECT task_id FROM cdc_st_task WHERE logical_table = ? LIMIT 1", Long.class, logicalTable);
+        } catch (Exception ignore) {
+            // 无任务也可登记(逻辑表级告警)
+        }
+        metaJdbc.update("INSERT INTO sync_alert (logical_table, task_id, alert_type, detail, status) "
+                        + "VALUES (?, ?, 'ddl_change', ?, 'OPEN')",
+                logicalTable, taskId,
+                "源表 DDL " + kind + ": " + (detail == null ? "" : detail)
+                        + "(拍板语义: 不自动同步, 请人工处置目标表后关闭本条告警)");
+        log.warn("DDL 变更告警已写 sync_alert: {} {} {}", logicalTable, kind, detail);
     }
 
     private void markOwnerIdle(CdcStTask task) {

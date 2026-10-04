@@ -15,6 +15,7 @@ import java.util.Map;
  *                                          businessKeyFields, keyColumns, topic?}
  *   POST /api/sync/cdc-st/start/{logicalTable}  启动(connector-cdc-mysql 全量+增量 → CdcSeqTransform → Kafka)
  *   POST /api/sync/cdc-st/stop/{logicalTable}   停止(checkpoint 落盘, 重启同 jobId 续采)
+ *   POST /api/sync/cdc-st/alert-ddl             源表 DDL(TRUNCATE/DROP/ALTER)告警登记(N6)
  *   GET  /api/sync/cdc-st/status                全部任务 + SeaTunnel 实时状态
  * </pre>
  */
@@ -83,5 +84,18 @@ public class SyncCdcStController {
     @GetMapping("/status")
     public ApiResponse<List<Map<String, Object>>> status() {
         return ApiResponse.ok(service.status());
+    }
+
+    /** N6(D1/D2): 源表 DDL(TRUNCATE/DROP/ALTER)告警登记——CDC 不输出 DDL 事件, 由 DBA 执行后登记 */
+    @PostMapping("/alert-ddl")
+    public ApiResponse<Map<String, Object>> alertDdl(@RequestBody Map<String, Object> body) {
+        String logicalTable = (String) body.get("logicalTable");
+        String ddlKind = (String) body.get("ddlKind");
+        String detail = (String) body.get("detail");
+        if (logicalTable == null || logicalTable.isBlank()) {
+            throw new IllegalArgumentException("logicalTable 不能为空");
+        }
+        service.alertDdlChange(logicalTable, ddlKind, detail);
+        return ApiResponse.ok(Map.of("alerted", true, "logicalTable", logicalTable));
     }
 }
