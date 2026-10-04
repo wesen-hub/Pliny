@@ -262,7 +262,9 @@ public class SyncConsumer {
         String table = RouteUtil.tableName(prefix, route.tableNo(), tableCount);
         Map<String, Object> fields = rec.getFields();
         // 业务键列回填: 采集端字段映射后 fields 可能不含 key 列(如 ext 表只映射 addr/level),
-        // 但 ODKU 定位行需要 key 列值 → 从 CdcRecord.businessKey 回填(单键直填; 多键按 '|' 拆分)
+        // 但 ODKU 定位行需要 key 列值 → 从 CdcRecord.businessKey 回填
+        // (N1(A1): 单键直填; 多键 businessKey 为 JSON 数组元素与 keys 一一对应, 键值含 '|' 不歧义;
+        //  解析失败回退 '|' 拆分, 兼容旧格式消息重放)
         List<String> keys = rec.getKeyColumns();
         if (keys != null && !keys.isEmpty()) {
             final Map<String, Object> ff = fields;
@@ -273,16 +275,33 @@ public class SyncConsumer {
                 if (keys.size() == 1) {
                     fields.put(keys.get(0), businessKey);
                 } else {
-                    String[] parts = String.valueOf(businessKey).split("\\|", -1);
-                    for (int i = 0; i < keys.size() && i < parts.length; i++) {
+                    List<String> parts = parseKeyValues(businessKey);
+                    for (int i = 0; i < keys.size() && i < parts.size(); i++) {
                         Object v = fields.get(keys.get(i));
                         if (v == null || String.valueOf(v).isBlank()) {
-                            fields.put(keys.get(i), parts[i]);
+                            fields.put(keys.get(i), parts.get(i));
                         }
                     }
                 }
             }
         }
         return new AtomicUpsertDao.TableOp(table, rowKind, rec.getKeyColumns(), fields, rec.getSeq(), writer);
+    }
+
+    /** N1(A1): 多键键值解析——businessKey 为 JSON 数组字符串(元素与 keyColumns 一一对应);
+     *  非 JSON(旧格式 '|' 拼接串)回退 '|' 拆分, 兼容改格式前已入 Kafka 的消息重放 */
+    private List<String> parseKeyValues(String businessKey) {
+        try {
+            var node = Json.readTree(businessKey);
+            if (node != null && node.isArray()) {
+                List<String> vals = new ArrayList<>();
+                node.forEach(e -> vals.add(e.isNull() ? "" : e.asText()));
+                return vals;
+            }
+        } catch (Exception ignore) {
+            // 非 JSON → 旧格式 '|' 拼接
+        }
+        String[] parts = businessKey.split("\\|", -1);
+        return List.of(parts);
     }
 }

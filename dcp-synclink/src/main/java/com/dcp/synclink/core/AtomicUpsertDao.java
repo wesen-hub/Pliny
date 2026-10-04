@@ -236,10 +236,10 @@ public class AtomicUpsertDao {
     }
 
     /**
-     * 批路径三步式(快照行, 设计方案 §4.3):
-     * ① 轻探存在(SELECT 键列) ② 已存在行条件 UPDATE(号条件 + 值条件, NULL 安全 <=>)
-     * ③ 不存在行批量 INSERT(双条件 upsert 形态, 并发窗口安全; 值同不写、号不推进)。
-     * 0 行 = 确定性零写入, 不依赖引擎隐式行为; 号列 = 写者列(与流路径同裁判规则)。
+     * 批路径原子 upsert(快照行, 设计方案 §4.3 + N4):
+     * 行存在与否都由一条 INSERT ... ON DUPLICATE KEY UPDATE 双条件覆盖(号进且值变才写, <=> NULL 安全),
+     * 插入与条件更新原子完成, 无 probe→UPDATE 竞态(并发删除 → INSERT 重插, 不丢行);
+     * 号列 = 写者列(与流路径同裁判规则)。
      */
     public void applySnapshotBatch(List<TableOp> ops) {
         if (ops == null || ops.isEmpty()) {
@@ -261,122 +261,20 @@ public class AtomicUpsertDao {
         if (upserts.isEmpty()) {
             return;
         }
-        // 分子批: 探存在 IN 列表不宜过大
+        // 分子批: 单条 INSERT 语句参数规模控制(快照 S 号全批同号, 同号拒写不互扰)
         final int chunk = 500;
         for (int from = 0; from < upserts.size(); from += chunk) {
             snapshotChunk(upserts.subList(from, Math.min(upserts.size(), from + chunk)));
         }
     }
 
-    /** 单子批三步式: 探存在 → 更新组 + 插入组(一个事务) */
+    /** 单子批原子 upsert(N4): 不 probe 分组, 全部走双条件 INSERT...ODKU(插入或条件更新原子完成) */
     private void snapshotChunk(List<TableOp> part) {
-        String table = part.get(0).table();
-        List<String> keyColumns = part.get(0).keyColumns();
-        java.util.Set<String> exists = probeExisting(table, keyColumns, part);
-        List<TableOp> updates = new ArrayList<>();
-        List<TableOp> inserts = new ArrayList<>();
-        for (TableOp op : part) {
-            if (exists.contains(keyOf(op.fields(), keyColumns))) {
-                updates.add(op);
-            } else {
-                inserts.add(op);
-            }
-        }
-        tx.executeWithoutResult(status -> {
-            for (TableOp op : updates) {
-                snapshotUpdate(table, keyColumns, op);
-            }
-            if (!inserts.isEmpty()) {
-                snapshotInsert(table, keyColumns, inserts);
-            }
-        });
+        snapshotInsert(part.get(0).table(), part.get(0).keyColumns(), part);
     }
 
-    /** 轻探存在: 单键 IN; 多键 OR 拼接(键值统一 str 化, 与写入口径一致) */
-    private java.util.Set<String> probeExisting(String table, List<String> keyColumns, List<TableOp> part) {
-        StringBuilder sql = new StringBuilder("SELECT ").append(keysSql(keyColumns))
-                .append(" FROM `").append(table).append("` WHERE ");
-        List<Object> args = new ArrayList<>();
-        if (keyColumns.size() == 1) {
-            sql.append("`").append(keyColumns.get(0)).append("` IN (");
-            for (int i = 0; i < part.size(); i++) {
-                if (i > 0) {
-                    sql.append(", ");
-                }
-                sql.append("?");
-                args.add(str(part.get(i).fields().get(keyColumns.get(0))));
-            }
-            sql.append(")");
-        } else {
-            for (int i = 0; i < part.size(); i++) {
-                if (i > 0) {
-                    sql.append(" OR ");
-                }
-                sql.append("(");
-                for (int j = 0; j < keyColumns.size(); j++) {
-                    if (j > 0) {
-                        sql.append(" AND ");
-                    }
-                    sql.append("`").append(keyColumns.get(j)).append("` = ?");
-                    args.add(str(part.get(i).fields().get(keyColumns.get(j))));
-                }
-                sql.append(")");
-            }
-        }
-        return targetJdbc.query(sql.toString(), rs -> {
-            java.util.Set<String> found = new java.util.HashSet<>();
-            while (rs.next()) {
-                StringBuilder k = new StringBuilder();
-                for (int j = 0; j < keyColumns.size(); j++) {
-                    if (j > 0) {
-                        k.append('|');
-                    }
-                    String v = rs.getString(j + 1);
-                    k.append(v == null ? "" : v);
-                }
-                found.add(k.toString());
-            }
-            return found;
-        }, args.toArray());
-    }
-
-    /** 已存在行: 条件 UPDATE(号条件 ? > 写者列 且 任一值列有差异); 0 行 = 确定性零写入 */
-    private void snapshotUpdate(String table, List<String> keyColumns, TableOp op) {
-        String judgeCol = requireWriter(op);
-        Map<String, Object> fields = op.fields();
-        List<String> dataCols = new ArrayList<>(fields.keySet());
-        dataCols.removeAll(keyColumns);
-        if (dataCols.isEmpty()) {
-            return;
-        }
-        StringBuilder sql = new StringBuilder("UPDATE `").append(table).append("` SET ");
-        List<Object> args = new ArrayList<>();
-        for (int i = 0; i < dataCols.size(); i++) {
-            if (i > 0) {
-                sql.append(", ");
-            }
-            sql.append("`").append(dataCols.get(i)).append("` = ?");
-            args.add(str(fields.get(dataCols.get(i))));
-        }
-        sql.append(", `").append(judgeCol).append("` = ?");
-        args.add(op.seq());
-        sql.append(" WHERE ");
-        appendKeyCond(sql, args, keyColumns, fields);
-        sql.append(" AND ? > `").append(judgeCol).append("`");
-        args.add(op.seq());
-        sql.append(" AND (");
-        for (int i = 0; i < dataCols.size(); i++) {
-            if (i > 0) {
-                sql.append(" OR ");
-            }
-            sql.append("NOT (`").append(dataCols.get(i)).append("` <=> ?)");
-            args.add(str(fields.get(dataCols.get(i))));
-        }
-        sql.append(")");
-        targetJdbc.update(sql.toString(), args.toArray());
-    }
-
-    /** 不存在行: 批量 INSERT(双条件 upsert 形态, 并发窗口安全); 写者列仅在"号进且值变"时推进 */
+    /** 批量原子 upsert(双条件 ODKU, 并发窗口安全); 写者列仅在"号进且值变"时推进;
+     *  同批同键多行(快照重发): 后续行对先前行触发 ODKU, 同号拒写保留先到者(幂等) */
     private void snapshotInsert(String table, List<String> keyColumns, List<TableOp> ops) {
         String judgeCol = requireWriter(ops.get(0));
         java.util.Set<String> fieldCols = new java.util.LinkedHashSet<>();
@@ -437,22 +335,6 @@ public class AtomicUpsertDao {
             sql.append("`").append(keyColumns.get(j)).append("` = ?");
             args.add(str(fields.get(keyColumns.get(j))));
         }
-    }
-
-    private String keysSql(List<String> keyColumns) {
-        return keyColumns.stream().map(c -> "`" + c + "`")
-                .collect(java.util.stream.Collectors.joining(", "));
-    }
-
-    private String keyOf(Map<String, Object> fields, List<String> keyColumns) {
-        StringBuilder k = new StringBuilder();
-        for (String c : keyColumns) {
-            if (k.length() > 0) {
-                k.append('|');
-            }
-            k.append(str(fields.get(c)));
-        }
-        return k.toString();
     }
 
     /** 多值 INSERT ... ON DUPLICATE KEY UPDATE(同表, 同写者) */
@@ -579,7 +461,8 @@ public class AtomicUpsertDao {
         return w;
     }
 
-    /** 写者 seq 列名: 同一(任务实例 × 数据源 × 库 × 表)流共用一列, 各自比各自的 → 跨任务/跨源互不压制 */
+    /** 写者 seq 列名: 同一(任务实例 × 数据源 × 库 × 表)流共用一列, 各自比各自的 → 跨任务/跨源互不压制;
+     *  N8: 超长截断后缀 md5 截前 16 hex 字符(与文档 md5(16) 对齐, 总长 ≤ 60 ≤ MySQL 列名上限 64) */
     public static String writerColOf(String taskId, String datasourceId, String sourceDb, String sourceTable) {
         if (taskId == null || taskId.isBlank() || sourceDb == null || sourceDb.isBlank()
                 || sourceTable == null || sourceTable.isBlank()) {
@@ -589,7 +472,7 @@ public class AtomicUpsertDao {
                 + "_" + sourceDb + "." + sourceTable;
         String col = raw.replaceAll("[^A-Za-z0-9_]", "_");
         if (col.length() > 60) {
-            col = col.substring(0, 52) + "_" + md5Short(raw);
+            col = col.substring(0, 43) + "_" + md5Short(raw);
         }
         return col;
     }
@@ -602,7 +485,7 @@ public class AtomicUpsertDao {
             for (byte b : d) {
                 h.append(String.format("%02x", b & 0xff));
             }
-            return h.substring(0, 8);
+            return h.substring(0, 16);
         } catch (Exception e) {
             return Integer.toHexString(s.hashCode());
         }
