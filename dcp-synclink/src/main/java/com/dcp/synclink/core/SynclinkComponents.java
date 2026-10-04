@@ -48,7 +48,7 @@ public class SynclinkComponents implements AutoCloseable {
                 num("dcp.sync.buffer.drain-per-queue", 200));
         LogicalTableReader tableReader = new LogicalTableReader(metaJdbc);
         this.syncConsumer = new SyncConsumer(targetDb.daoOf("target_db"), tableReader, dltService,
-                batchWriteService, metaJdbc,
+                batchWriteService,
                 num("dcp.sync.demo.table-count", 50),
                 str("dcp.sync.demo.table-prefix", "t_order"));
         batchWriteService.init();

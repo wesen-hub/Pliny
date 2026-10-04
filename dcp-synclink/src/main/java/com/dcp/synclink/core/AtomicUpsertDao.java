@@ -14,28 +14,31 @@ import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 目标分表原子幂等写(V3 §4.5)。
+ * 目标分表原子幂等写(设计文档 §4.5)。
  *
  * <p>核心: seq 裁判与写入合成一条 SQL, 杜绝「先查再写」的竞态
  * (跨分区/重放时同一行可能并发写, 小 seq 后落盘覆盖大 seq)。
  *
  * <pre>
  *   INSERT ... ON DUPLICATE KEY UPDATE
- *     col = IF(seq < VALUES(seq), VALUES(col), col),
- *     seq = IF(seq < VALUES(seq), VALUES(seq), seq)
- *   DELETE FROM t WHERE 唯一键 AND seq < ?
+ *     col = IF(writer_col &lt; VALUES(writer_col), VALUES(col), col),
+ *     writer_col = GREATEST(writer_col, VALUES(writer_col)),
+ *     seq = GREATEST(seq, VALUES(seq))
+ *   DELETE FROM t WHERE 唯一键 AND writer_col &lt; ?
  * </pre>
  *
- * P1: 支持批量(一批一个事务, 主键修改拆出的 DELETE+INSERT 同批原子)。
- * TODO(P2+): 列类型从模型定义生成; 字段级部分更新(多表合并场景)。
+ * <p>新方案: 写者列裁判是唯一裁判(每任务×源一条独立写者 seq 列, 各自比各自的),
+ * 无行级 seq 裁判(旧单源模式)/无直覆写入(旧多源模式)。
+ *
+ * P1: 支持批量(一批一个事务); 攒批写失败逐条隔离入死信由 BatchWriteService 负责。
+ * TODO(P2+): 列类型从模型定义生成。
  */
 @Slf4j
 public class AtomicUpsertDao {
 
-    /** 目标侧单条操作(已路由到物理表); judge=字段级 seq 裁判开关(单源逻辑表启用);
-     *  writer=写者 seq 列名(如 _s{taskId}; 非空时按写者列裁判, 每个任务/源各比各的) */
+    /** 目标侧单条操作(已路由到物理表); writer=写者 seq 列名(_s{taskId}_d{datasourceId}_{db}.{table}, 必配) */
     public record TableOp(String table, String rowKind, List<String> keyColumns,
-                          Map<String, Object> fields, long seq, boolean judge, String writer) {
+                          Map<String, Object> fields, long seq, String writer) {
     }
 
     private final JdbcTemplate targetJdbc;
@@ -158,7 +161,7 @@ public class AtomicUpsertDao {
     }
 
     /**
-     * 批量原子写入: 一批一个事务(含主键修改拆出的 DELETE+INSERT, 成对原子)。
+     * 批量原子写入: 一批一个事务。
      * 建表 DDL 在事务外执行(MySQL DDL 隐式提交)。
      */
     public void applyBatch(List<TableOp> ops) {
@@ -213,19 +216,16 @@ public class AtomicUpsertDao {
         // 攒批桶可能混入多个写者(多源/跨任务同表): 按写者列分组, 各自成一条多值 SQL, 各自比各自的 seq
         Map<String, List<TableOp>> writerGroups = new LinkedHashMap<>();
         for (TableOp u : upserts) {
-            String k = (u.writer() != null && !u.writer().isBlank())
-                    ? "W:" + u.writer() : "L:" + u.judge();
-            writerGroups.computeIfAbsent(k, x -> new ArrayList<>()).add(u);
+            if (u.writer() == null || u.writer().isBlank()) {
+                throw new IllegalStateException("写者列缺失(新方案身份必配, 消费端入口已拦截无身份消息): " + table);
+            }
+            writerGroups.computeIfAbsent(u.writer(), x -> new ArrayList<>()).add(u);
         }
         tx.executeWithoutResult(status -> {
             for (Map.Entry<String, List<TableOp>> g : writerGroups.entrySet()) {
                 List<TableOp> gl = g.getValue();
-                TableOp first = gl.get(0);
-                String writer = (first.writer() != null && !first.writer().isBlank())
-                        ? first.writer() : null;
-                if (writer != null) {
-                    ensureWriterCol(table, writer);
-                }
+                String writer = g.getKey();
+                ensureWriterCol(table, writer);
                 multiUpsertInternal(gl, keyCols, writer);
             }
             for (TableOp d : deletes) {
@@ -239,7 +239,7 @@ public class AtomicUpsertDao {
      * 批路径三步式(快照行, 设计方案 §4.3):
      * ① 轻探存在(SELECT 键列) ② 已存在行条件 UPDATE(号条件 + 值条件, NULL 安全 <=>)
      * ③ 不存在行批量 INSERT(双条件 upsert 形态, 并发窗口安全; 值同不写、号不推进)。
-     * 0 行 = 确定性零写入, 不依赖引擎隐式行为; 号列 = 写者列(多源)或行 seq(单源), 与流路径同裁判规则。
+     * 0 行 = 确定性零写入, 不依赖引擎隐式行为; 号列 = 写者列(与流路径同裁判规则)。
      */
     public void applySnapshotBatch(List<TableOp> ops) {
         if (ops == null || ops.isEmpty()) {
@@ -340,10 +340,9 @@ public class AtomicUpsertDao {
         }, args.toArray());
     }
 
-    /** 已存在行: 条件 UPDATE(号条件 ? > 号列 且 任一值列有差异); 0 行 = 确定性零写入 */
+    /** 已存在行: 条件 UPDATE(号条件 ? > 写者列 且 任一值列有差异); 0 行 = 确定性零写入 */
     private void snapshotUpdate(String table, List<String> keyColumns, TableOp op) {
-        boolean perWriter = op.writer() != null && !op.writer().isBlank();
-        String judgeCol = perWriter ? op.writer() : "seq";
+        String judgeCol = requireWriter(op);
         Map<String, Object> fields = op.fields();
         List<String> dataCols = new ArrayList<>(fields.keySet());
         dataCols.removeAll(keyColumns);
@@ -377,10 +376,9 @@ public class AtomicUpsertDao {
         targetJdbc.update(sql.toString(), args.toArray());
     }
 
-    /** 不存在行: 批量 INSERT(双条件 upsert 形态, 并发窗口安全); 号列仅在"号进且值变"时推进 */
+    /** 不存在行: 批量 INSERT(双条件 upsert 形态, 并发窗口安全); 写者列仅在"号进且值变"时推进 */
     private void snapshotInsert(String table, List<String> keyColumns, List<TableOp> ops) {
-        boolean perWriter = ops.get(0).writer() != null && !ops.get(0).writer().isBlank();
-        String judgeCol = perWriter ? ops.get(0).writer() : "seq";
+        String judgeCol = requireWriter(ops.get(0));
         java.util.Set<String> fieldCols = new java.util.LinkedHashSet<>();
         for (TableOp op : ops) {
             fieldCols.addAll(op.fields().keySet());
@@ -460,8 +458,10 @@ public class AtomicUpsertDao {
     /** 多值 INSERT ... ON DUPLICATE KEY UPDATE(同表, 同写者) */
     private void multiUpsertInternal(List<TableOp> ops, List<String> keyCols, String writer) {
         String table = ops.get(0).table();
-        boolean perWriter = writer != null && !writer.isBlank();
-        // 列集合: key 列 + 字段并集 + [写者列] + seq
+        if (writer == null || writer.isBlank()) {
+            throw new IllegalStateException("写者列缺失(新方案身份必配): " + table);
+        }
+        // 列集合: key 列 + 字段并集 + 写者列 + seq
         List<String> cols = new ArrayList<>(new LinkedHashSet<>(keyCols));
         java.util.Set<String> fieldCols = new LinkedHashSet<>();
         for (TableOp op : ops) {
@@ -469,9 +469,7 @@ public class AtomicUpsertDao {
         }
         fieldCols.removeAll(keyCols);
         cols.addAll(fieldCols);
-        if (perWriter) {
-            cols.add(writer);
-        }
+        cols.add(writer);
         cols.add("seq");
 
         StringBuilder sql = new StringBuilder("INSERT INTO `").append(table).append("` (")
@@ -490,7 +488,7 @@ public class AtomicUpsertDao {
                     sql.append(", ");
                 }
                 first = false;
-                if ("seq".equals(c) || (perWriter && writer.equals(c))) {
+                if ("seq".equals(c) || writer.equals(c)) {
                     sql.append("?");
                     args.add(op.seq());
                 } else {
@@ -503,24 +501,14 @@ public class AtomicUpsertDao {
         }
         sql.append(" ON DUPLICATE KEY UPDATE ");
         List<String> sets = new ArrayList<>();
-        // 单源逻辑表启用整行 seq 字段裁判(防乱序/重放倒流);
-        // 多源表(多表合并)禁用: 各源写不同字段, 行 seq 会被对方顶高, 整行裁判会误拒本源的合法更新
-        boolean judge = ops.get(0).judge();
+        // 写者列裁判(新方案唯一裁判): 只与本写者(任务×源)自己的 seq 比, 别的写者写高行 seq 不再误拒
+        // (标识符统一反引号, 缺陷 6b: 裸 writer/seq 加固)
         for (String c : fieldCols) {
-            if (perWriter) {
-                // 写者列裁判: 只与本写者(任务×源)自己的 seq 比, 别的写者写高行 seq 不再误拒
-                sets.add("`" + c + "` = IF(" + writer + " < VALUES(" + writer
-                        + "), VALUES(`" + c + "`), `" + c + "`)");
-            } else if (judge) {
-                sets.add("`" + c + "` = IF(seq < VALUES(seq), VALUES(`" + c + "`), `" + c + "`)");
-            } else {
-                sets.add("`" + c + "` = VALUES(`" + c + "`)");
-            }
+            sets.add("`" + c + "` = IF(`" + writer + "` < VALUES(`" + writer
+                    + "`), VALUES(`" + c + "`), `" + c + "`)");
         }
-        if (perWriter) {
-            sets.add(writer + " = GREATEST(" + writer + ", VALUES(" + writer + "))");
-        }
-        sets.add("seq = GREATEST(seq, VALUES(seq))");
+        sets.add("`" + writer + "` = GREATEST(`" + writer + "`, VALUES(`" + writer + "`))");
+        sets.add("`seq` = GREATEST(`seq`, VALUES(`seq`))");
         sql.append(String.join(", ", sets));
         targetJdbc.update(sql.toString(), args.toArray());
     }
@@ -530,8 +518,7 @@ public class AtomicUpsertDao {
         List<String> keyColumns = op.keyColumns();
         Map<String, Object> fields = op.fields();
         long seq = op.seq();
-        boolean perWriter = op.writer() != null && !op.writer().isBlank();
-        String writer = perWriter ? op.writer() : null;
+        String writer = requireWriter(op);
         List<String> cols = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         for (String k : keyColumns) {
@@ -545,10 +532,8 @@ public class AtomicUpsertDao {
             cols.add("`" + e.getKey() + "`");
             args.add(str(e.getValue()));
         }
-        if (perWriter) {
-            cols.add("`" + writer + "`");
-            args.add(seq);
-        }
+        cols.add("`" + writer + "`");
+        args.add(seq);
         cols.add("`seq`");
         args.add(seq);
 
@@ -561,21 +546,13 @@ public class AtomicUpsertDao {
             if (keyColumns.contains(e.getKey())) {
                 continue;
             }
-            // 单源表启用整行 seq 字段裁判(防乱序/重放倒流); 多源表禁用(行 seq 被对方顶高会误拒)
-            if (perWriter) {
-                sets.add("`" + e.getKey() + "` = IF(" + writer + " < VALUES(" + writer
-                        + "), VALUES(`" + e.getKey() + "`), `" + e.getKey() + "`)");
-            } else if (op.judge()) {
-                sets.add("`" + e.getKey() + "` = IF(seq < VALUES(seq), VALUES(`" + e.getKey()
-                        + "`), `" + e.getKey() + "`)");
-            } else {
-                sets.add("`" + e.getKey() + "` = VALUES(`" + e.getKey() + "`)");
-            }
+            // 写者列裁判(新方案唯一裁判): 只与本写者(任务×源)自己的 seq 比
+            // (标识符统一反引号, 缺陷 6b: 裸 writer/seq 加固)
+            sets.add("`" + e.getKey() + "` = IF(`" + writer + "` < VALUES(`" + writer
+                    + "`), VALUES(`" + e.getKey() + "`), `" + e.getKey() + "`)");
         }
-        if (perWriter) {
-            sets.add("`" + writer + "` = GREATEST(`" + writer + "`, VALUES(`" + writer + "`))");
-        }
-        sets.add("seq = GREATEST(seq, VALUES(seq))");
+        sets.add("`" + writer + "` = GREATEST(`" + writer + "`, VALUES(`" + writer + "`))");
+        sets.add("`seq` = GREATEST(`seq`, VALUES(`seq`))");
         sql.append(String.join(", ", sets));
         targetJdbc.update(sql.toString(), args.toArray());
     }
@@ -587,15 +564,19 @@ public class AtomicUpsertDao {
             conds.add("`" + k + "` = ?");
             args.add(str(op.fields().get(k)));
         }
-        if (op.writer() != null && !op.writer().isBlank()) {
-            // 只允许本写者的新版本删行: 写者列 < 本次 seq 才删, 防旧删除重放误删新行
-            conds.add("`" + op.writer() + "` < ?");
-            args.add(op.seq());
-        } else {
-            conds.add("seq < ?");
-            args.add(op.seq());
-        }
+        // 只允许本写者的新版本删行: 写者列 < 本次 seq 才删, 防旧删除重放误删新行
+        conds.add("`" + requireWriter(op) + "` < ?");
+        args.add(op.seq());
         targetJdbc.update("DELETE FROM `" + op.table() + "` WHERE " + String.join(" AND ", conds), args.toArray());
+    }
+
+    /** 写者列必配(新方案唯一裁判): 缺失 = 无身份消息混入, fail-fast */
+    private static String requireWriter(TableOp op) {
+        String w = op.writer();
+        if (w == null || w.isBlank()) {
+            throw new IllegalStateException("写者列缺失(新方案身份必配): 表=" + op.table());
+        }
+        return w;
     }
 
     /** 写者 seq 列名: 同一(任务实例 × 数据源 × 库 × 表)流共用一列, 各自比各自的 → 跨任务/跨源互不压制 */

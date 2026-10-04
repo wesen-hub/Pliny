@@ -1,8 +1,7 @@
 package com.dcp.synclink.model;
 
 /**
- * 轻量 JSON 工具(业务 jar 自足): 复刻 backend SyncProducer.Json 的语义,
- * 不做 Spring 依赖, ObjectMapper 静态单例(线程安全)。
+ * 轻量 JSON 工具(业务 jar 自足): 不做 Spring 依赖, ObjectMapper 静态单例(线程安全)。
  */
 public final class Json {
 

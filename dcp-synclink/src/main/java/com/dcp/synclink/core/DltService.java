@@ -35,7 +35,7 @@ public class DltService {
                 businessKey, payload, truncate(errorMsg, 2000));
     }
 
-    /** 批量失败时的汇总死信(无原始 record; 攒批场景): 按逻辑表记一条汇总 */
+    /** 批量失败逐条隔离时的防御性汇总死信(无原始 record 对应时; 攒批场景) */
     public void saveRaw(String logicalTable, String errorMsg, int count) {
         metaJdbc.update(
                 "INSERT INTO dlt_message (logical_table, source_table, topic, partition_id, offset_id, "
@@ -44,15 +44,15 @@ public class DltService {
                 logicalTable, "[批量攒批失败 " + count + " 条]", truncate(errorMsg, 2000));
     }
 
-    /** 从 payload 解析逻辑表(CdcRecord JSON 或 envelope 两种格式) */
+    /** 从 payload 解析逻辑表(仅 SeaTunnel envelope 格式, 解析失败尽力而为返回"未知") */
     private String parseLogicalTable(String payload) {
         try {
-            if (payload != null && payload.contains("\"__payload\"")) {
-                var node = Json.readTree(payload);
-                payload = node.get("__payload").asText();
-            }
             var node = Json.readTree(payload);
-            return node.has("logicalTable") ? node.get("logicalTable").asText() : "未知";
+            if (!node.has("__payload")) {
+                return "未知";
+            }
+            var inner = Json.readTree(node.get("__payload").asText());
+            return inner.has("logicalTable") ? inner.get("logicalTable").asText() : "未知";
         } catch (Exception e) {
             return "未知";
         }

@@ -14,13 +14,16 @@ import java.util.concurrent.*;
  *
  * <pre>
  *   消费者线程(框架每分区一线程, 见 schedulerbridge.SyncWriterExecutor)
- *      → 解析/路由 → BatchEntry(TableOp 列表 + 原始记录 + 分区 offset) → offer 有界队列
+ *      → 解析/路由 → BatchEntry(TableOp 列表 + per-op 原始记录 OpRef) → offer 有界队列
  *      → 队列满 → 调用方 pause 分区等待 → 有空位 resume
  *
  *   共享写线程池(write-threads 个, 不分逻辑表):
  *      轮询所有逻辑表队列 → 按物理表攒批(Accumulator)
  *      → 够批(batch-size)或够时(batch-timeout-ms) → flush 多值 INSERT(事务)
  *      → 更新 per-partition 已写 offset 游标
+ *
+ *   写失败处置(新方案 G2): 攒批失败 → 逐条重试隔离, 重试仍失败的逐条入死信(记录失败原因),
+ *   不阻塞后续数据流(全部条处理完毕(写成功/入死信)即推进游标)。
  *
  *   offset 提交(见 {@link #tryCommit(Consumer)}): 由**消费者线程**(框架执行器线程)周期调用
  *   commitSync 提交游标 —— commitSync 要求调用者是合法组成员(同线程合法);
@@ -37,22 +40,27 @@ import java.util.concurrent.*;
 @Slf4j
 public class BatchWriteService {
 
-    /** 队列元素: 一"批"已解析记录(同一逻辑表); snapshot=true 走批路径三步式模板, false 走流路径多值 upsert */
+    /** 队列元素: 一"批"已解析记录(同一逻辑表, ops 与 opRefs 一一对应);
+     *  snapshot=true 走批路径三步式模板, false 走流路径多值 upsert */
     public record BatchEntry(String logicalTable, List<AtomicUpsertDao.TableOp> ops,
-                             List<ConsumerRecord<String, String>> rawRecords,
-                             Map<TopicPartition, Long> offsets, boolean snapshot) {
+                             List<OpRef> opRefs, boolean snapshot) {
+    }
+
+    /** 单 op 的原始记录引用(per-op 一一对应: 死信留证取 raw, 游标推进取 raw 的 topic/partition/offset) */
+    public record OpRef(ConsumerRecord<String, String> raw) {
     }
 
     /** 攒批桶键: 同一物理表 + 同一批流模板(快照批与增量批分开攒, 各自 flush) */
     private record BucketKey(String table, boolean snapshot) {
     }
 
-    /** 攒批桶: 同一物理表的待写操作 + 该批覆盖的分区 offset(取最大值) */
+    /** 攒批桶: 同一物理表的待写操作(与原始记录一一对应, 供失败逐条隔离入死信) + 该批覆盖的分区 offset(取最大值) */
     private static class Accumulator {
         final String table;
         final String logicalTable;
         final boolean snapshot;
         final List<AtomicUpsertDao.TableOp> ops = new ArrayList<>();
+        final List<ConsumerRecord<String, String>> records = new ArrayList<>();
         final Map<TopicPartition, Long> offsets = new HashMap<>();
         final long firstTime;
 
@@ -151,6 +159,14 @@ public class BatchWriteService {
         return off == null ? -1 : off;
     }
 
+    /** 无需写库的记录(如 TiCDC 水位事件/已落死信留证的消息)跳过时推进游标:
+     *  直接视为已处理参与提交, 避免"尾批之后无数据 → 游标永不追平"的假卡 lag。 */
+    public void ackOffsets(Map<TopicPartition, Long> offsets) {
+        if (offsets != null) {
+            offsets.forEach((tp, off) -> offsetCursor.merge(tp, off, Math::max));
+        }
+    }
+
     /** 写线程主循环: 轮询所有队列 → 按物理表攒批 → 够批/够时 flush → 周期提交 offset */
     private void writeLoop() {
         Map<BucketKey, Accumulator> buckets = new HashMap<>();
@@ -162,12 +178,23 @@ public class BatchWriteService {
                     List<BatchEntry> drained = new ArrayList<>(drainPerQueue);
                     q.drainTo(drained, drainPerQueue);
                     for (BatchEntry entry : drained) {
-                        for (AtomicUpsertDao.TableOp op : entry.ops()) {
+                        for (int i = 0; i < entry.ops().size(); i++) {
+                            AtomicUpsertDao.TableOp op = entry.ops().get(i);
                             BucketKey key = new BucketKey(op.table(), entry.snapshot());
                             Accumulator acc = buckets.computeIfAbsent(key,
                                     k -> new Accumulator(k.table(), entry.logicalTable(), k.snapshot()));
                             acc.ops.add(op);
-                            mergeOffsets(acc.offsets, entry.offsets());
+                            BatchWriteService.OpRef ref = i < entry.opRefs().size() ? entry.opRefs().get(i) : null;
+                            // per-op 原始记录(失败逐条隔离入死信留证)
+                            if (ref != null && ref.raw() != null) {
+                                acc.records.add(ref.raw());
+                            }
+                            // per-op offset(缺陷 4): 桶只合并本桶 op 的 offset,
+                            // 消灭整批 max offset 塞进每个物理表桶导致的跨表提前推进
+                            if (ref != null && ref.raw() != null) {
+                                acc.offsets.merge(new TopicPartition(ref.raw().topic(), ref.raw().partition()),
+                                        ref.raw().offset(), Math::max);
+                            }
                         }
                     }
                 }
@@ -202,7 +229,7 @@ public class BatchWriteService {
         log.info("写线程退出");
     }
 
-    /** flush 一个物理表的攒批: 多值 INSERT(事务) → 已写游标 */
+    /** flush 一个物理表的攒批: 多值 INSERT(事务) → 已写游标; 失败 → 逐条隔离(重试/入死信) */
     private void flush(Accumulator acc) {
         if (acc.ops.isEmpty()) {
             return;
@@ -219,21 +246,43 @@ public class BatchWriteService {
             acc.offsets.forEach((tp, off) -> offsetCursor.merge(tp, off, Math::max));
             log.debug("flush {}: {} 条", acc.table, acc.ops.size());
         } catch (Exception e) {
-            // 批量失败 → 死信兜底(不阻塞流水线); 游标不更新 → 下轮提交仍从旧位点(重放由幂等吸收)
-            log.error("flush 失败 {} ({}条): {}, 写死信", acc.table, acc.ops.size(), e.getMessage());
-            try {
-                dltService.saveRaw(acc.logicalTable, e.getMessage(), acc.ops.size());
-            } catch (Exception ex) {
-                log.error("死信落库失败: {}", ex.getMessage());
-            }
+            // 攒批失败(G2 新方案): 逐条重试隔离, 重试仍失败的逐条入死信(记录失败原因),
+            // 不阻塞后续数据流; 全部条处理完毕(写成功/入死信)即推进游标
+            log.error("flush 失败 {} ({}条), 转逐条隔离: {}", acc.table, acc.ops.size(), e.getMessage());
+            isolate(acc, e.getMessage());
         }
     }
-
-    private void mergeOffsets(Map<TopicPartition, Long> target, Map<TopicPartition, Long> src) {
-        if (src == null) {
-            return;
+    
+    /**
+     * 逐条隔离: 每条单事务重试; 仍失败 → 落死信(带原始 record 与失败原因)。
+     * 处理完(写成功或入死信)后推进游标 —— 失败不再阻塞后续数据流, 由人工从死信处理。
+     */
+    private void isolate(Accumulator acc, String batchError) {
+        int ok = 0;
+        int dlt = 0;
+        for (int i = 0; i < acc.ops.size(); i++) {
+            AtomicUpsertDao.TableOp op = acc.ops.get(i);
+            try {
+                targetDb.daoOf(acc.logicalTable).apply(op);
+                ok++;
+            } catch (Exception one) {
+                dlt++;
+                String reason = "攒批失败(" + batchError + ")逐条重试仍失败: " + one.getMessage();
+                try {
+                    if (i < acc.records.size() && acc.records.get(i) != null) {
+                        dltService.save(acc.records.get(i), reason);
+                    } else {
+                        dltService.saveRaw(acc.logicalTable, reason, 1);
+                    }
+                } catch (Exception dltEx) {
+                    log.error("死信落库失败: {}", dltEx.getMessage());
+                }
+            }
         }
-        src.forEach((tp, off) -> target.merge(tp, off, Math::max));
+        if (dlt > 0) {
+            log.warn("逐条隔离 {}: 成功 {} 条, 死信 {} 条(批量错误: {})", acc.table, ok, dlt, batchError);
+        }
+        acc.offsets.forEach((tp, off) -> offsetCursor.merge(tp, off, Math::max));
     }
 
     /**
