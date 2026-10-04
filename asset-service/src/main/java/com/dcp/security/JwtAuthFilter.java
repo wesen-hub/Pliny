@@ -10,13 +10,13 @@ import com.dcp.module.system.mapper.SysRoleMapper;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
 
-@Component
+// 低危-2: 不再标注 @Component —— 否则 Boot 会把它自动注册进过滤器链, 与 SecurityConfig 的
+// addFilterBefore 显式注册重复(同一请求会被过滤两次); 现在由 SecurityConfig 注入并注册。
 public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final SysRoleMapper roleMapper;
