@@ -9,7 +9,7 @@ package com.dcp.seatunnel.transform;
  *
  * <p>编码公式(与设计文档 §2.4 一一对应):
  * <pre>
- *   mysql     fileNo&lt;&lt;44 | pos&lt;&lt;12 | row
+ *   mysql     fileNo&lt;&lt;44 | pos&lt;&lt;12 | row           file 为 binlog 文件名("binlog.000006" 取 '.' 末段数字)
  *   pg        (logid&lt;&lt;32 | offset) &lt;&lt; 10            lsn = "logid/offsethex"
  *   oracle    commit_scn&lt;&lt;12 | lcr_position
  *   sqlserver lsnNum*10^6 + serial                  lsn 三段 hex 取前 8 位(32bit, 单调)
@@ -65,17 +65,27 @@ public final class PositionSeq {
         }
     }
 
-    /** mysql:file:pos:row → fileNo<<44 | pos<<12 | row */
+    /** mysql:file:pos:row → fileNo<<44 | pos<<12 | row
+     *  (file 实测形态为 binlog 文件名 "binlog.000006": 取 '.' 末段数字为 fileNo,
+     *  纯数字直取; 单源单调: 文件名后缀随 binlog 轮转递增, 取数字后 fileNo 单调不变式保持) */
     static long mysql(String body) {
         String[] p = body.split(":", -1);
         if (p.length < 2) {
             throw new IllegalStateException("mysql 位点格式异常: " + body);
         }
-        long file = parseLong(p[0], "mysql.file");
+        long file = parseFileNo(p[0]);
         long pos = parseLong(p[1], "mysql.pos");
         long row = p.length > 2 && !p[2].isEmpty() ? parseLong(p[2], "mysql.row") : 0L;
         SourcePositionSpec.checkLimits("mysql", new long[]{file, pos, row});
         return requirePositive((file << 44) | (pos << 12) | row, "mysql");
+    }
+
+    /** binlog 文件名 → fileNo: "binlog.000006" → 6; 纯数字直取; 末段非数字 → fail-fast(不变式 5) */
+    private static long parseFileNo(String file) {
+        String s = file.trim();
+        int dot = s.lastIndexOf('.');
+        String num = dot >= 0 ? s.substring(dot + 1) : s;
+        return parseLong(num, "mysql.file");
     }
 
     /** pg:lsn "logid/offsethex" → (logid<<32 | offset) << 10 */

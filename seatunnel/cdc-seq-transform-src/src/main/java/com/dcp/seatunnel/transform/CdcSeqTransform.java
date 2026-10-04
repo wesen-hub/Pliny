@@ -21,24 +21,26 @@ import java.util.Map;
  * <pre>
  *   RowKind → INSERT/UPDATE/DELETE
  *   businessKey = business_key_fields 值按声明顺序以 '|' 拼接(空值按 null_key_mode)
- *   seq        = 位点即序号(路径 1, emit_position=true) 或 元库 seq_counter 号段(旧)
+ *   seq        = 位点即序号(严格位点一态)
  *   bucket     = MurmurHash3(businessKey) % bucketCount(固定桶, 扩容映射热更新在 sink 侧)
  *   输出       = [__bucket, __payload(CdcRecord JSON)]
  * </pre>
  *
- * <p>位点发号三态(⑤ emit_position 灰度开关):
+ * <p>位点发号(新方案: 仅严格位点一态, 三态/号段已废弃):
  * <ul>
- *   <li>true(严格位点): 增量行必须有补丁透传位点(缺位点=混发 → fail-fast);
- *       快照行(无位点)统一编码为快照级号 S=f(snapshot_start_position)(④);</li>
- *   <li>false(纯号段): 计数器模式, 忽略补丁位点列(灰度双跑对照旧链路);</li>
- *   <li>缺省(兼容): 有位点用位点, 否则计数器(补丁落地前旧配置不受影响)。</li>
+ *   <li>增量行必须有补丁透传位点(缺位点 = 混发 → fail-fast);</li>
+ *   <li>快照行(位点主段空形态, 实测定案)统一编码为快照级号 S=f(snapshot_start_position)(方案 A 后端下发, 必配);</li>
  * </ul>
+ *
+ * <p>主键修改检测(新方案): 补丁透传 before 主键值(行尾第三列 __src_before_key),
+ * beforeKey ≠ businessKey → 写 sync_alert 告警 + 抛异常停止任务(checkpoint 保留,
+ * watchdog 查 OPEN 告警不自动 restore, 人工处理后重建/续采)。
  *
  * <p>要点:
  * <ul>
- *   <li>CDC 无 before image(2.3.12), 主键修改无法拆解 → 按业务铁律留给消费端告警(文档 §3.5);</li>
+ *   <li>CDC 无 before image(2.3.12), 主键修改无法自动拆解 → 按拍板策略暂停告警人工介入;</li>
  *   <li>UPDATE_BEFORE(若引擎发出)也按 UPDATE 处理: 序号小于 AFTER, 目标侧 seq 裁判天然收敛;</li>
- *   <li>JDBC 连接在 open() 建立(构造期不可序列化), close() 释放;</li>
+ *   <li>严格位点模式不连 seq_counter(位点即序号); 告警落库 sync_alert 为独立职责(可选配置);</li>
  *   <li>字段值统一字符串化(目标分表 VARCHAR 承载, 与 AtomicUpsertDao.str 一致)。</li>
  * </ul>
  */
@@ -50,14 +52,9 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
 
     private final CdcSeqTransformConfig config;
 
-    /** open() 初始化(transient: 不可序列化) */
-    private transient Connection seqConn;
-    private transient PreparedStatement allocStmt;
-    private transient PreparedStatement insertStmt;
-    private transient PreparedStatement selectStmt;
-    /** 当前已领号段的游标: [nextSeq, rangeEnd] 闭区间, nextSeq 为下一个待用号 */
-    private transient long nextSeq;
-    private transient long rangeEnd;
+    /** open() 初始化(transient: 不可序列化): 告警落库连接(可选, 主键修改/缺列告警写 sync_alert) */
+    private transient Connection alertConn;
+    private transient PreparedStatement alertStmt;
 
     private static final ObjectMapper OM = new ObjectMapper();
 
@@ -81,57 +78,41 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
 
     @Override
     public void open() {
-        // 严格位点模式下计数器不可达(缺位点 fail-fast), 不连元库;
-        // 号段/兼容模式仍需 seq_counter
-        if (config.isStrictPositionMode()) {
-            return;
-        }
+        // 严格位点一态: 不连 seq_counter(位点即序号, 无号可领);
+        // 告警落库为独立职责: 配置了告警库则建连接(主键修改告警写 sync_alert), 未配置仅抛异常
         try {
-            Class.forName("com.mysql.cj.jdbc.Driver");
-            this.seqConn = DriverManager.getConnection(
-                    config.getSeqDbUrl(), config.getSeqDbUser(), config.getSeqDbPassword());
-            this.allocStmt = seqConn.prepareStatement(
-                    "UPDATE seq_counter SET cur = cur + ? WHERE table_name = ?");
-            this.insertStmt = seqConn.prepareStatement(
-                    "INSERT INTO seq_counter (table_name, cur) VALUES (?, ?)");
-            this.selectStmt = seqConn.prepareStatement(
-                    "SELECT cur FROM seq_counter WHERE table_name = ?");
-            this.nextSeq = 0;
-            this.rangeEnd = 0;
-            allocateRange(); // 预热第一个号段(失败尽早暴露)
+            if (config.getAlertDbUrl() != null && !config.getAlertDbUrl().isBlank()) {
+                Class.forName("com.mysql.cj.jdbc.Driver");
+                this.alertConn = DriverManager.getConnection(
+                        config.getAlertDbUrl(), config.getAlertDbUser(), config.getAlertDbPassword());
+                this.alertStmt = alertConn.prepareStatement(
+                        "INSERT INTO sync_alert (logical_table, task_id, alert_type, detail, status) "
+                                + "VALUES (?, ?, ?, ?, 'OPEN')");
+            }
         } catch (Exception e) {
-            throw new IllegalStateException("CdcSeqTransform 连接元库失败: " + e.getMessage(), e);
+            throw new IllegalStateException("CdcSeqTransform 告警库连接失败: " + e.getMessage(), e);
         }
     }
 
-    /** 领下一个 seq; 号段用尽时再领一段(区间预分配, 崩溃丢号段留间隙无害) */
-    private long nextSeq() throws Exception {
-        if (nextSeq > rangeEnd) {
-            allocateRange();
-        }
-        return nextSeq++;
+    /** 主键修改告警: 写 sync_alert(失败仅告警日志, 不阻断异常抛出) */
+    private void alertPrimaryKeyChange(String beforeKey, String businessKey) {
+        alertGeneric("primary_key_change", beforeKey + " → " + businessKey);
     }
 
-    /** 领号段 [start, end]: UPDATE 行锁 +1 段, 首见插入 [1, batch] */
-    private void allocateRange() throws Exception {
-        int batch = Math.max(1, config.getSeqBatch());
-        String table = config.getSeqKey();
-        allocStmt.setInt(1, batch);
-        allocStmt.setString(2, table);
-        int rows = allocStmt.executeUpdate();
-        if (rows == 0) {
-            insertStmt.setString(1, table);
-            insertStmt.setInt(2, batch);
-            insertStmt.executeUpdate();
+    /** 通用告警落库: 写 sync_alert(失败仅告警日志, 不阻断异常抛出) */
+    private void alertGeneric(String alertType, String detail) {
+        try {
+            if (alertStmt != null) {
+                alertStmt.setString(1, config.getLogicalTable());
+                alertStmt.setLong(2, config.getTaskId() == null || config.getTaskId().isBlank()
+                        ? 0 : Long.parseLong(config.getTaskId()));
+                alertStmt.setString(3, alertType);
+                alertStmt.setString(4, detail);
+                alertStmt.executeUpdate();
+            }
+        } catch (Exception e) {
+            LOGGER.error("{} 告警落库失败({}): {}", alertType, config.getLogicalTable(), e.getMessage());
         }
-        selectStmt.setString(1, table);
-        long end;
-        try (ResultSet rs = selectStmt.executeQuery()) {
-            rs.next();
-            end = rs.getLong(1);
-        }
-        rangeEnd = end;
-        nextSeq = end - batch + 1;
     }
 
     @Override
@@ -142,27 +123,35 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
                     : (rk == RowKind.INSERT ? "INSERT" : "UPDATE");
 
             // ① 源字段(全部字符串化, 与目标 VARCHAR 承载一致)
+            //    补丁透传三列 __src_pos/__snapshot/__src_before 已由 widen 工艺并入
+            //    producedType(位于行尾三列, 不进业务字段)
             Map<String, Object> srcFields = new LinkedHashMap<>();
             String[] names = config.getInputNames();
             Object[] values = row.getFields();
-            for (int i = 0; i < names.length && i < values.length; i++) {
+            boolean hasPatchCols = names.length >= 3
+                    && "__src_pos".equals(names[names.length - 3]);
+            int fieldCount = hasPatchCols ? values.length - 3 : values.length;
+            for (int i = 0; i < names.length && i < fieldCount; i++) {
                 Object v = values[i];
                 srcFields.put(names[i], v == null ? null : String.valueOf(v));
             }
 
-            // ② seq: 位点即序号(路径 1, connector 补丁在行末透传位点列, 不进 schema)
-            //    快照行与补丁未落地(无位点列)回退计数器; 快照批/流批分派独立, 两体系不互比
-            String srcPos = values.length > names.length ? strOf(values[names.length]) : null;
-            boolean isSnapshot = values.length > names.length + 1
-                    && "true".equalsIgnoreCase(strOf(values[names.length + 1]));
+            // ② seq: 位点即序号(严格位点一态, 补丁在行尾透传位点/快照标志/before 三列)
+            //    快照行统一编码为快照级号 S=f(snapshot_start_position)(方案 A: 后端读源库当前位点下发)
+            String srcPos = hasPatchCols ? strOf(values[values.length - 3]) : null;
+            String snapshotFlag = hasPatchCols ? strOf(values[values.length - 2]) : null;
+            boolean isSnapshot = hasPatchCols && isSnapshotRow(srcPos, snapshotFlag);
+            // before 行透传(行尾第三列, JSON): 解析后按 business_key_fields 拼 beforeKey,
+            // 主键修改检测用; 补丁未覆盖时无此列 → null 不检测
+            String srcBeforeJson = hasPatchCols ? strOf(values[values.length - 1]) : null;
+            String srcBeforeKey = beforeKeyOf(srcBeforeJson);
+
             long seq = resolveSeq(srcPos, isSnapshot);
 
-            // ③ 字段映射执行器(向导 Step3: 直连/计算/生成 + 加工链; 输出模型字段)
+            // ③ 字段映射执行器(向导 Step3: 直连/计算/生成 + 加工链; 输出模型字段;
+            //    必配 fail-fast, 输出 fields = 声明 modelField 集合, 列裁剪白名单)
             FieldMappingExecutor executor = config.getFieldMappingExecutor();
-            Map<String, Object> fields = executor != null && executor.isEnabled()
-                    ? executor.apply(srcFields, seq) : srcFields;
-            // 系统保留列 seq 不进业务字段(由 CdcRecord 顶层携带, 目标表独立列)
-            fields.remove("seq");
+            Map<String, Object> fields = executor.apply(srcFields, seq);
 
             // ③.5 行级转换(仅 filter/filter-kind): 不过则丢弃该行(不进 Kafka)
             RowChainExecutor rowChain = config.getRowChainExecutor();
@@ -188,6 +177,14 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
                 return null;
             }
 
+            // ④.5 主键修改检测(新方案): before 主键透传, 与当前业务键不同 = 主键值被修改
+            //      → 写 sync_alert 告警 + 抛异常停止任务(checkpoint 保留, watchdog 不自动 restore)
+            if (srcBeforeKey != null && !srcBeforeKey.isBlank() && !srcBeforeKey.equals(businessKey)) {
+                alertPrimaryKeyChange(srcBeforeKey, businessKey);
+                throw new IllegalStateException("PRIMARY_KEY_CHANGE 主键值被修改: " + srcBeforeKey
+                        + " → " + businessKey + "(任务已暂停, 请处理 sync_alert 告警后重建任务/映射)");
+            }
+
             // ⑤ CdcRecord 封装
             Map<String, Object> rec = new LinkedHashMap<>();
             rec.put("logicalTable", config.getLogicalTable());
@@ -204,13 +201,12 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
                 rec.put("datasourceId", config.getDatasourceId());
             }
             rec.put("businessKey", businessKey);
+            if (srcBeforeKey != null && !srcBeforeKey.isBlank()) {
+                rec.put("beforeKey", srcBeforeKey);
+            }
             rec.put("keyColumns", config.getKeyColumns());
             rec.put("rowKind", rowKind);
             rec.put("seq", seq);
-            // ⑤ 发号体系标志(position/compat/counter), 灰度双跑对照用
-            rec.put("positionMode", config.getEmitPosition() == null
-                    ? "compat" : String.valueOf(config.getEmitPosition()));
-            // 快照标志透传(消费端据此分派批/流模板; 补丁未落地 false 等价旧行为)
             rec.put("snapshot", isSnapshot);
             rec.put("fields", fields);
             String payload = OM.writeValueAsString(rec);
@@ -225,52 +221,50 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
     }
 
     /**
-     * ②④⑤⑥ seq 发号分派(位点/快照级号/号段三路径)。
+     * ④ 快照行判定(实测定案 2026-10-05):
+     * <ul>
+     *   <li>__snapshot 列 = true(将来 Debezium 版本若带 snapshot 键);</li>
+     *   <li>位点主段为空 → 快照行。实测 MySQL 快照行 sourceOffset
+     *       = {transaction_id=null, ts_sec=..., file=, pos=0}(无 snapshot 键, 位点列
+     *       透传为 "mysql::0:"); 增量行 file 必非空 → 主段空仅快照阶段出现。</li>
+     * </ul>
+     */
+    private boolean isSnapshotRow(String srcPos, String snapshotFlag) {
+        if ("true".equalsIgnoreCase(snapshotFlag)) {
+            return true;
+        }
+        if (srcPos == null || srcPos.isBlank()) {
+            return false;
+        }
+        int cut = srcPos.indexOf(':');
+        String body = cut > 0 ? srcPos.substring(cut + 1) : srcPos;
+        String first = body.split(":", -1)[0];
+        return first == null || first.isBlank();
+    }
+
+    /**
+     * ④⑤ seq 发号分派(新方案: 仅严格位点一态)。
      *
-     * <p>④ 快照行优先走快照级号 S: 快照行位点不逐行单调(快照阶段共享同一位点), 不能作序号;
-     * 严格位点模式必配 snapshot_start_position(否则 fail-fast);
-     * 兼容模式: 配了起点走 S, 否则回退计数器(补丁未透传快照标志的旧链路)。
+     * <p>④ 快照行统一走快照级号 S=f(snapshot_start_position): 快照行位点不逐行单调
+     * (快照阶段共享同一位点), 不能作序号; 未配置 snapshot_start_position → fail-fast。
      *
-     * <p>⑤ 增量行三态: true(严格位点, 位点缺失即混发 fail-fast);
-     * false(纯号段, 忽略补丁位点列); 缺省(兼容, 有位点用位点)。
-     *
-     * <p>⑥ 兼容模式位点编码失败(如 mongo ts_ms 缺失等实测位点取值形态异常)时
-     * 不 fail-fast, 告警后回退计数器号段(满位源治理回退分支; 严格位点模式仍 fail-fast)。
-     * (包可见: 供同包 PositionCheck 自检直连)
+     * <p>⑤ 增量行必须有补丁透传位点, 缺位点 = 新旧号混发 → fail-fast。
      */
     long resolveSeq(String srcPos, boolean isSnapshot) throws Exception {
         if (isSnapshot) {
             String snap = config.getSnapshotStartPosition();
-            if (snap != null && !snap.isBlank()) {
-                return snapshotSeq(snap);
-            }
-            if (config.isStrictPositionMode()) {
+            if (snap == null || snap.isBlank()) {
                 throw new IllegalStateException("快照行需配置 snapshot_start_position"
                         + "(④ 快照级号 S=f(起点位点), fail-fast)");
             }
-            return nextSeq();
+            return snapshotSeq(snap);
         }
-        if (config.isStrictPositionMode()) {
-            if (srcPos != null && !srcPos.isBlank()) {
-                checkLayout(srcPos);
-                return guardReset(PositionSeq.encode(config.getSourceType(), srcPos));
-            }
+        if (srcPos == null || srcPos.isBlank()) {
             throw new IllegalStateException("位点模式下增量行位点缺失, "
                     + "疑似位点透传补丁未生效(守卫: 新旧号混发检测, fail-fast)");
         }
-        if (config.getEmitPosition() != null && !config.getEmitPosition()) {
-            return nextSeq(); // 纯号段模式(灰度双跑对照旧链路)
-        }
-        // 兼容模式(缺省): 有位点用位点, 位点不可用回退计数器(⑥ 满位源治理回退分支)
-        if (srcPos != null && !srcPos.isBlank()) {
-            try {
-                checkLayout(srcPos);
-                return guardReset(PositionSeq.encode(config.getSourceType(), srcPos));
-            } catch (IllegalStateException e) {
-                LOGGER.warn("兼容模式位点编码失败, 回退计数器号段: {} ({})", srcPos, e.getMessage());
-            }
-        }
-        return nextSeq();
+        checkLayout(srcPos);
+        return guardReset(PositionSeq.encode(config.getSourceType(), srcPos));
     }
 
     /**
@@ -314,18 +308,34 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
         return seq;
     }
 
-    private static String strOf(Object v) {
-        return v == null ? null : String.valueOf(v);
+    /** ④.5 beforeKey 提取: 从 before 行 JSON(补丁透传)按 business_key_fields 拼接主键值;
+     *  null(无 before 列/CDC 无 before image)→ null(不检测);
+     *  解析失败 → 告警 + fail-fast(无法完成主键修改检测, 不允许静默降级, 缺陷 5) */
+    private String beforeKeyOf(String beforeJson) {
+        if (beforeJson == null || beforeJson.isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> m = OM.readValue(beforeJson, Map.class);
+            StringBuilder key = new StringBuilder();
+            for (String f : config.getBusinessKeyFields()) {
+                Object v = m.get(f);
+                if (key.length() > 0) {
+                    key.append(KEY_JOIN);
+                }
+                key.append(v == null ? "" : v);
+            }
+            return RouteUtil.resolveKey(key.toString(),
+                    config.getNullKeyMode(), config.getFallbackValue());
+        } catch (Exception e) {
+            alertGeneric("before_parse_fail", "before 行 JSON 解析失败: " + e.getMessage());
+            throw new IllegalStateException("before 行 JSON 解析失败(fail-fast, 无法完成主键修改检测): "
+                    + e.getMessage(), e);
+        }
     }
 
-    private int indexOf(String field) {
-        String[] names = config.getInputNames();
-        for (int i = 0; i < names.length; i++) {
-            if (names[i].equals(field)) {
-                return i;
-            }
-        }
-        return -1;
+    private static String strOf(Object v) {
+        return v == null ? null : String.valueOf(v);
     }
 
     @Override
@@ -341,10 +351,8 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
     @Override
     public void close() {
         try {
-            if (allocStmt != null) allocStmt.close();
-            if (insertStmt != null) insertStmt.close();
-            if (selectStmt != null) selectStmt.close();
-            if (seqConn != null) seqConn.close();
+            if (alertStmt != null) alertStmt.close();
+            if (alertConn != null) alertConn.close();
         } catch (Exception e) {
             // 忽略关闭异常
         }

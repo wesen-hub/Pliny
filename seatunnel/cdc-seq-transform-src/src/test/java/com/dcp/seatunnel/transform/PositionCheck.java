@@ -25,6 +25,11 @@ public final class PositionCheck {
         eq("mysql 重放恒定", encode("mysql", "mysql:123:456789:2"),
                 encode("mysql", "mysql:123:456789:2"));
         eq("mysql row 缺省", encode("mysql", "mysql:123:456789"), (123L << 44) | (456789L << 12));
+        // binlog 文件名形态(实测定案 2026-10-05): "binlog.000006" 取 '.' 末段数字; 纯数字 file 兼容直取
+        eq("mysql binlog 文件名", encode("mysql", "mysql:binlog.000006:157:0"),
+                (6L << 44) | (157L << 12));
+        eq("mysql binlog 文件名重放恒定", encode("mysql", "mysql:binlog.000006:157:0"),
+                encode("mysql", "mysql:binlog.000006:157:0"));
         eq("pg 编码", encode("pg", "pg:3/16B6C50"), ((3L << 32) | 0x16B6C50L) << 10);
         eq("oracle 编码", encode("oracle", "oracle:58001234:7"), (58001234L << 12) | 7L);
         eq("sqlserver 编码", encode("sqlserver", "sqlserver:00000025:00000001:002f:0003"),
@@ -50,6 +55,7 @@ public final class PositionCheck {
         // ③ 守卫-未知格式 fail-fast
         throwIf("位点为空", () -> encode("mysql", null));
         throwIf("位点非数值", () -> encode("mysql", "mysql:abc:1:0"));
+        throwIf("mysql file 末段非数字", () -> encode("mysql", "mysql:binlog.abc:1:0"));
         throwIf("未知 type", () -> encode("mysql", "redis:1:2"));
         throwIf("未知体系", () -> encode("mysql", "unknown:whatever"));
         throwIf("sqlserver lsn 长度不足", () -> encode("sqlserver", "sqlserver:0000"));
@@ -83,16 +89,19 @@ public final class PositionCheck {
      * 体系重置(seq 大幅回退)→ 告警不丢数据。
      */
     private static void seqPolicyCheck() {
-        // 构造最小 config(仅 source_type/emit_position/snapshot_start_position/阈值), 其余选项取默认
+        // 构造最小 config(required 全集 + 严格位点选项), 其余选项取默认
         java.util.Map<String, Object> opts = new java.util.HashMap<>();
         opts.put("logical_table", "t");
+        opts.put("task_id", "task-check");
+        opts.put("datasource_id", "ds-check");
+        opts.put("source_db", "d");
+        opts.put("source_table", "t");
         opts.put("business_key_fields", java.util.List.of("id"));
         opts.put("key_columns", java.util.List.of("id"));
-        opts.put("seq_db_url", "jdbc:mysql://x/d");
-        opts.put("seq_db_user", "u");
-        opts.put("seq_db_password", "p");
+        opts.put("field_mapping",
+                "[{\"modelField\":\"id\",\"source\":{\"kind\":\"field-map\",\"srcField\":\"id\"}}]");
+        // alert_db 三件套 optionRule required(引擎提交时校验); 离线自检不配 → open() 不建连接
         opts.put("source_type", "mysql");
-        opts.put("emit_position", true);
         opts.put("snapshot_start_position", "mysql:999:123456789:0");
         opts.put("seq_reset_threshold", 1_000_000_000_000L);
         org.apache.seatunnel.api.configuration.ReadonlyConfig cfg =

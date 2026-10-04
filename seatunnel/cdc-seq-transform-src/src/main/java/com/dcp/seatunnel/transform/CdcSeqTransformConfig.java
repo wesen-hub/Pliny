@@ -32,21 +32,18 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
     private final int bucketCount;
     private final RouteUtil.NullKeyMode nullKeyMode;
     private final String fallbackValue;
-    private final String seqDbUrl;
-    private final String seqDbUser;
-    private final String seqDbPassword;
-    private final int seqBatch;
+    private final String alertDbUrl;
+    private final String alertDbUser;
+    private final String alertDbPassword;
     private final String[] inputNames;
     private final CatalogTable outputTable;
-    /** 字段映射执行器(向导 Step3 配置; null = 直通) */
+    /** 字段映射执行器(必配: 空映射在构造器 fail-fast; 列裁剪白名单) */
     private final FieldMappingExecutor fieldMappingExecutor;
     /** 行级转换执行器(向导 Step4: 仅 filter/filter-kind; null = 不过滤) */
     private final RowChainExecutor rowChainExecutor;
-    /** 源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb; null = 补丁落地前旧配置) */
+    /** 源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb) */
     private final String sourceType;
-    /** ⑤ 位点模式灰度开关: null=兼容(有位点用位点否则计数器); true=严格位点; false=纯号段 */
-    private final Boolean emitPosition;
-    /** ④ 快照起点位点(type:k1:v1...): 位点模式下快照行统一编码为快照级号 S */
+    /** ④ 快照起点位点(type:k1:v1...): 快照行统一编码为快照级号 S */
     private final String snapshotStartPosition;
     /** ③ seq 体系回退告警阈值(体系重置检测) */
     private final long seqResetThreshold;
@@ -63,20 +60,27 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
         this.sourceTable = options.get(CdcSeqTransformFactory.SOURCE_TABLE);
         this.businessKeyFields = options.get(CdcSeqTransformFactory.BUSINESS_KEY_FIELDS);
         this.keyColumns = options.get(CdcSeqTransformFactory.KEY_COLUMNS);
+        // 缺陷 6c: 空/全空白 fail-fast(optionRule required 只保证键存在, 空列表能漏过;
+        // 空业务键 → ERROR 模式全行拒, 空唯一键 → 幂等写无定位列, 均需注册级拦截)
+        if (isBlankList(this.businessKeyFields)) {
+            throw new IllegalArgumentException("business_key_fields 不能为空(空业务键无法路由/幂等定位, fail-fast)");
+        }
+        if (isBlankList(this.keyColumns)) {
+            throw new IllegalArgumentException("key_columns 不能为空(唯一键列空 → 幂等写无法定位目标行, fail-fast)");
+        }
         this.bucketCount = options.get(CdcSeqTransformFactory.BUCKET_COUNT);
         this.nullKeyMode = "FALLBACK".equalsIgnoreCase(options.get(CdcSeqTransformFactory.NULL_KEY_MODE))
                 ? RouteUtil.NullKeyMode.FALLBACK : RouteUtil.NullKeyMode.ERROR;
         this.fallbackValue = options.get(CdcSeqTransformFactory.FALLBACK_VALUE);
-        this.seqDbUrl = options.get(CdcSeqTransformFactory.SEQ_DB_URL);
-        this.seqDbUser = options.get(CdcSeqTransformFactory.SEQ_DB_USER);
-        this.seqDbPassword = options.get(CdcSeqTransformFactory.SEQ_DB_PASSWORD);
-        this.seqBatch = options.get(CdcSeqTransformFactory.SEQ_BATCH);
+        this.alertDbUrl = options.get(CdcSeqTransformFactory.ALERT_DB_URL);
+        this.alertDbUser = options.get(CdcSeqTransformFactory.ALERT_DB_USER);
+        this.alertDbPassword = options.get(CdcSeqTransformFactory.ALERT_DB_PASSWORD);
         String fm = options.get(CdcSeqTransformFactory.FIELD_MAPPING);
-        this.fieldMappingExecutor = fm == null || fm.isBlank() ? null : new FieldMappingExecutor(fm);
+        // 强校验必配: 空/缺失由 optionRule required + FieldMappingExecutor 构造器 fail-fast 双保险
+        this.fieldMappingExecutor = new FieldMappingExecutor(fm);
         String rc = options.get(CdcSeqTransformFactory.ROW_CHAIN);
         this.rowChainExecutor = rc == null || rc.isBlank() ? null : new RowChainExecutor(rc);
         this.sourceType = options.get(CdcSeqTransformFactory.SOURCE_TYPE);
-        this.emitPosition = options.get(CdcSeqTransformFactory.EMIT_POSITION);
         this.snapshotStartPosition = options.get(CdcSeqTransformFactory.SNAPSHOT_START_POSITION);
         this.seqResetThreshold = options.get(CdcSeqTransformFactory.SEQ_RESET_THRESHOLD);
 
@@ -95,52 +99,24 @@ public class CdcSeqTransformConfig implements java.io.Serializable {
     public String getSourceTable() { return sourceTable; }
     public String getDatasourceId() { return datasourceId; }
 
-    /**
-     * seq 计数键 = (任务实例, 逻辑表, 数据源, 源库, 源表): 每条(任务×源表)采集流一条独立序列;
-     * 不同任务的同(逻辑,源)也各自独立、永不互比。缺省逐级回退兼容旧配置。超长时 md5。
-     */
-    public String getSeqKey() {
-        if (sourceDb == null || sourceDb.isBlank() || sourceTable == null || sourceTable.isBlank()) {
-            return logicalTable;
-        }
-        String ds = datasourceId == null || datasourceId.isBlank() ? "0" : datasourceId;
-        String tk = taskId == null || taskId.isBlank() ? "0" : taskId;
-        String key = tk + "|" + logicalTable + "|" + ds + "|" + sourceDb + "." + sourceTable;
-        if (key.length() <= 120) {
-            return key;
-        }
-        try {
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
-            byte[] h = md.digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder("h");
-            for (byte b : h) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return key.substring(0, 120);
-        }
-    }
     public List<String> getBusinessKeyFields() { return businessKeyFields; }
     public List<String> getKeyColumns() { return keyColumns; }
     public int getBucketCount() { return bucketCount; }
     public RouteUtil.NullKeyMode getNullKeyMode() { return nullKeyMode; }
     public String getFallbackValue() { return fallbackValue; }
-    public String getSeqDbUrl() { return seqDbUrl; }
-    public String getSeqDbUser() { return seqDbUser; }
-    public String getSeqDbPassword() { return seqDbPassword; }
-    public int getSeqBatch() { return seqBatch; }
+    public String getAlertDbUrl() { return alertDbUrl; }
+    public String getAlertDbUser() { return alertDbUser; }
+    public String getAlertDbPassword() { return alertDbPassword; }
     public String[] getInputNames() { return inputNames; }
     public CatalogTable getOutputTable() { return outputTable; }
     public FieldMappingExecutor getFieldMappingExecutor() { return fieldMappingExecutor; }
     public RowChainExecutor getRowChainExecutor() { return rowChainExecutor; }
     public String getSourceType() { return sourceType; }
-    public Boolean getEmitPosition() { return emitPosition; }
     public String getSnapshotStartPosition() { return snapshotStartPosition; }
     public long getSeqResetThreshold() { return seqResetThreshold; }
 
-    /** ⑤ 位点模式生效判定: emit_position=true 严格位点; false/null 兼容/号段 */
-    public boolean isStrictPositionMode() {
-        return Boolean.TRUE.equals(emitPosition);
+    /** 列表为空或全空白(缺陷 6c fail-fast 判定) */
+    private static boolean isBlankList(List<String> list) {
+        return list == null || list.isEmpty() || list.stream().allMatch(s -> s == null || s.isBlank());
     }
 }

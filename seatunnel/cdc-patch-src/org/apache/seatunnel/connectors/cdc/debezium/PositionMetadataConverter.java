@@ -14,8 +14,11 @@ import java.util.Map;
  *
  * <p>{@link #merge(MetadataConverter[])} 是 ASM 补丁(PatchCdcBasePosition)在
  * {@code SeaTunnelRowDebeziumDeserializeSchema$Builder.build()} 的注入助手:
- * metadataConverters 为 null 时注入 [本类, SnapshotFlagMetadataConverter],
- * 非 null 时尾部追加(保留上游已有 converter)。行末多出两列: __src_pos / __snapshot。
+ * metadataConverters 为 null 时注入 [本类, SnapshotFlagMetadataConverter, BeforeImageMetadataConverter],
+ * 非 null 且未含其中某类时按序尾部追加(保留上游已有 converter),
+ * 三类已含则原样返回(幂等 —— 源 jar 的 builder 注入补丁已装配 metadata 列时不再追加,
+ * 否则行宽 = 物理列 + 4+ 个 metadata 超出 producedType 宽度, 引擎序列化必然越界)。
+ * 行末多出三列: __src_pos / __snapshot / __src_before。
  */
 public final class PositionMetadataConverter implements MetadataConverter, Serializable {
 
@@ -33,6 +36,8 @@ public final class PositionMetadataConverter implements MetadataConverter, Seria
         }
         Map<String, ?> off = record.sourceOffset();
         // MySQL: file / pos (/ row)
+        // 实测定案: 快照行 offset = {file="", pos=0}(无 snapshot 键) → 透传 "mysql::0:",
+        // 快照判定由下游 CdcSeqTransform 按位点主段空形态裁定
         if (off.containsKey("file") && off.containsKey("pos")) {
             return "mysql:" + off.get("file") + ":" + off.get("pos") + ":" + val(off, "row");
         }
@@ -71,15 +76,38 @@ public final class PositionMetadataConverter implements MetadataConverter, Seria
         return v == null ? "" : v;
     }
 
-    /** ASM 注入助手: null/空 → [POSITION, SNAPSHOT]; 非 null → 尾部追加 */
+    /** ASM 注入助手: null/空 → [POSITION, SNAPSHOT, BEFORE]; 缺失项按序尾部追加(幂等: 三类已含则原样) */
     public static MetadataConverter[] merge(MetadataConverter[] arr) {
-        if (arr == null || arr.length == 0) {
-            return new MetadataConverter[]{INSTANCE, SnapshotFlagMetadataConverter.INSTANCE};
+        boolean hasPos = false;
+        boolean hasSnap = false;
+        boolean hasBefore = false;
+        if (arr != null) {
+            for (MetadataConverter c : arr) {
+                if (c == INSTANCE) {
+                    hasPos = true;
+                } else if (c == SnapshotFlagMetadataConverter.INSTANCE) {
+                    hasSnap = true;
+                } else if (c == BeforeImageMetadataConverter.INSTANCE) {
+                    hasBefore = true;
+                }
+            }
         }
-        MetadataConverter[] out = new MetadataConverter[arr.length + 2];
-        System.arraycopy(arr, 0, out, 0, arr.length);
-        out[arr.length] = INSTANCE;
-        out[arr.length + 1] = SnapshotFlagMetadataConverter.INSTANCE;
-        return out;
+        if (hasPos && hasSnap && hasBefore) {
+            return arr;
+        }
+        java.util.List<MetadataConverter> out = new java.util.ArrayList<>();
+        if (arr != null) {
+            java.util.Collections.addAll(out, arr);
+        }
+        if (!hasPos) {
+            out.add(INSTANCE);
+        }
+        if (!hasSnap) {
+            out.add(SnapshotFlagMetadataConverter.INSTANCE);
+        }
+        if (!hasBefore) {
+            out.add(BeforeImageMetadataConverter.INSTANCE);
+        }
+        return out.toArray(new MetadataConverter[0]);
     }
 }

@@ -11,12 +11,26 @@ COPY settings-docker.xml /root/.m2/settings.xml
 COPY cdc-seq-transform-src /app/plugin
 RUN mvn -q -B -f /app/plugin/pom.xml package -DskipTests
 
+# Stage 1c: savepoint guard 补丁(ASM)注入 starter jar —— restore 失败必须显式报错,
+# 否则 backend "回退 initial 全量重采"分支永不触发(见 PatchSavepointGuard.java 注释)。
+# 每次构建从 dist 原始 jar 重打(幂等: dist 内 jar 保持未打补丁状态, 补丁只在构建期注入)。
+FROM maven:3.9-eclipse-temurin-17 AS guard-patch
+WORKDIR /patch
+COPY PatchSavepointGuard.java /patch/PatchSavepointGuard.java
+RUN mvn -q dependency:get -Dartifact=org.ow2.asm:asm:9.5 \
+    && mkdir -p classes \
+    && javac -encoding UTF-8 -cp /root/.m2/repository/org/ow2/asm/asm/9.5/asm-9.5.jar -d classes PatchSavepointGuard.java
+COPY dist/st-root/starter/seatunnel-starter.jar /patch/seatunnel-starter.jar
+RUN java -cp classes:/root/.m2/repository/org/ow2/asm/asm/9.5/asm-9.5.jar PatchSavepointGuard /patch/seatunnel-starter.jar
+
 # Stage 2: SeaTunnel 发行版 + 插件 + JDBC connector + MySQL 驱动
 FROM eclipse-temurin:17-jre
 
-# 发行包与驱动已预下载进构建上下文（避免构建期网络抖动）
-COPY dist/apache-seatunnel-2.3.12-bin.tar.gz /tmp/st.tar.gz
-RUN tar xzf /tmp/st.tar.gz -C /opt --strip-components=1 && rm /tmp/st.tar.gz
+# 发行包已预解压进构建上下文(避免构建期网络抖动; qemu x86 下 tar 解压 404MB 会报 Function not implemented)
+COPY dist/st-root /opt
+
+# savepoint guard 补丁后的 starter jar(构建期注入, 与镜像生命周期绑定, 不再依赖容器内 docker cp)
+COPY --from=guard-patch /patch/seatunnel-starter.jar /opt/starter/seatunnel-starter.jar
 
 # JDBC connector + connector-common（运行时依赖）+ MySQL 驱动 + MongoDB connector（发行包解压到 /opt, connectors 在 /opt/connectors）
 # 依赖 jar 约定目录: ${SEATUNNEL_HOME}/plugins/connector-<name>/（AbstractPluginDiscovery.getPluginDependencyJarPaths 扫描）

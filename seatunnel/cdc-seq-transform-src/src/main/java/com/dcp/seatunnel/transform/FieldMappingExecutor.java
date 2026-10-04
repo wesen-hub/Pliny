@@ -48,44 +48,57 @@ public class FieldMappingExecutor implements Serializable {
     }
 
     private final List<Mapping> mappings;
-    /** 是否启用映射(配置为空 = 直通) */
-    private final boolean enabled;
     private transient com.googlecode.aviator.AviatorEvaluatorInstance aviator;
 
     public FieldMappingExecutor(String fieldMappingJson) {
         this.mappings = new ArrayList<>();
         boolean has = false;
-        if (fieldMappingJson != null && !fieldMappingJson.isBlank()) {
-            try {
-                List<Map<String, Object>> list = OM.readValue(fieldMappingJson,
-                        OM.getTypeFactory().constructCollectionType(List.class, Map.class));
-                for (Map<String, Object> m : list) {
-                    Mapping mm = new Mapping();
-                    mm.modelField = String.valueOf(m.get("modelField"));
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> src = (Map<String, Object>) m.get("source");
-                    if (src != null) {
-                        mm.source = src;
-                    }
-                    @SuppressWarnings("unchecked")
-                    List<Map<String, Object>> steps = (List<Map<String, Object>>) m.get("steps");
-                    if (steps != null) {
-                        mm.steps = steps;
-                    }
-                    mappings.add(mm);
-                    if (mm.source.get("kind") != null && !"null".equals(String.valueOf(mm.source.get("kind")))) {
-                        has = true;
-                    }
-                }
-            } catch (Exception e) {
-                throw new IllegalStateException("field_mapping JSON 解析失败: " + e.getMessage(), e);
-            }
+        // 新方案强校验: 映射非空是任务存在的必要条件(数据面兜底, 防直建绕过注册校验);
+        // 空映射 = 全列直通, 洞穿写者列裁判前提 → fail-fast
+        if (fieldMappingJson == null || fieldMappingJson.isBlank()) {
+            throw new IllegalStateException("field_mapping 未配置: 新方案强制非空(列裁剪白名单前提)");
         }
-        this.enabled = has;
+        try {
+            List<Map<String, Object>> list = OM.readValue(fieldMappingJson,
+                    OM.getTypeFactory().constructCollectionType(List.class, Map.class));
+            for (Map<String, Object> m : list) {
+                Mapping mm = new Mapping();
+                mm.modelField = String.valueOf(m.get("modelField"));
+                @SuppressWarnings("unchecked")
+                Map<String, Object> src = (Map<String, Object>) m.get("source");
+                if (src != null) {
+                    mm.source = src;
+                }
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> steps = (List<Map<String, Object>>) m.get("steps");
+                if (steps != null) {
+                    mm.steps = steps;
+                }
+                mappings.add(mm);
+                if (mm.source.get("kind") != null && !"null".equals(String.valueOf(mm.source.get("kind")))) {
+                    has = true;
+                }
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("field_mapping JSON 解析失败: " + e.getMessage(), e);
+        }
+        if (mappings.isEmpty() || !has) {
+            throw new IllegalStateException("field_mapping 为空或未声明任何来源: 新方案强制非空(列裁剪白名单前提)");
+        }
     }
 
-    public boolean isEnabled() {
-        return enabled;
+    /** field-map 引用的源字段集合(任务启动时对探测源列集核对缺失列用) */
+    public java.util.Set<String> collectFieldMapSrcFields() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (Mapping m : mappings) {
+            if ("field-map".equals(String.valueOf(m.source.getOrDefault("kind", "")))) {
+                String sf = String.valueOf(m.source.getOrDefault("srcField", ""));
+                if (!sf.isBlank()) {
+                    out.add(sf);
+                }
+            }
+        }
+        return out;
     }
 
     /**
@@ -97,9 +110,7 @@ public class FieldMappingExecutor implements Serializable {
      */
     public Map<String, Object> apply(Map<String, Object> sourceFields, long seq) {
         Map<String, Object> out = new LinkedHashMap<>();
-        if (!enabled) {
-            return sourceFields;
-        }
+        // 新方案: 恒走白名单裁剪(空映射已在构造时 fail-fast, 不存在全列直通路径)
         for (Mapping m : mappings) {
             String kind = String.valueOf(m.source.getOrDefault("kind", ""));
             Object value = null;
@@ -116,10 +127,8 @@ public class FieldMappingExecutor implements Serializable {
                 }
                 case "uuid" -> value = genUuid(m);
                 case "system" -> value = "seq".equals(m.modelField) ? seq : now();
-                default -> {
-                    // 未定义来源: 直通同名源字段(容错)
-                    value = sourceFields.get(m.modelField);
-                }
+                default -> throw new IllegalStateException("未知映射来源 kind=" + kind
+                        + "(新方案支持 field-map/compute/uuid/system, 注册校验已拦截)");
             }
             // 加工链按序应用
             value = applySteps(value, m.steps);

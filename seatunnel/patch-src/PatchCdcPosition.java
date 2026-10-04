@@ -21,10 +21,10 @@ import java.util.zip.ZipOutputStream;
  * <p>两种注入模式:
  * <pre>
  *   builder:    {@code createDebeziumDeserializationSchema} 内 Builder.build() 前注入
- *               {@code .setMetadataConverters([PositionMetadataConverter.INSTANCE, SnapshotFlagMetadataConverter.INSTANCE])}
- *               行尾两列: 位点字符串 + 快照标志(mysql / postgres / oracle / sqlserver)
+ *               {@code .setMetadataConverters([PositionMetadataConverter.INSTANCE, SnapshotFlagMetadataConverter.INSTANCE, BeforeImageMetadataConverter.INSTANCE])}
+ *               行尾三列: 位点字符串 + 快照标志 + before 行 JSON(mysql / postgres / oracle / sqlserver)
  *   mongo-emit: 重写 MongoDBConnectorDeserializationSchema.emit, 开头调用
- *               {@code PositionAppender.append(row, record)} 追加行尾两列(mongodb 自研反序列化链, 无 Builder)
+ *               {@code PositionAppender.append(row, record)} 追加行尾三列(mongodb 自研反序列化链, 无 Builder)
  * </pre>
  *
  * <p>用法:
@@ -42,6 +42,8 @@ public class PatchCdcPosition {
             "org/apache/seatunnel/connectors/cdc/debezium/PositionMetadataConverter";
     static final String SNAPSHOT_CONVERTER_CLS =
             "org/apache/seatunnel/connectors/cdc/debezium/SnapshotFlagMetadataConverter";
+    static final String BEFORE_CONVERTER_CLS =
+            "org/apache/seatunnel/connectors/cdc/debezium/BeforeImageMetadataConverter";
     static final String META_CONVERTER_CLS =
             "org/apache/seatunnel/connectors/cdc/debezium/MetadataConverter";
     static final String APPENDER_CLS = "com/dcp/seatunnel/cdc/PositionAppender";
@@ -141,25 +143,25 @@ public class PatchCdcPosition {
 
     /**
      * builder 模式: 在 Builder.build() 调用前注入
-     * {@code setMetadataConverters([PositionMetadataConverter.INSTANCE, SnapshotFlagMetadataConverter.INSTANCE])}
-     * —— 行尾两列: __src_pos(位点字符串) + __snapshot(Boolean 快照标志),
-     * 与 CdcSeqTransform {@code values[names.length] / values[names.length+1]} 读取对齐。
+     * {@code setMetadataConverters([PositionMetadataConverter.INSTANCE, SnapshotFlagMetadataConverter.INSTANCE, BeforeImageMetadataConverter.INSTANCE])}
+     * —— 行尾三列: __src_pos(位点字符串) + __snapshot(Boolean 快照标志) + __src_before(before 行 JSON),
+     * 与 CdcSeqTransform {@code values[names.length] / values[names.length+1] / values[names.length+2]} 读取对齐。
      */
     static class BuilderPatch extends MethodVisitor {
         BuilderPatch(MethodVisitor mv) {
             super(Opcodes.ASM9, mv);
         }
-
+    
         @Override
         public void visitMethodInsn(int opcode, String owner, String name, String desc,
                                     boolean itf) {
             if (opcode == Opcodes.INVOKEVIRTUAL && owner.equals(BUILDER_CLS)
                     && name.equals("build")) {
-                System.out.println("  inject setMetadataConverters([pos, snapshot]) before Builder.build()");
-                // 栈顶为 Builder: dup 保留链式引用
-                super.visitInsn(Opcodes.DUP);
-                // new MetadataConverter[]{ PositionMetadataConverter.INSTANCE, SnapshotFlagMetadataConverter.INSTANCE }
-                super.visitInsn(Opcodes.ICONST_2);
+                System.out.println("  inject setMetadataConverters([pos, snapshot, before]) before Builder.build()");
+                // 不需要 DUP: setMetadataConverters 消耗栈顶 Builder 返回 Builder,
+                // 原 build 调用正好用其返回值(javap 实证 build() 后紧跟 areturn, 无链式后续使用;
+                // 多余的 DUP 会让 Builder 残留在栈上, 方法返回时栈高非法 → VerifyError)
+                super.visitInsn(Opcodes.ICONST_3);
                 super.visitTypeInsn(Opcodes.ANEWARRAY, META_CONVERTER_CLS);
                 super.visitInsn(Opcodes.DUP);
                 super.visitInsn(Opcodes.ICONST_0);
@@ -170,6 +172,11 @@ public class PatchCdcPosition {
                 super.visitInsn(Opcodes.ICONST_1);
                 super.visitFieldInsn(Opcodes.GETSTATIC, SNAPSHOT_CONVERTER_CLS, "INSTANCE",
                         "L" + SNAPSHOT_CONVERTER_CLS + ";");
+                super.visitInsn(Opcodes.AASTORE);
+                super.visitInsn(Opcodes.DUP);
+                super.visitInsn(Opcodes.ICONST_2);
+                super.visitFieldInsn(Opcodes.GETSTATIC, BEFORE_CONVERTER_CLS, "INSTANCE",
+                        "L" + BEFORE_CONVERTER_CLS + ";");
                 super.visitInsn(Opcodes.AASTORE);
                 super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, BUILDER_CLS, "setMetadataConverters",
                         "([L" + META_CONVERTER_CLS + ";)L" + BUILDER_CLS + ";", false);
@@ -226,6 +233,9 @@ public class PatchCdcPosition {
         @Override public void visitTableSwitchInsn(int min, int max, org.objectweb.asm.Label dflt, org.objectweb.asm.Label... labels) { }
         @Override public void visitTryCatchBlock(org.objectweb.asm.Label start, org.objectweb.asm.Label end,
                                                  org.objectweb.asm.Label handler, String type) { }
+        // 缺陷 5: 原方法体的 StackMapTable 帧必须一并吞掉 —— 帧引用的 label 已不存在,
+        // 透传底层 mv 会产生悬空帧引用(ClassFormatError/VerifyError)
+        @Override public void visitFrame(int type, int numLocal, Object[] local, int numStack, Object[] stack) { }
         @Override public void visitLocalVariable(String name, String desc, String signature,
                                                  org.objectweb.asm.Label start, org.objectweb.asm.Label end, int index) { }
         @Override public void visitLineNumber(int line, org.objectweb.asm.Label start) { }

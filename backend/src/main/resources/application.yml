@@ -108,13 +108,17 @@ dcp:
       url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       username: ${SYNC_TARGET_USERNAME:root}
       password: ${SYNC_TARGET_PASSWORD:root123}
-    # SeaTunnel CDC 采集端(CdcSeqTransform 领号用的元库地址, 从 seatunnel 容器内可达)
+    # SeaTunnel CDC 采集端(告警落库用的元库地址, 从 seatunnel 容器内可达; 新方案: 主键修改/缺列告警写 sync_alert)
     cdc-st:
-      seq-db-url: ${SYNC_CDCST_SEQ_DB_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
-      seq-db-user: ${SYNC_CDCST_SEQ_DB_USER:root}
-      seq-db-password: ${SYNC_CDCST_SEQ_DB_PASSWORD:root123}
+      alert-db-url: ${SYNC_CDCST_ALERT_DB_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      alert-db-user: ${SYNC_CDCST_ALERT_DB_USER:root}
+      alert-db-password: ${SYNC_CDCST_ALERT_DB_PASSWORD:root123}
       kafka-bootstrap: ${SYNC_CDCST_KAFKA_BOOTSTRAP:dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
-      seq-batch: ${SYNC_CDCST_SEQ_BATCH:1000}
+      # 待办1: job 丢失巡检自动 restore(H14 实证 master 宕机后 job 消失不自动恢复);
+      # restore 前先确认引擎可达, 单任务失败退避 5 分钟
+      watchdog:
+        enabled: ${SYNC_CDCST_WATCHDOG_ENABLED:true}
+        interval-ms: ${SYNC_CDCST_WATCHDOG_INTERVAL_MS:60000}
     demo:
       topic: ${SYNC_DEMO_TOPIC:dcp.order.demo}
       concurrency: ${SYNC_DEMO_CONCURRENCY:2}

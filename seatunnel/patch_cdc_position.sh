@@ -1,15 +1,17 @@
 #!/bin/bash
 # ① 位点透传补丁一键应用脚本(设计文档 §2.4 路径 1 位点即序号):
-# 给 5 个 CDC connector 接线自研 converter 对(PositionMetadataConverter + SnapshotFlagMetadataConverter),
-# 使源端位点 "type:k1:v1..." 与快照标志以行尾两列透传给 CdcSeqTransform。
+# 给 5 个 CDC connector 接线自研 converter 三件套(PositionMetadataConverter + SnapshotFlagMetadataConverter
+# + BeforeImageMetadataConverter), 使源端位点 "type:k1:v1..."、快照标志与 before 行
+# 以行尾三列透传给 CdcSeqTransform(位点/快照/before, 主键修改检测用)。
 #
 # 注入点(实测 SeaTunnel 2.3.12 字节码):
 #   mysql/pg/oracle/sqlserver: createDebeziumDeserializationSchema 的 Builder.build() 前
-#     → setMetadataConverters([POSITION, SNAPSHOT])   (metadata 列行尾、不进 schema)
+#     → setMetadataConverters([POSITION, SNAPSHOT, BEFORE])   (metadata 列行尾、不进 schema)
 #   mongodb: MongoDBConnectorDeserializationSchema.emit 开头
-#     → row = PositionAppender.append(row, record)    (行尾追加同构两列)
+#     → row = PositionAppender.append(row, record)    (行尾追加同构三列)
 #
-# 自举: connector-cdc-base 缺两个 converter 类时自动编译注入(幂等)。
+# 自举: connector-cdc-base 的 converter 三件套 + ProducedTypeWidener(producedType 加宽三列)
+# 每次执行都重新编译并覆盖注入(幂等: 同名类覆盖更新为最新版本)。
 #
 # 用法: bash patch_cdc_position.sh [dist目录, 默认本脚本同级的 dist/]
 # 每个 jar 自动备份 <jar>.bak(已存在不覆盖, 重复执行安全: 幂等注入点不重复)
@@ -27,34 +29,34 @@ echo "== 编译 ASM 补丁主类 =="
 mkdir -p "$PATCH_SRC/classes"
 javac -encoding UTF-8 -cp "$ASM_JAR" -d "$PATCH_SRC/classes" "$PATCH_SRC/PatchCdcPosition.java"
 
-echo "== 自举: connector-cdc-base 注入 converter 对(幂等) =="
-# 注意: 用 grep -c 而非 grep -q —— grep -q 匹配即退出会提前关闭管道,
-# unzip 收 SIGPIPE(141) 在 pipefail 下会让 `! pipeline` 误判为缺失
-if ! unzip -l "$CDC_BASE" 2>/dev/null | grep -c "debezium/PositionMetadataConverter.class" >/dev/null; then
-    mkdir -p "$DIR/cdc-patch-src/classes"
-    javac -encoding UTF-8 -cp "$ST_API:$CONNECT_API:$CDC_BASE" -d "$DIR/cdc-patch-src/classes" \
-        "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/PositionMetadataConverter.java" \
-        "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/SnapshotFlagMetadataConverter.java"
+echo "== 自举: connector-cdc-base 注入 converter 三件套 + Widener(覆盖更新, 幂等) =="
+mkdir -p "$DIR/cdc-patch-src/classes"
+javac -encoding UTF-8 -cp "$ST_API:$CONNECT_API:$CDC_BASE" -d "$DIR/cdc-patch-src/classes" \
+    "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/PositionMetadataConverter.java" \
+    "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/SnapshotFlagMetadataConverter.java" \
+    "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/BeforeImageMetadataConverter.java" \
+    "$DIR/cdc-patch-src/org/apache/seatunnel/connectors/cdc/debezium/ProducedTypeWidener.java"
+if [ ! -f "$CDC_BASE.bak" ]; then
     cp "$CDC_BASE" "$CDC_BASE.bak"
-    python3 - "$CDC_BASE" "$DIR/cdc-patch-src/classes" <<'PYEOF'
+fi
+python3 - "$CDC_BASE" "$DIR/cdc-patch-src/classes" <<'PYEOF'
 import sys, zipfile, shutil, os
 jar, classes = sys.argv[1], sys.argv[2]
 names = ["org/apache/seatunnel/connectors/cdc/debezium/PositionMetadataConverter.class",
-         "org/apache/seatunnel/connectors/cdc/debezium/SnapshotFlagMetadataConverter.class"]
+         "org/apache/seatunnel/connectors/cdc/debezium/SnapshotFlagMetadataConverter.class",
+         "org/apache/seatunnel/connectors/cdc/debezium/BeforeImageMetadataConverter.class",
+         "org/apache/seatunnel/connectors/cdc/debezium/ProducedTypeWidener.class"]
 tmp = jar + ".tmp"
 with zipfile.ZipFile(jar, "r") as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-    have = zin.namelist()
     for item in zin.infolist():
+        if item.filename in names:
+            continue  # 同名旧版本跳过, 尾部追加最新版本
         zout.writestr(item, zin.read(item.filename))
     for cls in names:
-        if cls not in have:
-            zout.write(os.path.join(classes, cls), cls)
+        zout.write(os.path.join(classes, cls), cls)
 shutil.move(tmp, jar)
-print("injected converter pair into connector-cdc-base")
+print("injected converter triple + widener into connector-cdc-base")
 PYEOF
-else
-    echo "converter pair already in connector-cdc-base, skip"
-fi
 
 echo "== 编译 PositionAppender(依赖已注入的 converter 对) =="
 javac -encoding UTF-8 -cp "$ST_API:$CONNECT_API:$CDC_BASE" -d "$PATCH_SRC/classes" "$PATCH_SRC/PositionAppender.java"

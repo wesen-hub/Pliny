@@ -15,11 +15,12 @@ import java.util.List;
 /**
  * CdcSeqTransform 工厂(SeaTunnel 2.3.12 SPI, plugin_name = CdcSeqTransform)。
  *
- * <p>采集端打标器: 置于 CDC source 与 Kafka sink 之间, 每行做三件事:
+ * <p>采集转换器: 置于 CDC source 与 Kafka sink 之间, 每行做四件事:
  * <pre>
- *   ① 领全局 seq(元库区间预分配, 行锁并发不重)并打标
- *   ② 桶路由: bucket = MurmurHash3(businessKey) % bucketCount
- *   ③ 封装 CdcRecord JSON(逻辑表/业务主键/唯一键列/rowKind/seq/字段) → 输出列 __payload
+ *   ① 列裁剪(白名单): 输出 fields = 声明的 modelField 集合(映射非空强校验)
+ *   ② seq = 位点确定性编码(严格位点一态, 缺位点 fail-fast; 快照行 = 快照级号 S)
+ *   ③ 桶路由: bucket = MurmurHash3(businessKey) % bucketCount
+ *   ④ 封装 CdcRecord JSON(逻辑表/身份/业务主键/唯一键列/rowKind/seq/beforeKey/字段)
  * </pre>
  * 输出两列: {@code __bucket}(INT, 供 Kafka sink partition_key_fields 保序) +
  * {@code __payload}(STRING, 消费端可直接反序列化为 CdcRecord)。
@@ -34,10 +35,9 @@ import java.util.List;
  *     bucket_count       = 4096
  *     null_key_mode      = ERROR            # ERROR | FALLBACK
  *     fallback_value     = __NULL_KEY__
- *     seq_db_url         = "jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true"
- *     seq_db_user        = root
- *     seq_db_password    = root123
- *     seq_batch          = 1000             # 领号区间大小(摊销 DB 开销)
+ *     field_mapping      = "[{modelField:..., source:{kind:field-map,srcField:...}}]"  # 强校验必配
+ *     snapshot_start_position = "mysql:binlog.000001:4:0"  # 快照级号 S=f(起点位点), 必配
+ *     alert_db_url       = "jdbc:mysql://mysql:3306/dcp?..."  # 告警落库(主键修改写 sync_alert, 可选)
  *   }
  * }
  * </pre>
@@ -45,15 +45,15 @@ import java.util.List;
 public class CdcSeqTransformFactory implements TableTransformFactory {
 
     public static final Option<String> TASK_ID = Options.key("task_id")
-            .stringType().noDefaultValue().withDescription("任务实例 id(seq 键第一维度, 同(逻辑,源)不同任务各自独立)");
+            .stringType().noDefaultValue().withDescription("任务实例 id(写者列第一维度, 同(逻辑,源)不同任务各自独立)");
     public static final Option<String> LOGICAL_TABLE = Options.key("logical_table")
-            .stringType().noDefaultValue().withDescription("逻辑表名(seq 计数器 + CdcRecord.logicalTable)");
+            .stringType().noDefaultValue().withDescription("逻辑表名(CdcRecord.logicalTable + 告警归属)");
     public static final Option<String> DATASOURCE_ID = Options.key("datasource_id")
-            .stringType().noDefaultValue().withDescription("源数据源 id(seq 键维度, 防不同数据源同名表串号)");
+            .stringType().noDefaultValue().withDescription("源数据源 id(写者列维度, 防不同数据源同名表串列)");
     public static final Option<String> SOURCE_DB = Options.key("source_db")
-            .stringType().noDefaultValue().withDescription("源库名(seq 键维度 + CdcRecord.sourceDb)");
+            .stringType().noDefaultValue().withDescription("源库名(写者列维度 + CdcRecord.sourceDb)");
     public static final Option<String> SOURCE_TABLE = Options.key("source_table")
-            .stringType().noDefaultValue().withDescription("源表名(seq 键维度 + CdcRecord.sourceTable)");
+            .stringType().noDefaultValue().withDescription("源表名(写者列维度 + CdcRecord.sourceTable)");
     public static final Option<List<String>> BUSINESS_KEY_FIELDS = Options.key("business_key_fields")
             .listType().noDefaultValue().withDescription("参与业务主键的字段(按声明顺序拼接)");
     public static final Option<List<String>> KEY_COLUMNS = Options.key("key_columns")
@@ -64,24 +64,20 @@ public class CdcSeqTransformFactory implements TableTransformFactory {
             .stringType().defaultValue("ERROR").withDescription("空主键策略: ERROR | FALLBACK");
     public static final Option<String> FALLBACK_VALUE = Options.key("fallback_value")
             .stringType().defaultValue("__NULL_KEY__").withDescription("FALLBACK 模式兜底键");
-    public static final Option<String> SEQ_DB_URL = Options.key("seq_db_url")
-            .stringType().noDefaultValue().withDescription("元库 JDBC URL(seq_counter)");
-    public static final Option<String> SEQ_DB_USER = Options.key("seq_db_user")
-            .stringType().noDefaultValue().withDescription("元库用户名");
-    public static final Option<String> SEQ_DB_PASSWORD = Options.key("seq_db_password")
-            .stringType().noDefaultValue().withDescription("元库密码");
-    public static final Option<Integer> SEQ_BATCH = Options.key("seq_batch")
-            .intType().defaultValue(1000).withDescription("领号区间大小");
+    public static final Option<String> ALERT_DB_URL = Options.key("alert_db_url")
+            .stringType().noDefaultValue().withDescription("告警库 JDBC URL(sync_alert, 主键修改/before 解析失败告警; 必配, 缺陷 5)");
+    public static final Option<String> ALERT_DB_USER = Options.key("alert_db_user")
+            .stringType().noDefaultValue().withDescription("告警库用户名(必配)");
+    public static final Option<String> ALERT_DB_PASSWORD = Options.key("alert_db_password")
+            .stringType().noDefaultValue().withDescription("告警库密码(必配)");
     public static final Option<String> FIELD_MAPPING = Options.key("field_mapping")
-            .stringType().noDefaultValue().withDescription("字段映射配置 JSON(向导 Step3: [{modelField, source:{kind,srcField,expr}, steps:[...]}])");
+            .stringType().noDefaultValue().withDescription("字段映射配置 JSON(强校验必配: [{modelField, source:{kind,srcField,expr}, steps:[...]}], 列裁剪白名单)");
     public static final Option<String> ROW_CHAIN = Options.key("row_chain")
             .stringType().noDefaultValue().withDescription("行级转换链 JSON(向导 Step4: 仅 filter/filter-kind, [{type,enabled,params}])");
     public static final Option<String> SOURCE_TYPE = Options.key("source_type")
-            .stringType().noDefaultValue().withDescription("源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb), 路径 1 位点编码分派");
-    public static final Option<Boolean> EMIT_POSITION = Options.key("emit_position")
-            .booleanType().noDefaultValue().withDescription("⑤ 位点模式灰度开关: true=严格位点(缺位点 fail-fast), false=纯号段计数器, 缺省=兼容(有位点用位点否则计数器)");
+            .stringType().noDefaultValue().withDescription("源库类型(mysql/pg/oracle/sqlserver/mongodb/tidb), 位点编码分派");
     public static final Option<String> SNAPSHOT_START_POSITION = Options.key("snapshot_start_position")
-            .stringType().noDefaultValue().withDescription("④ 快照起点位点(type:k1:v1...), 位点模式下快照行统一编码为快照级号 S");
+            .stringType().noDefaultValue().withDescription("④ 快照起点位点(type:k1:v1...), 快照行统一编码为快照级号 S(必配)");
     public static final Option<Long> SEQ_RESET_THRESHOLD = Options.key("seq_reset_threshold")
             .longType().defaultValue(1_000_000_000_000L).withDescription("③ seq 体系回退告警阈值(体系重置检测)");
 
@@ -93,10 +89,11 @@ public class CdcSeqTransformFactory implements TableTransformFactory {
     @Override
     public OptionRule optionRule() {
         return OptionRule.builder()
-                .required(LOGICAL_TABLE, BUSINESS_KEY_FIELDS, KEY_COLUMNS, SEQ_DB_URL, SEQ_DB_USER, SEQ_DB_PASSWORD)
-                .optional(BUCKET_COUNT, NULL_KEY_MODE, FALLBACK_VALUE, SEQ_BATCH, FIELD_MAPPING, ROW_CHAIN,
-                        DATASOURCE_ID, SOURCE_DB, SOURCE_TABLE, TASK_ID, SOURCE_TYPE,
-                        EMIT_POSITION, SNAPSHOT_START_POSITION, SEQ_RESET_THRESHOLD)
+                .required(LOGICAL_TABLE, TASK_ID, DATASOURCE_ID, SOURCE_DB, SOURCE_TABLE,
+                        BUSINESS_KEY_FIELDS, KEY_COLUMNS, FIELD_MAPPING,
+                        ALERT_DB_URL, ALERT_DB_USER, ALERT_DB_PASSWORD)
+                .optional(BUCKET_COUNT, NULL_KEY_MODE, FALLBACK_VALUE, ROW_CHAIN, SOURCE_TYPE,
+                        SNAPSHOT_START_POSITION, SEQ_RESET_THRESHOLD)
                 .build();
     }
 
