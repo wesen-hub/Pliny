@@ -10,6 +10,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +21,7 @@ import java.util.Map;
  * <p>每行处理流水线:
  * <pre>
  *   RowKind → INSERT/UPDATE/DELETE
- *   businessKey = business_key_fields 值按声明顺序以 '|' 拼接(空值按 null_key_mode)
+ *   businessKey = business_key_fields 值(单键裸串; 多键 JSON 数组, 空值按 null_key_mode)
  *   seq        = 位点即序号(严格位点一态)
  *   bucket     = MurmurHash3(businessKey) % bucketCount(固定桶, 扩容映射热更新在 sink 侧)
  *   输出       = [__bucket, __payload(CdcRecord JSON)]
@@ -49,8 +50,6 @@ import java.util.Map;
 public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTunnelMapTransform<SeaTunnelRow> {
 
     private static final long serialVersionUID = 1L;
-
-    private static final String KEY_JOIN = "|";
 
     private final CdcSeqTransformConfig config;
 
@@ -168,16 +167,14 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
             }
 
             // ④ 业务主键: 模型字段(business_key_fields)从映射后字段取值; 未映射直连取源字段
-            StringBuilder key = new StringBuilder();
+            //    N1(A1): 单键保持裸字符串(历史兼容/零开销); 多键编码为 JSON 数组字符串,
+            //    消除 '|' 分隔符与键值内容歧义(键值含 '|' 时按 '|' 拆分回填会错位)
+            List<String> keyVals = new ArrayList<>();
             for (String f : config.getBusinessKeyFields()) {
                 Object v = fields.containsKey(f) ? fields.get(f) : srcFields.get(f);
-                if (key.length() > 0) {
-                    key.append(KEY_JOIN);
-                }
-                key.append(v == null ? "" : v);
+                keyVals.add(v == null ? "" : String.valueOf(v));
             }
-            String businessKey = RouteUtil.resolveKey(key.toString(),
-                    config.getNullKeyMode(), config.getFallbackValue());
+            String businessKey = encodeKey(keyVals);
 
             // Mongo DELETE 事件只带 documentKey(_id), 文档已删无业务字段;
             // 若业务键不含 _id 则无法定位目标行 → 跳过该 DELETE(固有限制, 文档标注)
@@ -316,29 +313,42 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
         return seq;
     }
 
-    /** ④.5 beforeKey 提取: 从 before 行 JSON(补丁透传)按 business_key_fields 拼接主键值;
+    /** ④.5 beforeKey 提取: 从 before 行 JSON(补丁透传)按 business_key_fields 取值;
      *  null(无 before 列/CDC 无 before image)→ null(不检测);
-     *  解析失败 → 告警 + fail-fast(无法完成主键修改检测, 不允许静默降级, 缺陷 5) */
+     *  解析失败 → 告警 + fail-fast(无法完成主键修改检测, 不允许静默降级, 缺陷 5);
+     *  N1(A1): beforeKey 与 businessKey 同格式编码(多键 JSON 数组), 保证比对不因键值含 '|' 误判 */
     private String beforeKeyOf(String beforeJson) {
         if (beforeJson == null || beforeJson.isBlank()) {
             return null;
         }
         try {
             Map<String, Object> m = OM.readValue(beforeJson, Map.class);
-            StringBuilder key = new StringBuilder();
+            List<String> vals = new ArrayList<>();
             for (String f : config.getBusinessKeyFields()) {
                 Object v = m.get(f);
-                if (key.length() > 0) {
-                    key.append(KEY_JOIN);
-                }
-                key.append(v == null ? "" : v);
+                vals.add(v == null ? "" : String.valueOf(v));
             }
-            return RouteUtil.resolveKey(key.toString(),
-                    config.getNullKeyMode(), config.getFallbackValue());
+            return encodeKey(vals);
         } catch (Exception e) {
             alertGeneric("before_parse_fail", "before 行 JSON 解析失败: " + e.getMessage());
             throw new IllegalStateException("before 行 JSON 解析失败(fail-fast, 无法完成主键修改检测): "
                     + e.getMessage(), e);
+        }
+    }
+
+    /** N1(A1): 键编码——单键裸字符串; 多键 JSON 数组(元素与 business_key_fields 一一对应,
+     *  键值含 '|' 也不歧义); 全空键按 null_key_mode 兜底。businessKey/beforeKey 共用, 保证比对同格式 */
+    private String encodeKey(List<String> values) {
+        if (values.size() == 1) {
+            return RouteUtil.resolveKey(values.get(0), config.getNullKeyMode(), config.getFallbackValue());
+        }
+        if (values.stream().allMatch(String::isBlank)) {
+            return RouteUtil.resolveKey("", config.getNullKeyMode(), config.getFallbackValue());
+        }
+        try {
+            return OM.writeValueAsString(values);
+        } catch (Exception e) {
+            throw new IllegalStateException("业务键 JSON 编码失败: " + e.getMessage(), e);
         }
     }
 
