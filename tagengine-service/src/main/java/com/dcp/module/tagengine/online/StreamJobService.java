@@ -12,10 +12,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,7 +69,11 @@ public class StreamJobService {
     public StreamJobService(JdbcTemplate metaJdbc) {
         this.metaJdbc = metaJdbc;
         RestClient.Builder b = RestClient.builder();
-        b.requestFactory(new JdkClientHttpRequestFactory());
+        // 中危-4: 默认无超时, Flink 作业网关不可达时会无限挂起; 连接 5s / 读 15s
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(client);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        b.requestFactory(factory);
         this.rest = b.build();
     }
 

@@ -7,13 +7,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,14 +41,21 @@ public class TagV2Deployer {
 
     private final JdbcTemplate metaJdbc;
     private final TagEngineService engine;
+    private final RestClient rest;
     private final String controlUrl;
     private final String incrementalEngine;
 
     public TagV2Deployer(JdbcTemplate metaJdbc, TagEngineService engine,
-                         @Value("${dcp.outlet.control-url:http://127.0.0.1:8095}") String controlUrl,
+                         RestClient.Builder loadBalancedBuilder,
+                         @Value("${dcp.outlet.control-url:http://dcp-outlet-control}") String controlUrl,
                          @Value("${dcp.tagengine.incremental-engine:external}") String incrementalEngine) {
         this.metaJdbc = metaJdbc;
         this.engine = engine;
+        // 中危-4: 默认无超时, 控制面不可达时发布会无限挂起; 连接 5s / 读 15s
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(client);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        this.rest = loadBalancedBuilder.requestFactory(factory).build();
         this.controlUrl = controlUrl.endsWith("/") ? controlUrl.substring(0, controlUrl.length() - 1) : controlUrl;
         if (!"external".equals(incrementalEngine) && !"unit".equals(incrementalEngine)) {
             throw new IllegalArgumentException("dcp.tagengine.incremental-engine 须为 external|unit, 实际: " + incrementalEngine);
@@ -170,21 +176,12 @@ public class TagV2Deployer {
         }
     }
 
-    private static String httpPost(String url, String body) {
+    private String httpPost(String url, String body) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
+            return rest.post().uri(url)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode() + " " + resp.body());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+                    .body(body == null ? "" : body)
+                    .retrieve().body(String.class);
         } catch (Exception e) {
             throw new IllegalStateException("HTTP 失败:" + url, e);
         }
