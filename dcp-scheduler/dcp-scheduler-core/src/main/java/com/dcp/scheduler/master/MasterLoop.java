@@ -272,16 +272,17 @@ public class MasterLoop implements AutoCloseable {
             allParts = readParts();
             autoscaler.refreshRps(allParts);
             ensureLagSource();
-            int drained = autoscaler.drainTick(allParts, probeEndOffsets(allParts, System.currentTimeMillis()));
+            // 低危-6: endOffset 每轮只实查一次(内部按 probeSec 限频), 三个消费方复用同一快照
+            Map<String, Map<Integer, Long>> endOffsets = probeEndOffsets(allParts, System.currentTimeMillis());
+            int drained = autoscaler.drainTick(allParts, endOffsets);
             int scaled = 0;
             if (reassigned == 0) {
                 scaled = autoscaler.evaluate(readRunningSpecs(), allParts);
             }
             // ⑧.5 告警巡检(监控子文档 §六规则):lag 高位/错误率/容量水位/PENDING 积压
-            alertTick(allParts, live, probeEndOffsets(allParts, System.currentTimeMillis()));
+            alertTick(allParts, live, endOffsets);
             // ⑧.6 监控聚合(监控子文档 §二):分区差分派生 + 任务/实例/ns 三级聚合,后台直读
-            metricsDeriver.derive(allParts, metas, live, autoscaler.rpsSnapshot(),
-                    probeEndOffsets(allParts, System.currentTimeMillis()));
+            metricsDeriver.derive(allParts, metas, live, autoscaler.rpsSnapshot(), endOffsets);
             if (allocated > 0 || reassigned > 0 || rebalanced > 0 || instDrained > 0 || scaled > 0 || drained > 0) {
                 log.info("[{}] 决策轮:分配 {} 判死交接 {} 再平衡 {} 下架迁出 {} 扩缩 {} 追平清 {}",
                         ns, allocated, reassigned, rebalanced, instDrained, scaled, drained);

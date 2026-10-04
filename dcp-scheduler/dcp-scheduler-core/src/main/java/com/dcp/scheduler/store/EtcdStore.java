@@ -16,6 +16,7 @@ import io.etcd.jetcd.options.PutOption;
 import io.etcd.jetcd.watch.WatchResponse;
 import io.etcd.jetcd.options.WatchOption;
 import io.etcd.jetcd.Watch;
+import io.etcd.jetcd.common.exception.CompactedException;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * etcd 封装:注册/lease 保活/读写/watch/CAS/竞选。
@@ -37,7 +40,8 @@ public class EtcdStore implements AutoCloseable {
     private final Client client;
 
     public EtcdStore(String endpoints) {
-        this.client = Client.builder().endpoints(endpoints).build();
+        // jetcd 0.8.x 的 endpoints(String...) 按单个 URI 解析, 逗号分隔多地址需自行拆分
+        this.client = Client.builder().endpoints(endpoints.split(",")).build();
     }
 
     public static EtcdStore connect(String endpoints) {
@@ -210,15 +214,93 @@ public class EtcdStore implements AutoCloseable {
 
     // ══════════ watch ══════════
 
-    /** 前缀监听。回调在 grpc 线程执行,实现方需保证线程安全。 */
+    /**
+     * 前缀监听(带续传, 低危-5)。回调在 grpc 线程执行, 实现方需保证线程安全。
+     *
+     * <p>修复前 watch 不带 revision: 断线重连窗口内的事件会丢, 只能靠周期对账兜底;
+     * 现在记录已见 revision, 断开后从 {@code lastRevision+1} 重建, 窗口内事件不再丢。
+     * etcd 压缩了历史(CompactedException)时回退为不带 revision 监听(与旧行为一致)。
+     */
     public Watch.Watcher watchPrefix(ByteSequence prefix, Listener l) {
-        return client.getWatchClient().watch(prefix,
-                WatchOption.builder().withPrefix(prefix).build(),
-                new Watch.Listener() {
-                    @Override public void onNext(WatchResponse r) { l.onEvent(r); }
-                    @Override public void onError(Throwable t) { l.onError(t); }
-                    @Override public void onCompleted() { l.onCompleted(); }
-                });
+        ResumableWatch w = new ResumableWatch(prefix, l);
+        w.start();
+        return w;
+    }
+
+    /** 续传 watch 包装: onNext 记录 revision; 断开后延迟 1s 从 lastRevision+1 重建(防双重建)。 */
+    private final class ResumableWatch implements Watch.Watcher {
+        private final ByteSequence prefix;
+        private final Listener l;
+        private final AtomicLong lastRev = new AtomicLong(0);
+        private final AtomicBoolean compactedFallback = new AtomicBoolean(false);
+        private final AtomicBoolean rebuilding = new AtomicBoolean(false);
+        private volatile boolean closed = false;
+        private volatile Watch.Watcher inner;
+
+        ResumableWatch(ByteSequence prefix, Listener l) {
+            this.prefix = prefix;
+            this.l = l;
+        }
+
+        void start() {
+            WatchOption.Builder b = WatchOption.builder().withPrefix(prefix);
+            long rev = lastRev.get();
+            if (rev > 0 && !compactedFallback.get()) {
+                b.withRevision(rev + 1);
+            }
+            inner = client.getWatchClient().watch(prefix, b.build(), new Watch.Listener() {
+                @Override public void onNext(WatchResponse r) {
+                    long h = r.getHeader().getRevision();
+                    if (h > 0) {
+                        lastRev.accumulateAndGet(h, Math::max);
+                    }
+                    l.onEvent(r);
+                }
+                @Override public void onError(Throwable t) {
+                    if (t instanceof CompactedException) {
+                        compactedFallback.set(true);
+                        log.warn("watch(prefix={}) 遇 compacted, 回退为不带 revision 监听(靠周期对账兜底)", prefix);
+                    }
+                    l.onError(t);
+                    scheduleRebuild();
+                }
+                @Override public void onCompleted() {
+                    l.onCompleted();
+                    scheduleRebuild();
+                }
+            });
+        }
+
+        private void scheduleRebuild() {
+            if (closed || !rebuilding.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                Thread.sleep(1000);   // 异常路径简单退避, 避免重连风暴
+                if (closed) return;
+                if (inner != null) inner.close();
+                start();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } finally {
+                rebuilding.set(false);
+            }
+        }
+
+        @Override public void close() {
+            closed = true;
+            if (inner != null) inner.close();
+        }
+
+        @Override public void requestProgress() {
+            Watch.Watcher w = inner;
+            if (w != null) w.requestProgress();
+        }
+
+        @Override public boolean isClosed() {
+            Watch.Watcher w = inner;
+            return closed || (w != null && w.isClosed());
+        }
     }
 
     public interface Listener {
