@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import java.util.List;
 
 @Component
 public class JwtUtil {
@@ -22,11 +21,11 @@ public class JwtUtil {
         this.expireMs = expireHours * 3600_000L;
     }
 
-    public String generate(Long userId, String username, List<String> roles) {
+    /** 签发 token(H3: 只带身份, 不带 roles claim; 角色由 JwtAuthFilter 从 DB 回查, 防止默认密钥伪造 ADMIN) */
+    public String generate(Long userId, String username) {
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("username", username)
-                .claim("roles", roles)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expireMs))
                 .signWith(key)

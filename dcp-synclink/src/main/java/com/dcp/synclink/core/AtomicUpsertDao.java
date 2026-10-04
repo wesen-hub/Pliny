@@ -261,10 +261,21 @@ public class AtomicUpsertDao {
         if (upserts.isEmpty()) {
             return;
         }
-        // 分子批: 单条 INSERT 语句参数规模控制(快照 S 号全批同号, 同号拒写不互扰)
+        // H2: 先按写者列分组(多表合并多源同批各自比各自的 seq, 与增量路径 applyMultiValue 同口径;
+        //     否则多源 op 混批共用首个 op 的裁判列, 他源写者列永不推进且字段并集补 "" 静默清列)
+        Map<String, List<TableOp>> writerGroups = new LinkedHashMap<>();
+        for (TableOp op : upserts) {
+            if (op.writer() == null || op.writer().isBlank()) {
+                throw new IllegalStateException("写者列缺失(快照身份必配, 消费端入口已拦截无身份消息): " + op.table());
+            }
+            writerGroups.computeIfAbsent(op.writer(), x -> new ArrayList<>()).add(op);
+        }
+        // 分子批: 单条 INSERT 语句参数规模控制(快照 S 号全批同号, 同号拒写不互 扰)
         final int chunk = 500;
-        for (int from = 0; from < upserts.size(); from += chunk) {
-            snapshotChunk(upserts.subList(from, Math.min(upserts.size(), from + chunk)));
+        for (List<TableOp> group : writerGroups.values()) {
+            for (int from = 0; from < group.size(); from += chunk) {
+                snapshotChunk(group.subList(from, Math.min(group.size(), from + chunk)));
+            }
         }
     }
 

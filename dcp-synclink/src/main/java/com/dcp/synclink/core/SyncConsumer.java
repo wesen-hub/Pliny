@@ -153,6 +153,23 @@ public class SyncConsumer {
             log.error("投递队列失败(逐条兜底, 单条失败写死信): {}", ex.getMessage());
             Map<TopicPartition, Long> fallbackOffsets = new HashMap<>();
             for (ConsumerRecord<String, String> record : records) {
+                // L1: 回退路径复用主路径过滤——水位事件跳过、缺 logicalTable 坏消息落死信,
+                //     否则主路径已跳过的水位事件会被逐条重放(NPE 落死信无限增长)
+                if (isWatermark(record.value())) {
+                    fallbackOffsets.merge(new TopicPartition(record.topic(), record.partition()),
+                            record.offset(), Math::max);
+                    continue;
+                }
+                if (parseLogicalTable(record.value()) == null) {
+                    try {
+                        dltService.save(record, "无法解析逻辑表(回退路径, 消息缺少 logicalTable 字段)");
+                    } catch (Exception dltEx) {
+                        log.error("死信落库失败: {}", dltEx.getMessage());
+                    }
+                    fallbackOffsets.merge(new TopicPartition(record.topic(), record.partition()),
+                            record.offset(), Math::max);
+                    continue;
+                }
                 try {
                     processOne(record);
                 } catch (Exception single) {

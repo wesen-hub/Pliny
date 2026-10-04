@@ -28,7 +28,7 @@ dcp:
     meta:
       jdbc-url: ${DCP_WORKER_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       username: ${DCP_WORKER_META_USERNAME:root}
-      password: ${DCP_WORKER_META_PASSWORD:root123}
+      password: ${DCP_WORKER_META_PASSWORD}
     # 每 ns 的 Kafka bootstrap(平台栈 9092 / 出口栈 19092)
     kafka:
       sync: ${DCP_WORKER_KAFKA_SYNC:127.0.0.1:9092}
@@ -42,7 +42,7 @@ dcp:
     env:
       dcp.sync.target.url: ${DCP_WORKER_SYNC_TARGET_URL:jdbc:mysql://127.0.0.1:3306/dcp_target?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       dcp.sync.target.username: ${DCP_WORKER_SYNC_TARGET_USERNAME:root}
-      dcp.sync.target.password: ${DCP_WORKER_SYNC_TARGET_PASSWORD:root123}
+      dcp.sync.target.password: ${DCP_WORKER_SYNC_TARGET_PASSWORD}
       dcp.sync.buffer.queue-capacity: "2000"
       dcp.sync.buffer.batch-size: "500"
       dcp.sync.buffer.batch-timeout-ms: "100"

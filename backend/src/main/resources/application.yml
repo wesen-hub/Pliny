@@ -4,11 +4,18 @@ server:
 
 spring:
   application:
-    name: dcp
+    name: backend
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+    sentinel:
+      eager: false
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:root123}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 20
@@ -81,8 +88,8 @@ dcp:
   scheduler:
     sync-max-factor: ${DCP_SCHEDULER_SYNC_MAX_FACTOR:2}
   # 变更流出口已迁出至 delivery-service(N10), 相关配置见 delivery-service/src/main/resources/application.yml
-  enc-key: ${PLATFORM_ENC_KEY:dev-enc-key-0123456789abcdef}
-  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  enc-key: ${PLATFORM_ENC_KEY}
+  jwt-secret: ${JWT_SECRET}
   jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
   # 执行引擎: seatunnel (默认, 需要 seatunnel 容器) | light (轻量 JDBC 兑底)
   engine:
@@ -107,12 +114,12 @@ dcp:
     target:
       url: ${SYNC_TARGET_URL:jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       username: ${SYNC_TARGET_USERNAME:root}
-      password: ${SYNC_TARGET_PASSWORD:root123}
+      password: ${SYNC_TARGET_PASSWORD}
     # SeaTunnel CDC 采集端(告警落库用的元库地址, 从 seatunnel 容器内可达; 新方案: 主键修改/缺列告警写 sync_alert)
     cdc-st:
       alert-db-url: ${SYNC_CDCST_ALERT_DB_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
       alert-db-user: ${SYNC_CDCST_ALERT_DB_USER:root}
-      alert-db-password: ${SYNC_CDCST_ALERT_DB_PASSWORD:root123}
+      alert-db-password: ${SYNC_CDCST_ALERT_DB_PASSWORD}
       kafka-bootstrap: ${SYNC_CDCST_KAFKA_BOOTSTRAP:dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
       # 待办1: job 丢失巡检自动 restore(H14 实证 master 宕机后 job 消失不自动恢复);
       # restore 前先确认引擎可达, 单任务失败退避 5 分钟
@@ -137,7 +144,7 @@ dcp:
     # 底座容器内可达的元库地址(seq_counter/logical_table/dlt_message; 与 cdc-st 段同模式)
     meta-jdbc-url: ${INGEST_META_JDBC_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
     meta-user: ${INGEST_META_USER:root}
-    meta-password: ${INGEST_META_PASSWORD:root123}
+    meta-password: ${INGEST_META_PASSWORD}
     # 底座容器内可达的平台栈 Kafka(入站 topic dcp.in.{表} 与信封流 dcp.{表} 所在)
     kafka-bootstrap: ${INGEST_KAFKA_BOOTSTRAP:dcp-kafka:9092}
   lakesync:
@@ -146,10 +153,15 @@ dcp:
     # 底座容器内可达的元库地址(logical_table 业务键读 / dlt_message 落库; 与 ingest 同库同视角)
     meta-jdbc-url: ${LAKESYNC_META_JDBC_URL:jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
     meta-user: ${LAKESYNC_META_USER:root}
-    meta-password: ${LAKESYNC_META_PASSWORD:root123}
+    meta-password: ${LAKESYNC_META_PASSWORD}
     # 批作业 runner 与湖增量任务的 catalog/s3 同源配置(见 compose DCP_LAKESYNC_CATALOG_* env)
     runner-mode: ${LAKESYNC_RUNNER_MODE:simulate}
     catalog:
+      # rest = RESTCatalog(Polaris 等 REST 服务端); hadoop = HadoopCatalog 直连 S3(需 s3 scheme 的 fs 注册);
+      # jdbc = JdbcCatalog(元数据存 RDS, 免 Hadoop fs; 三机无 polaris 场景下湖增量标准路径)
+      type: ${DCP_LAKESYNC_CATALOG_TYPE:rest}
+      name: ${DCP_LAKESYNC_CATALOG_NAME:demo}
+      jdbc-uri: ${DCP_LAKESYNC_CATALOG_JDBC_URI:}
       uri: ${DCP_LAKESYNC_CATALOG_URI:http://dcp-polaris:8181/api/catalog}
       warehouse: ${DCP_LAKESYNC_CATALOG_WAREHOUSE:demo}
       namespace: ${DCP_LAKESYNC_CATALOG_NAMESPACE:dcp}

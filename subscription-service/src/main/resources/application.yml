@@ -24,7 +24,7 @@ management:
 
 dcp:
   # 管理面 JWT 验证(与 backend 同 secret, 只验证不签发)
-  jwt-secret: ${JWT_SECRET:dcp-jwt-secret-0123456789abcdef0123456789}
+  jwt-secret: ${JWT_SECRET}
   jwt-expire-hours: ${JWT_EXPIRE_HOURS:2}
   # 目标库(视图解析/快照/changes 查询的只读入口, 与 backend dcp.sync.target 同源)
   sync:

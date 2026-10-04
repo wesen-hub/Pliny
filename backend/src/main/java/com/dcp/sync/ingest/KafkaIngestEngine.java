@@ -148,6 +148,8 @@ public class KafkaIngestEngine {
             String key = String.valueOf(a.get("app_key"));
             List<String> tables = tablesOfApp(((Number) a.get("id")).longValue());
             Map<String, Object> row = new LinkedHashMap<>(a);
+            // H1: 列表不回显完整 appKey(只创建时返回一次), 统一脱敏
+            row.put("app_key", maskKey(key));
             row.put("logicalTables", tables);
             row.put("ok", appOk(key, tables));
             row.put("dlt", dltCount(key, null));
@@ -177,11 +179,20 @@ public class KafkaIngestEngine {
         }
         List<String> boundTables = tables.stream().map(t -> String.valueOf(t.get("logicalTable"))).toList();
         Map<String, Object> out = new LinkedHashMap<>(app);
+        out.put("app_key", maskKey(appKey));   // H1: 详情同样脱敏(路径参数为调用方自持 key)
         out.put("tables", tables);
         out.put("ok", appOk(appKey, boundTables));
         out.put("dlt", dltCount(appKey, null));
         out.put("samples", List.of());   // 吞吐采样环已随消费段退役(底座指标由 outlet 侧采集)
         return out;
+    }
+
+    /** H1: appKey 脱敏(≥8 位保留头尾各 4, 其余掩星; 短 key 全掩) */
+    private String maskKey(String key) {
+        if (key == null || key.length() < 8) {
+            return "****";
+        }
+        return key.substring(0, 4) + "****" + key.substring(key.length() - 4);
     }
 
     public void enableApp(String appKey, boolean enable) {

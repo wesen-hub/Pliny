@@ -870,6 +870,12 @@ public class MasterLoop implements AutoCloseable {
             failOp(e, op, "缺 rules 参数");
             return;
         }
+        // M1: 字段装箱化后整包覆盖语义要求全字段显式配置, null 视为缺失
+        if (r.up == null || r.down == null || r.upPeriods == null || r.downPeriods == null
+                || r.cooldownMinutes == null || r.maxStep == null || r.downEnabled == null) {
+            failOp(e, op, "rules 字段缺失(整包覆盖需全字段: up/down/upPeriods/downPeriods/cooldownMinutes/maxStep/downEnabled)");
+            return;
+        }
         if (r.up <= 0 || r.up > 1 || r.down < 0 || r.down >= 1 || r.up <= r.down) {
             failOp(e, op, "水位非法(需 0 < down < up ≤ 1)");
             return;

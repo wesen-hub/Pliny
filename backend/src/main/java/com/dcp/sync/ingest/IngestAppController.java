@@ -32,6 +32,7 @@ public class IngestAppController {
     }
 
     @GetMapping
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<List<Map<String, Object>>> list() {
         return ApiResponse.ok(engine.listApps());
     }
@@ -50,6 +51,7 @@ public class IngestAppController {
     }
 
     @GetMapping("/{appKey}")
+    @PreAuthorize("@perm.has('ingest:app:manage')")
     public ApiResponse<Map<String, Object>> status(@PathVariable String appKey) {
         try {
             return ApiResponse.ok(engine.appStatus(appKey));

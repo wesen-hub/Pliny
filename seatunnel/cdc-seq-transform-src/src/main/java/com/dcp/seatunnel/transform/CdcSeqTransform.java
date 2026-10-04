@@ -316,16 +316,25 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
     /** ④.5 beforeKey 提取: 从 before 行 JSON(补丁透传)按 business_key_fields 取值;
      *  null(无 before 列/CDC 无 before image)→ null(不检测);
      *  解析失败 → 告警 + fail-fast(无法完成主键修改检测, 不允许静默降级, 缺陷 5);
-     *  N1(A1): beforeKey 与 businessKey 同格式编码(多键 JSON 数组), 保证比对不因键值含 '|' 误判 */
+     *  N1(A1): beforeKey 与 businessKey 同格式编码(多键 JSON 数组), 保证比对不 因键值含 '|' 误判;
+     *  M2: before 镜像按源列名构建而 businessKey 取映射后模型字段, 旧实现同名取值会落空 →
+     *      改为按「源列名」回查旧值并重放确定性加工链; 任一业务键为 compute/uuid/system 生成列
+     *      时旧值不可重放 → 返回 null 跳过检测(宁漏检不误停任务) */
     private String beforeKeyOf(String beforeJson) {
         if (beforeJson == null || beforeJson.isBlank()) {
             return null;
         }
+        FieldMappingExecutor executor = config.getFieldMappingExecutor();
         try {
             Map<String, Object> m = OM.readValue(beforeJson, Map.class);
             List<String> vals = new ArrayList<>();
             for (String f : config.getBusinessKeyFields()) {
-                Object v = m.get(f);
+                String srcCol = executor.beforeKeySourceColumn(f);
+                if (srcCol == null) {
+                    return null;
+                }
+                Object raw = m.get(srcCol);
+                Object v = executor.applyBeforeSteps(f, raw == null ? null : String.valueOf(raw));
                 vals.add(v == null ? "" : String.valueOf(v));
             }
             return encodeKey(vals);

@@ -102,6 +102,37 @@ public class FieldMappingExecutor implements Serializable {
     }
 
     /**
+     * M2: 业务键模型字段的 before 回查口径(before 镜像按源列名构建, 业务键取映射后模型字段,
+     * 键空间不一致会导致主键修改检测误报停任务)。
+     *
+     * @return field-map → 源列名(可回查); 未声明映射 → 字段名本身(直连同名列);
+     *         compute/uuid/system → null(生成列, before 镜像无旧值可比, 检测应整体跳过)
+     */
+    public String beforeKeySourceColumn(String modelField) {
+        for (Mapping m : mappings) {
+            if (modelField.equals(m.modelField)) {
+                String kind = String.valueOf(m.source.getOrDefault("kind", ""));
+                if ("field-map".equals(kind)) {
+                    String sf = String.valueOf(m.source.getOrDefault("srcField", ""));
+                    return sf.isBlank() ? modelField : sf;
+                }
+                return null;
+            }
+        }
+        return modelField;
+    }
+
+    /** M2: before 语境重放该字段的确定性加工链(steps), 使 beforeKey 与 businessKey 同变换口径 */
+    public Object applyBeforeSteps(String modelField, Object rawValue) {
+        for (Mapping m : mappings) {
+            if (modelField.equals(m.modelField)) {
+                return applySteps(rawValue, m.steps);
+            }
+        }
+        return rawValue;
+    }
+
+    /**
      * 应用映射: 源行 → 模型字段。
      *
      * @param sourceFields 源行字段(已字符串化; DELETE 行仅 PK 列)

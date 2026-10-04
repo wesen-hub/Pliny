@@ -1,6 +1,9 @@
 # macOS
 .DS_Store
 
+# 本地环境变量(密钥, 参考 .env.example)
+.env
+
 # 构建产物
 backend/target/
 frontend/node_modules/

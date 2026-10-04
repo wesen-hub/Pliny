@@ -5,12 +5,46 @@
 name: data-collect-platform
 
 services:
+  # 微服务治理: Nacos 注册中心(阶段 A; 本地 standalone, 集群部署见最小集群方案 3 节点)
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: dcp-nacos
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # 微服务治理网关(阶段 A): 唯一 API 入口, lb:// 路由到各控制面服务
+  dcp-gateway:
+    build: ./dcp-gateway
+    container_name: dcp-gateway
+    restart: unless-stopped
+    depends_on:
+      nacos:
+        condition: service_healthy
+    environment:
+      NACOS_ADDR: nacos:8848
+      TZ: Asia/Shanghai
+    ports:
+      - "8088:8088"
+
   mysql:
     image: mysql:8.0
     container_name: dcp-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       MYSQL_DATABASE: dcp
       TZ: Asia/Shanghai
     command:
@@ -25,7 +59,7 @@ services:
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -37,7 +71,7 @@ services:
     container_name: dcp-demo-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       TZ: Asia/Shanghai
     command:
       - --character-set-server=utf8mb4
@@ -49,7 +83,7 @@ services:
     ports:
       - "3307:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -239,18 +273,28 @@ services:
       kafka:
         condition: service_started
     environment:
+      NACOS_ADDR: nacos:8848
+      # 本地实测无需 Nacos 注册(发现注册关闭; 生产三机环境用 nacos 服务发现)
+      SPRING_CLOUD_NACOS_DISCOVERY_ENABLED: ${SPRING_CLOUD_NACOS_DISCOVERY_ENABLED:-false}
+      # 调度实例注册/对账(与 dcp-worker 同款, 缺省指向 compose 内 etcd)
+      DCP_ETCD: ${DCP_ETCD:-http://dcp-etcd:2379}
+      # cdc-st 作业 sink Kafka(生产缺省三机 outlet; 本地 compose 覆盖为栈内 kafka)
+      SYNC_CDCST_KAFKA_BOOTSTRAP: ${SYNC_CDCST_KAFKA_BOOTSTRAP:-kafka:9092}
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: root123
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-dcp-kafka:9092}
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://mysql:3306/demo2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+      SYNC_TARGET_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
+      SYNC_CDCST_ALERT_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
+      LAKESYNC_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       # dcp-worker 执行体服务(P0d: TaskSpec 提交/注销/扩容建议消费均走 REST,不再直连 etcd)
       DCP_WORKER_URL: ${DCP_WORKER_URL:-http://dcp-worker:8097}
       # 入站底座任务登记桥(P3):控制面地址; 入站消费已迁出至底座(kafka-ingest@1.0.0), 只登记不激活
       OUTLET_CONTROL_URL: ${OUTLET_CONTROL_URL:-http://outlet-service:8095}
       INGEST_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       INGEST_META_USER: root
-      INGEST_META_PASSWORD: root123
+      INGEST_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       INGEST_KAFKA_BOOTSTRAP: ${INGEST_KAFKA_BOOTSTRAP:-dcp-kafka:9092}
       # 打标引擎/在线标签/流作业已迁出至 tagengine-service(N9); 湖同步(LakeSync)保留
       DCP_LAKESYNC_CATALOG_URI: ${DCP_LAKESYNC_CATALOG_URI:-http://dcp-polaris:8181/api/catalog}
@@ -258,8 +302,8 @@ services:
       DCP_LAKESYNC_CATALOG_S3_ENDPOINT: ${DCP_LAKESYNC_CATALOG_S3_ENDPOINT:-http://dcp-minio:9000}
       DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY: ${DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY:-minioadmin}
       DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: ${DCP_LAKESYNC_CATALOG_S3_SECRET_KEY:-minioadmin123}
-      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
-      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:?PLATFORM_ENC_KEY 未设置: 请在 .env 或环境变量中配置随机密钥}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       SYNC_TOPICS: ${SYNC_TOPICS:-dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync}
       TZ: Asia/Shanghai
     ports:
@@ -319,10 +363,11 @@ services:
       outlet-kafka:
         condition: service_healthy
     environment:
+      NACOS_ADDR: nacos:8848
       DCP_WORKER_URL: ${DCP_WORKER_URL:-http://dcp-worker:8097}
       OUTLET_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       OUTLET_META_USERNAME: root
-      OUTLET_META_PASSWORD: root123
+      OUTLET_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       OUTLET_KAFKA_BOOTSTRAP: outlet-kafka:19092
       OUTLET_LOGIC_REPO: /app/logic-repo
       TZ: Asia/Shanghai
@@ -346,9 +391,10 @@ services:
       outlet-kafka:
         condition: service_healthy
     environment:
+      NACOS_ADDR: nacos:8848
       DELIVERY_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       DELIVERY_META_USERNAME: root
-      DELIVERY_META_PASSWORD: root123
+      DELIVERY_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       DELIVERY_KAFKA_BOOTSTRAP: outlet-kafka:19092
       # 变更流源: L1 内部流 topic(与 backend 旧 dcp.outlet.kafka.topics 同源)
       OUTLET_KAFKA_TOPICS: ${OUTLET_KAFKA_TOPICS:-dcp.cdc.target_db}
@@ -380,23 +426,24 @@ services:
       kafka:
         condition: service_started
     environment:
+      NACOS_ADDR: nacos:8848
       SUBSCRIPTION_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SUBSCRIPTION_META_USERNAME: root
-      SUBSCRIPTION_META_PASSWORD: root123
+      SUBSCRIPTION_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       # 管理面 JWT 验证(与 backend 同 secret)
-      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       # push 交付 Kafka(raw producer)
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-dcp-kafka:9092}
       # 订阅推送底座任务登记桥(P3): 实时/流式档 → sub-push 底座任务(只登记不激活)
       DCP_OUTLET_CONTROL_URL: ${DCP_OUTLET_CONTROL_URL:-http://outlet-service:8095}
       DCP_SUB_PUSH_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       DCP_SUB_PUSH_META_USER: root
-      DCP_SUB_PUSH_META_PASSWORD: root123
+      DCP_SUB_PUSH_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       DCP_SUB_PUSH_KAFKA_BOOTSTRAP: ${DCP_SUB_PUSH_KAFKA_BOOTSTRAP:-dcp-kafka:9092}
       # 目标库(视图解析/快照/changes 查询, 与 backend dcp.sync.target 同源)
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://mysql:3306/demo2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       SYNC_TARGET_USERNAME: ${SYNC_TARGET_USERNAME:-root}
-      SYNC_TARGET_PASSWORD: ${SYNC_TARGET_PASSWORD:-root123}
+      SYNC_TARGET_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       TZ: Asia/Shanghai
     ports:
       - "8098:8098"
@@ -418,15 +465,16 @@ services:
       neo4j:
         condition: service_healthy
     environment:
+      NACOS_ADDR: nacos:8848
       ASSET_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       ASSET_META_USERNAME: root
-      ASSET_META_PASSWORD: root123
+      ASSET_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       # 管理面 JWT 验证(与 backend 同 secret)
-      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       # 目标库(血缘重建 schema/存量解析, 与 backend dcp.sync.target 同源)
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://mysql:3306/demo2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       SYNC_TARGET_USERNAME: ${SYNC_TARGET_USERNAME:-root}
-      SYNC_TARGET_PASSWORD: ${SYNC_TARGET_PASSWORD:-root123}
+      SYNC_TARGET_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       LINEAGE_NEO4J_URI: ${LINEAGE_NEO4J_URI:-bolt://neo4j:7687}
       LINEAGE_NEO4J_USER: ${LINEAGE_NEO4J_USER:-neo4j}
       LINEAGE_NEO4J_PASSWORD: ${LINEAGE_NEO4J_PASSWORD:-neo4j123}
@@ -457,20 +505,21 @@ services:
       flink-jobmanager:
         condition: service_started
     environment:
+      NACOS_ADDR: nacos:8848
       TAGENGINE_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       TAGENGINE_META_USERNAME: root
-      TAGENGINE_META_PASSWORD: root123
+      TAGENGINE_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       # 在线标签层(Redis tag:online:{entity})
       TAGENGINE_REDIS_HOST: ${TAGENGINE_REDIS_HOST:-dcp-redis}
       TAGENGINE_REDIS_PORT: ${TAGENGINE_REDIS_PORT:-6379}
       # 在线事件源(dcp.in.* 订阅)
       TAGENGINE_KAFKA_BOOTSTRAP: ${TAGENGINE_KAFKA_BOOTSTRAP:-dcp-kafka:9092}
       # 管理面 JWT 验证(与 backend 同 secret)
-      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       # 目标库(数据集字段探测/批快照只读入口, 与 backend dcp.sync.target 同源)
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
       SYNC_TARGET_USERNAME: ${SYNC_TARGET_USERNAME:-root}
-      SYNC_TARGET_PASSWORD: ${SYNC_TARGET_PASSWORD:-root123}
+      SYNC_TARGET_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       # 批执行器(spark-submit/simulate)
       DCP_TAGENGINE_RUNNER_MODE: ${DCP_TAGENGINE_RUNNER_MODE:-simulate}
       DCP_TAGENGINE_EXECUTOR_JAR: ${DCP_TAGENGINE_EXECUTOR_JAR:-}
@@ -485,7 +534,7 @@ services:
       DCP_TAGSTREAM_KAFKA: ${DCP_TAGSTREAM_KAFKA:-dcp.in.}
       DCP_TAGSTREAM_JDBC_URL: ${DCP_TAGSTREAM_JDBC_URL:-jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
       DCP_TAGSTREAM_JDBC_USER: ${DCP_TAGSTREAM_JDBC_USER:-root}
-      DCP_TAGSTREAM_JDBC_PASSWORD: ${DCP_TAGSTREAM_JDBC_PASSWORD:-root123}
+      DCP_TAGSTREAM_JDBC_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       DCP_TAGSTREAM_REDIS_HOST: ${DCP_TAGSTREAM_REDIS_HOST:-dcp-redis}
       DCP_TAGSTREAM_REDIS_PORT: ${DCP_TAGSTREAM_REDIS_PORT:-6379}
       # 打标事件流发射(tag 契约订阅推送底座任务 dcp-sub-push 数据源; 底座运行时=dcp-worker outlet ns → outlet-kafka)
@@ -521,6 +570,7 @@ services:
       outlet-kafka:
         condition: service_started
     environment:
+      NACOS_ADDR: nacos:8848
       DCP_ETCD: ${DCP_ETCD:-http://dcp-etcd:2379}
       DCP_WORKER_INSTANCE_ID: ${DCP_WORKER_INSTANCE_ID:-dcp-worker-1}
       # tag/lake/sub/ingest = 消费底座多 ns 拆分(底座任务按部署器归 ns; ingest 消费平台栈, 其余出口栈)
@@ -529,7 +579,7 @@ services:
       DCP_WORKER_BUNDLES: ${DCP_WORKER_BUNDLES:-sync@/opt/dcp/bundles/dcp-synclink.jar,indexer@/opt/dcp/bundles/dcp-indexer-rt.jar,outlet@/opt/dcp/bundles/dcp-outlet-rt.jar,filesync@/opt/dcp/bundles/dcp-filesync-rt.jar}
       DCP_WORKER_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       DCP_WORKER_META_USERNAME: root
-      DCP_WORKER_META_PASSWORD: root123
+      DCP_WORKER_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       DCP_WORKER_KAFKA_SYNC: kafka:9092
       DCP_WORKER_KAFKA_INDEXER: outlet-kafka:19092
       DCP_WORKER_KAFKA_OUTLET: outlet-kafka:19092
@@ -539,11 +589,11 @@ services:
       DCP_WORKER_KAFKA_INGEST: kafka:9092
       DCP_WORKER_SYNC_TARGET_URL: jdbc:mysql://mysql:3306/demo2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       DCP_WORKER_SYNC_TARGET_USERNAME: root
-      DCP_WORKER_SYNC_TARGET_PASSWORD: root123
+      DCP_WORKER_SYNC_TARGET_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       DCP_WORKER_OUTLET_LOGIC_REPO: /app/logic-repo
       DCP_WORKER_OUTLET_CONTROL_URL: http://outlet-service:8095
       # 文件同步执行器(与 backend PLATFORM_ENC_KEY / 目标 MinIO 同源)
-      DCP_FILESYNC_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      DCP_FILESYNC_ENC_KEY: ${PLATFORM_ENC_KEY:?PLATFORM_ENC_KEY 未设置: 请在 .env 或环境变量中配置随机密钥}
       DCP_FILESYNC_TARGET_ENDPOINT: http://dcp-minio:9000
       DCP_FILESYNC_TARGET_ACCESS_KEY: minioadmin
       DCP_FILESYNC_TARGET_SECRET_KEY: minioadmin123
@@ -659,13 +709,14 @@ services:
       kafka:
         condition: service_started
     environment:
+      NACOS_ADDR: nacos:8848
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: root123
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-dcp-outlet-kafka1:9092,dcp-outlet-kafka2:9092,dcp-outlet-kafka3:9092}
       SYNC_TARGET_URL: ${SYNC_TARGET_URL:-jdbc:mysql://dcp-outlet-tidb1:4000/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
-      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
-      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:?PLATFORM_ENC_KEY 未设置: 请在 .env 或环境变量中配置随机密钥}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       SYNC_TOPICS: ${SYNC_TOPICS:-dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync}
       TZ: Asia/Shanghai
     ports:

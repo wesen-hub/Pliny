@@ -54,7 +54,7 @@ public class AuthService {
         failCache.remove(username);
         List<String> roles = userMapper.selectRolesByUserId(user.getId())
                 .stream().map(SysRole::getRoleCode).toList();
-        String token = jwtUtil.generate(user.getId(), user.getUsername(), roles);
+        String token = jwtUtil.generate(user.getId(), user.getUsername());
         auditService.record("system", "LOGIN", "user", user.getId(), "用户登录: " + username);
         return Map.of(
                 "token", token,

@@ -382,20 +382,43 @@ public class Autoscaler {
 
     // ── 规则继承与读取辅助 ──
 
-    /** 任务级规则逐字段覆盖 ns 默认规则(扩缩容子文档 §二)。 */
+    /** 系统默认规则(无任何 ns/任务配置时的兜底)。 */
+    private static ScaleRules systemDefaults() {
+        ScaleRules d = new ScaleRules();
+        d.up = 0.8;
+        d.upPeriods = 3;
+        d.down = 0.4;
+        d.downPeriods = 6;
+        d.cooldownMinutes = 10;
+        d.maxStep = 2.0;
+        d.downEnabled = true;
+        return d;
+    }
+
+    /**
+     * 任务级规则逐字段覆盖 ns 默认规则(扩缩容子文档 §二)。
+     * M1: 三层继承(系统默认 ← ns 规则 ← 任务规则), 只覆盖非 null 字段,
+     *     不再整体新建对象(旧实现基本类型字段退回 0/false, 会静默禁用缩容/清零水位)。
+     */
     private ScaleRules effectiveRules(TaskSpec spec) {
+        ScaleRules out = systemDefaults();
         ScaleRules base = store.getObj(KeySpace.rules(ns), ScaleRules.class)
                 .orElseGet(ScaleRules::new);
-        if (spec.scaleRules == null) return base;
-        ScaleRules r = new ScaleRules();
-        r.up = spec.scaleRules.up;
-        r.upPeriods = spec.scaleRules.upPeriods;
-        r.down = spec.scaleRules.down;
-        r.downPeriods = spec.scaleRules.downPeriods;
-        r.cooldownMinutes = spec.scaleRules.cooldownMinutes;
-        r.maxStep = spec.scaleRules.maxStep;
-        r.downEnabled = spec.scaleRules.downEnabled;
-        return r;
+        merge(out, base);
+        if (spec.scaleRules != null) {
+            merge(out, spec.scaleRules);
+        }
+        return out;
+    }
+
+    private static void merge(ScaleRules target, ScaleRules src) {
+        if (src.up != null) target.up = src.up;
+        if (src.upPeriods != null) target.upPeriods = src.upPeriods;
+        if (src.down != null) target.down = src.down;
+        if (src.downPeriods != null) target.downPeriods = src.downPeriods;
+        if (src.cooldownMinutes != null) target.cooldownMinutes = src.cooldownMinutes;
+        if (src.maxStep != null) target.maxStep = src.maxStep;
+        if (src.downEnabled != null) target.downEnabled = src.downEnabled;
     }
 
     /** 任务当前分区数(以 parts 记录为准,含中间态;扩缩容子文档 §二边界语义)。 */
