@@ -63,16 +63,10 @@
             <el-table-column label="任务" min-width="150">
               <template #default="{ row }"><el-link type="primary" @click="$router.push(`/sync/task/${row.id}`)">{{ row.name }}</el-link></template>
             </el-table-column>
-            <el-table-column prop="model" label="模型" width="140" />
-            <el-table-column prop="source" label="源表" width="120" />
-            <el-table-column label="采集延迟" width="100">
-              <template #default="{ row }"><el-tag size="small" type="success">{{ row.cdcLag }}</el-tag></template>
-            </el-table-column>
-            <el-table-column label="湖可见延迟" width="110">
-              <template #default="{ row }"><el-tag size="small" type="primary">{{ row.lakeLag }}</el-tag></template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }"><el-tag size="small" :type="row.status === '运行中' ? 'success' : 'warning'" effect="plain">{{ row.status }}</el-tag></template>
+            <el-table-column prop="source" label="源表" min-width="180" />
+            <el-table-column prop="topic" label="主题" min-width="180" />
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }"><el-tag size="small" :type="row.running ? 'success' : 'info'" effect="plain">{{ row.running ? '运行中' : '已停止' }}</el-tag></template>
             </el-table-column>
           </el-table>
         </el-card>
@@ -80,10 +74,9 @@
       <el-col :span="8">
         <el-card shadow="never">
           <template #header>待办与告警</template>
-          <div class="notice"><el-tag size="small" type="primary">审批</el-tag> 映射配置待审批: SCM.t_material → 物料主数据(2 字段)</div>
-          <div class="notice"><el-tag size="small" type="warning">待办</el-tag> 模型「物料主数据」已发布,等待源表映射</div>
-          <div class="notice"><el-tag size="small" type="success">完成</el-tag> 模型「订单明细」发布 → 资产目录占位已创建</div>
-          <div class="notice"><el-tag size="small" type="danger">告警</el-tag> 攒批写链路延迟 2.4s(阈值 5s)</div>
+          <div class="notice" v-for="(n, i) in notices" :key="i">
+            <el-tag size="small" :type="noticeType(n.level)">{{ noticeText(n.level) }}</el-tag> {{ n.text }}
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -91,20 +84,40 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-// TODO: 接入后端 API(/sync/overview,链路两段延迟 /stats)
+import { ref, onMounted } from 'vue'
+import { getSyncOverview } from '../../api'
+
 const cards = ref([
-  { label: '采集延迟(源→缓冲)', value: '1.8', unit: 's', color: '#52c41a' },
-  { label: '湖仓可见延迟', value: '7.2', unit: 'min', color: '#1677ff' },
-  { label: '运行中同步任务', value: '14', unit: '', color: '#303133' },
-  { label: '今日同步数据量', value: '186', unit: 'GB', color: '#722ed1' }
+  { label: '运行中采集任务', value: '—', unit: '', color: '#303133' },
+  { label: '待处理死信', value: '—', unit: '', color: '#722ed1' },
+  { label: '逻辑表数', value: '—', unit: '', color: '#1677ff' },
+  { label: '今日新增死信', value: '—', unit: '', color: '#52c41a' }
 ])
-const tasks = ref([
-  { id: 't-od', name: '订单明细-同步', model: '订单明细 DWD', source: 'ERP.t_order', cdcLag: '1.8s', lakeLag: '7.2min', status: '运行中' },
-  { id: 't-cm', name: '客户主数据-同步', model: '客户主数据 DWD', source: 'CRM.t_customer', cdcLag: '2.2s', lakeLag: '6.8min', status: '运行中' },
-  { id: 't-os', name: '订单汇总-同步', model: '订单汇总 DWS', source: 'ERP+CRM 合并', cdcLag: '2.0s', lakeLag: '8.1min', status: '运行中' },
-  { id: 't-mm', name: '物料主数据-同步', model: '物料主数据 DWD', source: 'SCM.t_material', cdcLag: '—', lakeLag: '—', status: '待映射' }
-])
+const tasks = ref([])
+const notices = ref([])
+
+function noticeType(level) {
+  return { danger: 'danger', warning: 'warning', success: 'success' }[level] || 'info'
+}
+function noticeText(level) {
+  return { danger: '告警', warning: '待办', success: '完成' }[level] || '提示'
+}
+
+onMounted(async () => {
+  try {
+    const data = await getSyncOverview()
+    if (Array.isArray(data.cards) && data.cards.length) {
+      cards.value = data.cards.map((c, i) => ({
+        label: c.label, value: c.value, unit: c.unit || '',
+        color: ['#303133', '#722ed1', '#1677ff', '#52c41a'][i] || '#303133'
+      }))
+    }
+    tasks.value = data.tasks || []
+    notices.value = data.notices || []
+  } catch (e) {
+    console.warn('同步总览加载失败(展示占位)', e)
+  }
+})
 </script>
 
 <style scoped>
