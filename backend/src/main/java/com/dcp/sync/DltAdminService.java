@@ -134,4 +134,20 @@ public class DltAdminService {
     public void ignore(Long id) {
         metaJdbc.update("UPDATE dlt_message SET status = 'IGNORED' WHERE id = ? AND status = 'PENDING'", id);
     }
+
+    /** 批量忽略(单 SQL IN 更新, 噪声消息清量用; 分批 500 防超长 SQL) */
+    public int ignoreBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        int n = 0;
+        for (int i = 0; i < ids.size(); i += 500) {
+            List<Long> chunk = ids.subList(i, Math.min(i + 500, ids.size()));
+            String in = String.join(",", chunk.stream().map(String::valueOf).toList());
+            n += metaJdbc.update(
+                    "UPDATE dlt_message SET status = 'IGNORED' WHERE id IN (" + in + ") AND status = 'PENDING'");
+        }
+        log.info("死信批量忽略: {} 条", n);
+        return n;
+    }
 }

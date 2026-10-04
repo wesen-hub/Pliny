@@ -249,6 +249,7 @@ CREATE TABLE IF NOT EXISTS cdc_st_task (
   field_mapping       JSON NULL COMMENT '字段映射配置(该源表 → 模型字段, 向导 Step3 产物)',
   row_chain           JSON NULL COMMENT '行级转换链(该源表: 仅 filter/filter-kind, 向导 Step4 产物)',
   sea_tunnel_job_id   VARCHAR(64) NULL COMMENT 'SeaTunnel jobId(重启同 id 恢复 checkpoint)',
+  snapshot_start_position VARCHAR(255) NULL COMMENT '快照起点位点(方案 A: 首次 start 读源库当前位点持久化, 重放复用保证 S 恒定)',
   running             TINYINT NOT NULL DEFAULT 0 COMMENT '1=运行中',
   update_time         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   sync_task_id        BIGINT NOT NULL DEFAULT 0 COMMENT '所属 UI 任务(sync_task.id; 0=逻辑表直建)',
@@ -289,6 +290,20 @@ CREATE TABLE IF NOT EXISTS sync_field_flow (
   KEY idx_task (sync_task_id),
   KEY idx_logical (logical_table)
 ) ENGINE=InnoDB COMMENT='字段流注册: 同一源列只能有一条采集流(跨任务唯一)';
+
+-- 同步链路告警表(2026-10-04 新方案: 减列/主键修改等异常告警, 人工确认闭环)
+CREATE TABLE IF NOT EXISTS sync_alert (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  logical_table VARCHAR(128) NOT NULL COMMENT '逻辑表',
+  task_id       BIGINT NULL COMMENT '采集任务 id(cdc_st_task.task_id, 可空)',
+  alert_type    VARCHAR(32)  NOT NULL COMMENT '告警类型: missing_column=映射引用源列缺失, primary_key_change=主键值修改',
+  detail        VARCHAR(1024) NULL COMMENT '详情: 缺失列名与映射 / beforeKey→businessKey',
+  status        VARCHAR(16)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=未处理, CLOSED=已处理',
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_lt (logical_table),
+  KEY idx_status (status)
+) ENGINE=InnoDB COMMENT='同步链路告警(缺列/主键修改, 人工确认闭环)';
 
 -- 同步死信队列(消费失败消息落库; 页面: 同步任务 → 死信监控)
 CREATE TABLE IF NOT EXISTS dlt_message (

@@ -17,6 +17,7 @@ import java.util.Map;
  *   POST /api/sync/dlt/{id}/replay    重放单条(原样重发原 topic)
  *   POST /api/sync/dlt/replay-batch   批量重放 {ids:[]}
  *   POST /api/sync/dlt/{id}/ignore    忽略
+ *   POST /api/sync/dlt/ignore-batch   批量忽略 {ids:[]}(单 SQL 更新, 供噪声消息清量)
  * </pre>
  */
 @RestController
@@ -67,5 +68,13 @@ public class DltController {
     public ApiResponse<Map<String, Object>> ignore(@PathVariable Long id) {
         dltService.ignore(id);
         return ApiResponse.ok(Map.of("ignored", true, "id", id));
+    }
+
+    @PostMapping("/ignore-batch")
+    public ApiResponse<Map<String, Object>> ignoreBatch(@RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        List<Object> ids = (List<Object>) body.getOrDefault("ids", List.of());
+        int n = dltService.ignoreBatch(ids.stream().map(x -> ((Number) x).longValue()).toList());
+        return ApiResponse.ok(Map.of("ignored", n));
     }
 }

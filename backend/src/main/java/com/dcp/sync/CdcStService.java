@@ -5,8 +5,10 @@ import com.dcp.module.datasource.DatasourceService;
 import com.dcp.module.datasource.entity.DatasourceConfig;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -39,18 +41,20 @@ public class CdcStService {
     private final JdbcTemplate metaJdbc;
     private final DatasourceService datasourceService;
     private final SeaTunnelClient seaTunnelClient;
+    private final CurrentPositionReader currentPositionReader;
     private final String encKey;
 
-    @Value("${dcp.sync.cdc-st.seq-db-url}")
-    private String seqDbUrl;
-    @Value("${dcp.sync.cdc-st.seq-db-user}")
-    private String seqDbUser;
-    @Value("${dcp.sync.cdc-st.seq-db-password}")
-    private String seqDbPassword;
+    @Value("${dcp.sync.cdc-st.alert-db-url}")
+    private String alertDbUrl;
+    @Value("${dcp.sync.cdc-st.alert-db-user}")
+    private String alertDbUser;
+    @Value("${dcp.sync.cdc-st.alert-db-password}")
+    private String alertDbPassword;
     @Value("${dcp.sync.cdc-st.kafka-bootstrap:kafka:9092}")
     private String kafkaBootstrap;
-    @Value("${dcp.sync.cdc-st.seq-batch:1000}")
-    private int seqBatch;
+    /** 巡检自动 restore 开关(待办1: H14 实证 master 宕机后 job 消失不自动恢复) */
+    @Value("${dcp.sync.cdc-st.watchdog.enabled:true}")
+    private boolean watchdogEnabled;
 
     /** SeaTunnel 作业内 table 名(连接 source→transform→sink 的显式接线) */
     private static final String SOURCE_TABLE = "cdc_source";
@@ -58,10 +62,12 @@ public class CdcStService {
 
     public CdcStService(JdbcTemplate metaJdbc, DatasourceService datasourceService,
                         SeaTunnelClient seaTunnelClient,
+                        CurrentPositionReader currentPositionReader,
                         @org.springframework.beans.factory.annotation.Value("${dcp.enc-key}") String encKey) {
         this.metaJdbc = metaJdbc;
         this.datasourceService = datasourceService;
         this.seaTunnelClient = seaTunnelClient;
+        this.currentPositionReader = currentPositionReader;
         this.encKey = encKey;
     }
 
@@ -84,6 +90,11 @@ public class CdcStService {
         }
         if (keyColumns == null || keyColumns.isEmpty()) {
             throw new IllegalArgumentException("keyColumns 不能为空");
+        }
+        // 注册强校验(新方案): 映射非空/D2/保留列/kind 约束, 直建/脚本路径与 UI 统一
+        List<String> mappingIssues = SyncMappingRules.validateStructure(SyncMappingRules.parseMapping(fieldMapping));
+        if (!mappingIssues.isEmpty()) {
+            throw new IllegalArgumentException("字段映射校验失败: " + String.join("; ", mappingIssues));
         }
         if (topic == null || topic.isBlank()) {
             String cfgTopic = null;
@@ -229,8 +240,9 @@ public class CdcStService {
     /** 单实例启动(共享逻辑: 已在跑幂等跳过; 重启复用 jobId 恢复 checkpoint) */
     private void startOne(CdcStTask task, boolean quiet) {
         String logicalTable = task.getLogicalTable();
+        boolean hasJobId = task.getSeaTunnelJobId() != null && !task.getSeaTunnelJobId().isBlank();
         // 已在跑 → 幂等跳过(避免重复提交同 jobId 被 Zeta 拒绝)
-        if (task.getSeaTunnelJobId() != null && !task.getSeaTunnelJobId().isBlank()) {
+        if (hasJobId) {
             try {
                 SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(task.getSeaTunnelJobId());
                 if ("RUNNING".equals(info.getJobStatus())) {
@@ -247,26 +259,114 @@ public class CdcStService {
         }
         SyncMode mode = modeOfTask(task);
         boolean snapshotOnly = mode.snapshotOnly();
+        boolean incrementalStart = "incremental".equals(mode.syncMode()) || "scheduled-batch".equals(mode.syncMode());
         // startup.mode: full-cdc/full-once=initial(快照+增量); incremental/scheduled-batch=start_mode(位点)
-        String startupMode = ("incremental".equals(mode.syncMode()) || "scheduled-batch".equals(mode.syncMode()))
-                ? mode.startMode() : "initial";
+        String startupMode = incrementalStart ? mode.startMode() : "initial";
+        // 启停纪律(问题记录二.2): 无 savepoint(无既有 jobId = 无 checkpoint 可恢复)且位点模式
+        // 为 latest 时, 直接追流会静默丢全量历史 → 强制降级 initial(全量+增量)
+        if (!hasJobId && "latest".equalsIgnoreCase(startupMode)) {
+            log.warn("任务 {} 无 savepoint 且 start_mode=latest → 强制 initial 防丢历史", logicalTable);
+            startupMode = "initial";
+        }
         DatasourceConfig ds = datasourceService.get(task.getDatasourceId());
+        String dsType = ds.getType() == null ? "mysql" : ds.getType().toLowerCase();
+        // 快照起点位点(方案 A, 设计文档 §2.2): 快照行位点实测为空形态("mysql::0:"),
+        // 任务提交前读源库当前位点下发为 snapshot_start_position 编码 S;
+        // 已持久化(重启/重放)则复用, 保证 S 恒定(S < 一切流号, 衔接不等式成立)
+        boolean needsSnapshot = "initial".equalsIgnoreCase(startupMode) || snapshotOnly;
+        String snapshotStartPosition = null;
+        if (needsSnapshot) {
+            snapshotStartPosition = task.getSnapshotStartPosition();
+            if (snapshotStartPosition == null || snapshotStartPosition.isBlank()) {
+                String pwd = com.dcp.common.CryptoUtil.decrypt(ds.getPasswordCiphertext(), encKey);
+                snapshotStartPosition = currentPositionReader.read(dsType, ds, pwd, task.getSourceDb());
+                metaJdbc.update("UPDATE cdc_st_task SET snapshot_start_position = ? WHERE task_id = ?",
+                        snapshotStartPosition, task.getTaskId());
+                task.setSnapshotStartPosition(snapshotStartPosition);
+                log.info("SeaTunnel CDC 快照起点位点已下发并持久化: {} ← {}.{} snap={}",
+                        logicalTable, task.getSourceDb(), task.getSourceTable(), snapshotStartPosition);
+            }
+        }
         Map<String, Object> config = buildJobConfig(task, ds, "STREAMING", startupMode, snapshotOnly,
-                ("incremental".equals(mode.syncMode()) || "scheduled-batch".equals(mode.syncMode()))
-                        ? mode.startValue() : null, ds.getType());
+                incrementalStart ? mode.startValue() : null, dsType, snapshotStartPosition);
+        // 启动级缺列检测(新方案 D6): 映射引用源列已不存在 → 写 sync_alert(missing_column)告警,
+        // 不 fail-fast(在线减列后任务正常跑, 重启后照常起), 继续 null 更新
+        alertMissingColumns(task, ds);
         String jobId = task.getSeaTunnelJobId();
         boolean restart = jobId != null && !jobId.isBlank();
         if (!restart) {
             // SeaTunnel jobId 必须是数字; 时间戳*100+taskId 保证并发不撞
             jobId = String.valueOf(System.currentTimeMillis() * 100 + task.getTaskId());
         }
-        String seaTunnelJobId = seaTunnelClient.submitJob(jobId, config, restart);
-        metaJdbc.update("UPDATE cdc_st_task SET sea_tunnel_job_id = ?, running = 1 WHERE task_id = ?",
-                seaTunnelJobId, task.getTaskId());
-        markOwnerRunning(task);
-        recordHistory(logicalTable, mode.syncMode(), seaTunnelJobId, "start", "RUNNING", null);
-        log.info("SeaTunnel CDC 已启动: {} ← {}.{} topic={} jobId={} syncTaskId={}", logicalTable,
-                task.getSourceDb(), task.getSourceTable(), task.getTopic(), seaTunnelJobId, task.getSyncTaskId());
+        try {
+            String seaTunnelJobId = seaTunnelClient.submitJob(jobId, config, restart);
+            metaJdbc.update("UPDATE cdc_st_task SET sea_tunnel_job_id = ?, running = 1 WHERE task_id = ?",
+                    seaTunnelJobId, task.getTaskId());
+            markOwnerRunning(task);
+            recordHistory(logicalTable, mode.syncMode(), seaTunnelJobId, "start", "RUNNING", null);
+            log.info("SeaTunnel CDC 已启动: {} ← {}.{} topic={} jobId={} syncTaskId={}", logicalTable,
+                    task.getSourceDb(), task.getSourceTable(), task.getTopic(), seaTunnelJobId, task.getSyncTaskId());
+        } catch (IllegalStateException e) {
+            // 启停纪律(问题记录二.2): restore 失败(旧 jobId 无可用 savepoint/checkpoint, 如 S3
+            // 位点丢失)→ 弃旧 jobId, 换新 jobId + initial 全量重采; 二次失败照抛不吞
+            if (!restart) {
+                throw e;
+            }
+            log.warn("restore 失败(无可用 savepoint?), 回退 initial 全量重采: {} jobId={}: {}",
+                    logicalTable, jobId, e.getMessage());
+            String freshJobId = String.valueOf(System.currentTimeMillis() * 100 + task.getTaskId());
+            Map<String, Object> freshConfig = buildJobConfig(task, ds, "STREAMING", "initial",
+                    snapshotOnly, null, dsType, snapshotStartPosition);
+            String seaTunnelJobId = seaTunnelClient.submitJob(freshJobId, freshConfig, false);
+            metaJdbc.update("UPDATE cdc_st_task SET sea_tunnel_job_id = ?, running = 1 WHERE task_id = ?",
+                    seaTunnelJobId, task.getTaskId());
+            markOwnerRunning(task);
+            recordHistory(logicalTable, mode.syncMode(), seaTunnelJobId, "start",
+                    "RUNNING", "restore 失败回退 initial 全量重采");
+            log.info("SeaTunnel CDC 已全量重采启动: {} ← {}.{} jobId={}", logicalTable,
+                    task.getSourceDb(), task.getSourceTable(), seaTunnelJobId);
+        }
+    }
+
+    /**
+     * 启动级缺列检测(新方案 D6): 探测源表列集, 映射引用的源列不存在 → 写 sync_alert(missing_column)。
+     * 只告警不 fail-fast(源表在线减列后任务重启照常起, 缺失列按 null 更新);
+     * 探测失败/不支持(Mongo 等无 JDBC 探测)→ 跳过, 不阻断启动。
+     */
+    private void alertMissingColumns(CdcStTask task, DatasourceConfig ds) {
+        try {
+            String pwd = com.dcp.common.CryptoUtil.decrypt(ds.getPasswordCiphertext(), encKey);
+            Map<String, Object> schema = probeSchema(ds.getType() == null ? "mysql" : ds.getType().toLowerCase(),
+                    ds, task, pwd);
+            if (schema == null || !(schema.get("fields") instanceof Map<?, ?> fm)) {
+                return;
+            }
+            java.util.Set<String> srcCols = new java.util.HashSet<>();
+            fm.keySet().forEach(k -> srcCols.add(String.valueOf(k)));
+            java.util.Set<String> referenced = new java.util.LinkedHashSet<>();
+            for (Map<String, Object> row : SyncMappingRules.parseMapping(task.getFieldMapping())) {
+                Map<String, Object> source = row.get("source") instanceof Map<?, ?> m
+                        ? (Map<String, Object>) m : Map.of();
+                String kind = source.get("kind") == null ? "" : String.valueOf(source.get("kind"));
+                String srcField = source.get("srcField") == null ? "" : String.valueOf(source.get("srcField"));
+                if ("field-map".equals(kind) && !srcField.isBlank()) {
+                    referenced.add(srcField);
+                }
+            }
+            List<String> missing = referenced.stream().filter(f -> !srcCols.contains(f)).toList();
+            if (missing.isEmpty()) {
+                return;
+            }
+            metaJdbc.update("INSERT INTO sync_alert (logical_table, task_id, alert_type, detail, status) "
+                            + "VALUES (?, ?, 'missing_column', ?, 'OPEN')",
+                    task.getLogicalTable(), task.getTaskId(),
+                    "任务启动: 映射引用源列缺失 [" + String.join(", ", missing) + "]"
+                            + "(源表 " + task.getSourceDb() + "." + task.getSourceTable()
+                            + "), 按新方案继续 null 更新");
+            log.warn("缺列告警已写 sync_alert: {} 缺失列 [{}]", task.getLogicalTable(), missing);
+        } catch (Exception e) {
+            log.warn("缺列探测失败(跳过告警, 继续启动): {} - {}", task.getLogicalTable(), e.getMessage());
+        }
     }
 
     /** 标记所属 sync_task 运行中(直建实例 syncTaskId=0 不更新任务配置) */
@@ -312,8 +412,13 @@ public class CdcStService {
     private void stopOne(CdcStTask task) {
         String logicalTable = task.getLogicalTable();
         if (task.getSeaTunnelJobId() != null && !task.getSeaTunnelJobId().isBlank()) {
+            // 启停纪律(问题记录二.2): 优雅停止 → SeaTunnel 同步完成最终 checkpoint 落盘(S3),
+            // 等效 CLI savepoint; 停止前确认 job 仍在, 已消失的 job 直接收敛本地标记
             try {
-                seaTunnelClient.stopJob(task.getSeaTunnelJobId());
+                SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(task.getSeaTunnelJobId());
+                if (info.isRunning() || "UNKNOW".equals(info.getJobStatus())) {
+                    seaTunnelClient.stopJob(task.getSeaTunnelJobId());
+                }
             } catch (Exception e) {
                 log.warn("停止 SeaTunnel job 失败 {} ({}): {}", logicalTable, task.getSourceTable(), e.getMessage());
             }
@@ -326,7 +431,8 @@ public class CdcStService {
 
     private CdcStTask loadTask(Long taskId) {
         java.util.List<CdcStTask> l = metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
-                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, task_id, sync_task_id "
+                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, "
+                        + "task_id, sync_task_id, snapshot_start_position "
                         + "FROM cdc_st_task WHERE task_id = ?",
                 (rs, i) -> mapTask(rs), taskId);
         return l.isEmpty() ? null : l.get(0);
@@ -384,6 +490,8 @@ public class CdcStService {
     private Map<String, Object> probeSchema(String type, DatasourceConfig ds, CdcStTask task, String pwd) {
         Map<String, Object> fields = new LinkedHashMap<>();
         String url = switch (type) {
+            case "mysql" -> "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+                    .formatted(ds.getHost(), ds.getPort(), task.getSourceDb());
             case "postgresql" -> "jdbc:postgresql://%s:%d/%s".formatted(ds.getHost(), ds.getPort(), task.getSourceDb());
             case "sqlserver" -> "jdbc:sqlserver://%s:%d;databaseName=%s;encrypt=false".formatted(ds.getHost(), ds.getPort(), task.getSourceDb());
             case "oracle" -> "jdbc:oracle:thin:@//%s:%d/%s".formatted(ds.getHost(), ds.getPort(), task.getSourceDb());
@@ -550,7 +658,7 @@ public class CdcStService {
     /** 构造 SeaTunnel 作业配置: MySQL-CDC → CdcSeqTransform(含字段映射)→ Kafka */
     private Map<String, Object> buildJobConfig(CdcStTask task, DatasourceConfig ds,
                                                String jobMode, String startupMode, boolean snapshotOnly,
-                                               String startValue, String dsType) {
+                                               String startValue, String dsType, String snapshotStartPosition) {
         Map<String, Object> env = new LinkedHashMap<>();
         env.put("job.mode", jobMode);
         env.put("job.name", "cdc-st-" + task.getLogicalTable() + "-" + task.getSourceTable());
@@ -569,9 +677,7 @@ public class CdcStService {
         transform.put("source_table_name", SOURCE_TABLE);
         transform.put("result_table_name", OUTPUT_TABLE);
         transform.put("logical_table", task.getLogicalTable());
-        if (task.getTaskId() != null) {
-            transform.put("task_id", String.valueOf(task.getTaskId()));
-        }
+        transform.put("task_id", String.valueOf(task.getTaskId()));
         transform.put("datasource_id", String.valueOf(task.getDatasourceId()));
         transform.put("source_db", task.getSourceDb());
         transform.put("source_table", task.getSourceTable());
@@ -579,14 +685,17 @@ public class CdcStService {
         transform.put("key_columns", task.getKeyColumns());
         transform.put("bucket_count", task.getBucketCount());
         transform.put("null_key_mode", "ERROR");
-        transform.put("seq_db_url", seqDbUrl);
-        transform.put("seq_db_user", seqDbUser);
-        transform.put("seq_db_password", seqDbPassword);
-        transform.put("seq_batch", seqBatch);
+        // 告警落库(新方案): 主键修改/缺列告警写 sync_alert(元库)
+        transform.put("alert_db_url", alertDbUrl);
+        transform.put("alert_db_user", alertDbUser);
+        transform.put("alert_db_password", alertDbPassword);
         transform.put("source_type", dsType);
-        if (task.getFieldMapping() != null && !task.getFieldMapping().isBlank()) {
-            transform.put("field_mapping", task.getFieldMapping());
+        // 快照级号 S=f(快照起点位点)(方案 A: 后端读源库当前位点下发; 非快照任务无此配置项)
+        if (snapshotStartPosition != null && !snapshotStartPosition.isBlank()) {
+            transform.put("snapshot_start_position", snapshotStartPosition);
         }
+        // 新方案强校验必配: 注册级已保证映射非空
+        transform.put("field_mapping", task.getFieldMapping());
         if (task.getRowChain() != null && !task.getRowChain().isBlank()) {
             transform.put("row_chain", task.getRowChain());
         }
@@ -617,10 +726,92 @@ public class CdcStService {
         }
     }
 
+    /** 巡检 auto-restore 的最近尝试时间(任务级, 失败退避防风暴) */
+    private final java.util.concurrent.ConcurrentHashMap<Long, Long> lastRestoreAttempt = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** restore 失败退避窗口: 5 分钟内不重试同一任务 */
+    private static final long RESTORE_BACKOFF_MS = 5 * 60_000L;
+
+    /**
+     * 待办1: SeaTunnel job 丢失巡检自动 restore(问题记录二.1, H14 实证 master 宕机后 job
+     * 消失不自动恢复)。每 watchdog-interval-ms 扫描 running=1 的采集任务: 引擎侧非 RUNNING
+     * 即自动以同 jobId 重新提交(isStartWithSavePoint → 从 S3 checkpoint 恢复); 引擎整体
+     * 不可达时跳过本轮(不风暴)。autoStop 任务(full-once/scheduled-batch/full-scheduled)
+     * FINISHED 属正常完成, 只收敛本地标记不重启。
+     *
+     * <p>savepoint 定期调度口径: 2.3.12 REST 无 savepoint 端点(实测 404), CLI savepoint 会
+     * 触发 checkpoint 后停止任务(不适于周期触发); checkpoint 已迁 MinIO S3 且每 10s 持续
+     * 落盘, "可恢复点"由持续 checkpoint 兜底 + 本巡检的 restore 恢复验证守护。
+     */
+    @Scheduled(fixedDelayString = "${dcp.sync.cdc-st.watchdog.interval-ms:60000}")
+    @SchedulerLock(name = "cdcStWatchdog", lockAtMostFor = "10m", lockAtLeastFor = "30s")
+    public void watchdogScan() {
+        if (!watchdogEnabled) {
+            return;
+        }
+        try {
+            if (!seaTunnelClient.engineReachable()) {
+                log.info("SeaTunnel 引擎不可达, 跳过本轮 CDC 巡检");
+                return;
+            }
+            for (CdcStTask task : loadRunningTasks()) {
+                try {
+                    Long lastAttempt = lastRestoreAttempt.get(task.getTaskId());
+                    if (lastAttempt != null && System.currentTimeMillis() - lastAttempt < RESTORE_BACKOFF_MS) {
+                        continue;   // 退避期内不重试(上次 restore 失败)
+                    }
+                    SeaTunnelClient.JobInfo info = task.getSeaTunnelJobId() == null || task.getSeaTunnelJobId().isBlank()
+                            ? null : seaTunnelClient.jobInfo(task.getSeaTunnelJobId());
+                    if (info != null && info.isRunning()) {
+                        continue;   // 健康
+                    }
+                    if (info != null && info.isFinished() && modeOfTask(task).autoStop()) {
+                        // 一次性/批模式任务正常跑完: 收敛本地标记, 不重启
+                        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE task_id = ?", task.getTaskId());
+                        markOwnerIdle(task);
+                        continue;
+                    }
+                    log.warn("CDC job 丢失, 自动 restore: {} ← {}.{} jobId={} status={}", task.getLogicalTable(),
+                            task.getSourceDb(), task.getSourceTable(), task.getSeaTunnelJobId(),
+                            info == null ? "NOT-FOUND" : info.getJobStatus());
+                    // G1 主键修改告警未处理(OPEN)→ 不自动 restore: 任务因主键修改已暂停,
+                    // 人工处理 sync_alert 后重建任务/映射(检查点保留, 处理后手动启动续采)
+                    Integer openPkAlerts = metaJdbc.queryForObject(
+                            "SELECT COUNT(*) FROM sync_alert WHERE logical_table = ? "
+                                    + "AND alert_type = 'primary_key_change' AND status = 'OPEN'",
+                            Integer.class, task.getLogicalTable());
+                    if (openPkAlerts != null && openPkAlerts > 0) {
+                        log.warn("存在未处理主键修改告警, 不自动 restore: {} (请处理 sync_alert 后人工重启)",
+                                task.getLogicalTable());
+                        continue;
+                    }
+                    startOne(task, true);
+                    lastRestoreAttempt.remove(task.getTaskId());
+                } catch (Exception e) {
+                    log.warn("CDC 巡检 restore 失败 {} ({}.{}): {}", task.getLogicalTable(),
+                            task.getSourceDb(), task.getSourceTable(), e.getMessage());
+                    lastRestoreAttempt.put(task.getTaskId(), System.currentTimeMillis());
+                }
+            }
+        } catch (Exception e) {
+            log.error("CDC 巡检扫描异常", e);
+        }
+    }
+
+    /** 加载全部运行中(running=1)采集任务(巡检用) */
+    private List<CdcStTask> loadRunningTasks() {
+        return metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
+                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, "
+                        + "sea_tunnel_job_id, task_id, sync_task_id "
+                        + "FROM cdc_st_task WHERE running = 1 ORDER BY task_id",
+                (rs, i) -> mapTask(rs));
+    }
+
     /** 加载某逻辑表的全部采集任务 */
     private List<CdcStTask> loadTasks(String logicalTable) {
         return metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
-                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, task_id, sync_task_id "
+                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, "
+                        + "task_id, sync_task_id, snapshot_start_position "
                         + "FROM cdc_st_task WHERE logical_table = ? ORDER BY task_id",
                 (rs, i) -> mapTask(rs), logicalTable);
     }
@@ -640,6 +831,7 @@ public class CdcStService {
         t.setSeaTunnelJobId(rs.getString(11));
         t.setTaskId(rs.getLong(12));
         t.setSyncTaskId(rs.getLong(13));
+        t.setSnapshotStartPosition(rs.getString(14));
         return t;
     }
 
@@ -733,5 +925,7 @@ public class CdcStService {
         private String rowChain;
         private String seaTunnelJobId;
         private Long syncTaskId;
+        /** 快照起点位点(方案 A: 首次 start 时读源库当前位点持久化; 重启/重放复用保证 S 恒定) */
+        private String snapshotStartPosition;
     }
 }

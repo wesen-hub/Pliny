@@ -112,6 +112,16 @@ public class SeaTunnelClient {
         }
     }
 
+    /** 引擎整体可达性（GET /overview, 巡检用: 区分"引擎挂"与"单 job 丢失"） */
+    public boolean engineReachable() {
+        try {
+            ResponseEntity<Map> resp = rest.getForEntity(baseUrl + "/overview", Map.class);
+            return resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private HttpEntity<String> jsonEntity(Object body) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

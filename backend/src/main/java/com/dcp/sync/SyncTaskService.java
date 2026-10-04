@@ -41,9 +41,10 @@ public class SyncTaskService {
      * @return 问题列表(空 = 通过)
      */
     public List<String> validate(List<Map<String, Object>> fieldMapping, List<String> availableFields) {
-        List<String> issues = new ArrayList<>();
+        // 结构强校验(非空/D2/保留列/kind 约束): 与直建路径共用同一套规则
+        List<String> issues = new ArrayList<>(SyncMappingRules.validateStructure(fieldMapping));
         if (fieldMapping == null) {
-            return List.of("字段映射为空");
+            return issues;
         }
         var seen = new java.util.HashSet<String>();
         if (availableFields != null) {
@@ -102,6 +103,11 @@ public class SyncTaskService {
                      Object rowChain, Object businessKey,
                      String syncMode, String fullScope, String cronExpr, String startMode, String startValue,
                      Map<String, Map<String, Object>> originByTable, boolean newInstance) {
+        // 注册强校验(新方案): 映射非空/D2/保留列/compute 表达式, UI 与直建路径统一, 失败不留半成品
+        List<String> issues = validate(fieldMapping, null);
+        if (!issues.isEmpty()) {
+            throw new IllegalArgumentException("字段映射校验失败: " + String.join("; ", issues));
+        }
         // 行级转换(仅 filter/filter-kind): 按源表拆分, 随 job 配置下发采集端执行
         @SuppressWarnings("unchecked")
         Map<String, Object> chainByTable = (Map<String, Object>) (rowChain instanceof Map<?, ?> m ? m : Map.of());
@@ -174,6 +180,18 @@ public class SyncTaskService {
                                 + "row_chain=VALUES(row_chain)",
                         logicalTable, dsId, db, t, topic, toJson(keyFields), toJson(keyFields),
                         perTableMapping, perTableChain == null ? null : toJson(perTableChain), ownerId);
+            }
+        }
+        // 多写者提示(新方案, 零阻断): 同逻辑表内同 modelField 已被其他任务写入 → 信息性提示
+        // (跨源表/跨任务同 modelField 属业务允许; 同主键撞行时按 LWW 后写覆盖)
+        for (Map<String, Object> f : flows) {
+            List<Map<String, Object>> peers = metaJdbc.queryForList(
+                    "SELECT sync_task_id FROM sync_field_flow WHERE logical_table = ? AND target_col = ? "
+                            + "AND sync_task_id <> ? LIMIT 1",
+                    f.get("logicalTable"), f.get("targetCol"), ownerId == null ? -1 : ownerId);
+            if (!peers.isEmpty()) {
+                log.info("提示: modelField {} 已被其他任务(#{})写入, 同主键撞行时按 LWW 后写覆盖",
+                        f.get("targetCol"), peers.get(0).get("sync_task_id"));
             }
         }
         refreshFieldFlows(ownerId, flows);   // 本任务字段流登记(先删后插, 含编辑/补字段)
