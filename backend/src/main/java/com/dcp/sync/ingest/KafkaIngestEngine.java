@@ -414,9 +414,16 @@ public class KafkaIngestEngine {
         String topic = IN_TOPIC_PREFIX + logicalTable;
         int partitions = partitionCountOf(logicalTable);
         try (AdminClient admin = AdminClient.create(kafkaProperties.buildAdminProperties(null))) {
-            var existing = admin.describeTopics(List.of(topic)).allTopicNames()
-                    .get(5, TimeUnit.SECONDS).get(topic);
-            if (existing == null) {
+            // describe 对不存在 topic 抛 UnknownTopicOrPartitionException(而非返回 null 条目),
+            // 故异常一律按"不存在"处理直接创建, 创建竞态由 createTopics 侧告警吸收
+            boolean exists = true;
+            try {
+                admin.describeTopics(List.of(topic)).allTopicNames()
+                        .get(5, TimeUnit.SECONDS).get(topic);
+            } catch (Exception e) {
+                exists = false;
+            }
+            if (!exists) {
                 try {
                     admin.createTopics(List.of(new NewTopic(topic, partitions, (short) 1)))
                             .all().get(30, TimeUnit.SECONDS);
@@ -426,8 +433,13 @@ public class KafkaIngestEngine {
                 }
             }
             for (int i = 0; i < 5 && partitions > 1; i++) {
-                int cur = admin.describeTopics(List.of(topic)).allTopicNames().get(5, TimeUnit.SECONDS)
-                        .get(topic).partitions().size();
+                int cur;
+                try {
+                    cur = admin.describeTopics(List.of(topic)).allTopicNames().get(5, TimeUnit.SECONDS)
+                            .get(topic).partitions().size();
+                } catch (Exception e) {
+                    break;   // 元数据不可达 → 放弃扩分区(后续提交前会再兜底)
+                }
                 if (cur >= partitions) {
                     break;
                 }
