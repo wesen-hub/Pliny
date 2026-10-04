@@ -187,10 +187,14 @@ public class KafkaIngestEngine {
         return out;
     }
 
-    /** H1: appKey 脱敏(≥8 位保留头尾各 4, 其余掩星; 短 key 全掩) */
+    /** H1: appKey 脱敏(≥12 位保留头尾各 4, 8~11 位保留头尾各 2, 其余掩星; 短 key 全掩)
+     *  低危-7: 修复前 8 位 key 头尾各 4 等于全暴露, 现 8~11 位只留头尾各 2 */
     private String maskKey(String key) {
         if (key == null || key.length() < 8) {
             return "****";
+        }
+        if (key.length() < 12) {
+            return key.substring(0, 2) + "****" + key.substring(key.length() - 2);
         }
         return key.substring(0, 4) + "****" + key.substring(key.length() - 4);
     }

@@ -10,6 +10,8 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -36,10 +38,19 @@ public class WorkerClient {
 
     private final RestClient rest;
 
-    public WorkerClient(@Value("${dcp.worker.url:http://localhost:8097}") String workerUrl) {
-        this.rest = RestClient.builder()
+    /**
+     * 服务发现模式: workerUrl 填服务名(默认 http://dcp-worker)时经 @LoadBalanced
+     * RestClient 走 Nacos 实例轮询; 显式填 http://ip:port 时直连(本地调试/降级)。
+     */
+    public WorkerClient(RestClient.Builder loadBalancedBuilder,
+                        @Value("${dcp.worker.url:http://dcp-worker}") String workerUrl) {
+        // 中危-4: 默认无超时, worker 不可达时写路径会无限挂起; 连接 5s / 读 15s 足够覆盖正常提交
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(client);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        this.rest = loadBalancedBuilder
                 .baseUrl(workerUrl)
-                .requestFactory(new JdkClientHttpRequestFactory())
+                .requestFactory(factory)
                 .build();
     }
 

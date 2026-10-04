@@ -49,7 +49,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/actuator/**").permitAll()
-                        .requestMatchers("/api/ingest/**").permitAll()
+                        // 业务系统 ingest 提交通道: appKey 自校验(Bearer appKey), 不走 JWT;
+                        // 管理端点 /api/ingest/apps/** 仍走 JWT(中危-3: 收窄原 /api/ingest/** 全量放行)
+                        .requestMatchers(HttpMethod.POST, "/api/ingest/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/ingest/meta/*").permitAll()
                         // 采集 Agent 通道: secret 自校验(X-Agent-Secret), 不走 JWT
                         .requestMatchers(HttpMethod.POST, "/api/agents/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agents/*/heartbeat").permitAll()
