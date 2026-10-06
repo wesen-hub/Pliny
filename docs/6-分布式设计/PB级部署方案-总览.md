@@ -27,7 +27,7 @@
 ③ 数据层   TiDB(PD×3 + TiKV×10 热窗口 7 天 + Server×4 无状态)| MySQL MGR ×3 元库
            | MinIO ×16(EC 8+4 → 有效 1.5PB,PB 主载体)| Iceberg+Polaris ×2
            | Redis 哨兵 3主3从(打标在线)| Neo4j 因果集群 ×3(血缘)| etcd ×3(调度底座)
-④ 治理层   Nacos ×3 | API 网关 ×2 | Sentinel 内嵌网关 | SkyWalking(采样 1%)| 无 Seata
+④ 治理层   Nacos ×3 | API 网关 ×2 | Sentinel 内嵌网关 | Zipkin(采样 1%)| 无 Seata
 ⑤ 应用层   K8s 计算节点 ×10(64C/256G)+ Flink/Spark 专用池 ×4
            控制面 6 服务各 ×2~3 | dcp-worker 执行体池共 50 实例(按 ns 分池)
 ⑥ 监控层   Prometheus ×2 + Grafana ×2,告警复用网关
@@ -67,7 +67,7 @@
 - Nacos ×3 集群(4C/8G),服务发现/配置下发替代直连 URL;
 - API 网关 ×2(8C/16G),路由/JWT 鉴权/限流;
 - Sentinel 内嵌网关进程,不独立部署;
-- 链路追踪 SkyWalking:OAP ×1(8C/32G)+ ES 存储,10 万 QPS 全链路采样 1%;
+- 链路追踪:Micrometer Tracing + Zipkin Server ×1(8C/32G),10 万 QPS 全链路采样 1%;
 - 最终一致架构,无需 Seata 分布式事务。
 
 ### ⑤ 应用服务层
