@@ -80,3 +80,25 @@ spring:
           uri: lb://backend
           predicates:
             - Path=/api/**
+
+dcp:
+  # 管理面 JWT 验签 secret(与 backend 同源 env; 只验不签, 缺失/长度不足 32 字节启动失败)
+  jwt-secret: ${JWT_SECRET}
+  gateway:
+    auth:
+      # M2: 白名单路径(格式 METHOD:path, ANY=不限方法; 与各后端服务 SecurityConfig permitAll 对齐)。
+      # 放行原因: 机器通道/订阅方 PULL 由后端自校验(appKey/X-Agent-Secret/X-Dcp-Token/契约),
+      # 不经网关时后端自验兜底; OPTIONS 预检一律放行。
+      whitelist:
+        - ANY:/api/auth/login
+        - ANY:/api/actuator/**
+        - POST:/api/ingest/*
+        - GET:/api/ingest/meta/*
+        - ANY:/api/agents/**
+        - ANY:/api/chg/**
+        - ANY:/api/outlet/contracts/**
+        - GET:/api/data-sub/*/schema
+        - GET:/api/data-sub/*/snapshot
+        - GET:/api/data-sub/*/changes
+        - POST:/api/data-sub/*/export
+        - GET:/api/data-sub/export-task/**
