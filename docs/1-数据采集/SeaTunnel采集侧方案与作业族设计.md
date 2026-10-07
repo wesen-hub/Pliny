@@ -1,7 +1,7 @@
 # SeaTunnel 采集侧方案与作业族设计
 
 > 范围:同步链路中 Kafka 之前的段落(采集/转换/输出);Kafka 之后的五段式消费侧见 `2-同步链路/`。
-> 状态:作业族模型、源库单点约束分派、跨机迁移为**设计态(未落地)**;CDC 采集、转换、桶路由、停旧启新为已实现。
+> 状态:作业族模型、源库单点约束分派、判死迁移已**完成代码改造(2026-10,未部署验证)**;CDC 采集、转换、桶路由、停旧启新为已实现;3 节点 Zeta 组网与 H14-H16 演练属部署演练,未执行。落地细节见「九、已落地实现与决策定论」。
 
 ## 一、边界与定位
 
@@ -231,14 +231,109 @@ worker-2 判死(上面挂着 mysql-01、pg-01、mssql-01 三个作业族)
 ## 八、落地路线(按依赖顺序)
 
 ```
-① checkpoint 切 S3 共享存储(MinIO)——迁移成立的第一前提
-② 3 节点 Zeta 集群组网 + H14/H15/H16 逐项演练
-③ 平台调度框架接管作业族生命周期(双通道监控 + 判死 + 自动重提)
-④ source_assign 分派表 + server-id 分配表落地(全局唯一)
-⑤ 一源库一作业族合并改造(现状「每源表一个 job」→ 同源库多表进一个 job-json)
-⑥ 字段级回补通道(B 类后加列的存量回补)
+① checkpoint 切 S3 共享存储(MinIO)——迁移成立的第一前提 ✅ 已落地(seatunnel.yaml 切 S3,外层 hdfs SPI)
+② 3 节点 Zeta 集群组网 + H14/H15/H16 逐项演练 ⏸ 部署演练,未执行(用户明确不做)
+③ 平台调度框架接管作业族生命周期(双通道监控 + 判死 + 自动重提) ✅ 已落地(watchdog 族级巡检)
+④ source_assign 分派表 + server-id 分配表落地(全局唯一) ✅ 已落地(cdc_job_family/cdc_worker/server_id_pool)
+⑤ 一源库一作业族合并改造(现状「每源表一个 job」→ 同源库多表进一个 job-json) ✅ 已落地
+⑥ 字段级回补通道(B 类后加列的存量回补) ✅ 已落地(BackfillService)
 ```
 
-## 九、面试口径(一页纸)
+## 九、已落地实现与决策定论(2026-10 代码改造)
 
-> 「Kafka 之前的采集侧:源库按作业族组织——一源库一作业族,绑定一个 worker、一个 server-id 区间,消灭多流浪费(binlog 按全量流传输、过滤在客户端,N 作业 = N 倍带宽与 dump 线程;PG 槽排他、SQLServer 实例约束更是硬冲突)。页面任务经三分类判定后合并进 job-json,停旧启新提交:旧表 checkpoint 续跑、新表快照回放追平、共用一个 binlog 流;加列则改白名单重启、增量自然出现、存量按需字段级回补。转换层做位点透传(位点即序号)+ 列裁剪白名单;输出层按主键哈希定桶、Kafka 分区器路由。并行度上增量恒 1 保序、吞吐靠作业族横向扩。迁移触发两类:worker 判死(作业族独立迁移、server-id 随迁、checkpoint 续跑)与主动缩容(排空追平);三段式 HA(集群选主/平台重提/S3 checkpoint)是设计态,现状是同机自愈。」
+> 二~五章的设计模型已从设计态落地为代码实现,落地过程中产生五项决策定论,均已在代码中固化。仅代码改造,**未部署验证**;H14-H16 演练与 3 节点 Zeta 组网未执行。
+
+### 9.1 五项决策定论总览
+
+| # | 决策点 | 定论 | 代码落点 |
+|---|---|---|---|
+| D1 | job-json 结构 | **一 job 多流水线**:每表独立 source+transform+sink,共享作业级 env/checkpoint/提交生命周期 | `CdcStService.buildFamilyJobConfig` |
+| D2 | 源库→worker 绑定落地 | **独立 SeaTunnel 实例(单节点 Zeta)+ 分派表定向提交 REST 端口**(2.3.x Zeta 集群无法指定运行节点,且集群 failover 不自动恢复) | `CdcJobFamilyService` + `SeaTunnelClient` per-baseUrl 重载 |
+| D3 | 回补通道形态 | **backend 内回补任务表 + 定时执行**:JDBC 主键区间分片读源表 → 逐列 upsert → 游标断点续跑 → 限速 | `BackfillService` + `sync_backfill_run` |
+| D4 | 回补写者身份/seq | **任务自己的写者列 + 回补专用小号 seq=1**(小于一切流号),同列 LWW 裁判 | `BackfillService.BACKFILL_SEQ=1L` + IF 裁判 SQL |
+| D5 | 同族 sync_mode 混编 | **允许混编**(用户拍板):族 job 恒 STREAMING,snapshot-only 表 `snapshot.mode=initial_only` 快照完自行结束;全族 autoStop 且 FINISHED 才收敛 | `buildFamilyJobConfig` + `familyAutoStop` |
+
+### 9.2 D1:一 job 多流水线结构
+
+```json
+{
+  "env": { "job.mode": "STREAMING", "job.name": "cdc-family-{id}",
+           "parallelism": 1, "checkpoint.interval": 10000 },
+  "source":    [ "cdc_source_0", "cdc_source_1", ... ],   // 每表一个 CDC source
+  "transform": [ "cdc_output_0", "cdc_output_1", ... ],   // CdcSeqTransform 一对一
+  "sink":      [ "kafka_sink_0", "kafka_sink_1", ... ]    // 每表写 task.getTopic()
+}
+```
+
+- **env 作业级共享**:parallelism=1(增量单 binlog 流保序)、checkpoint.interval=10000;停/启/恢复都是族级一个动作;
+- **server-id 从族区间按表序派生**:`sidBase = rangeStart + idx × 5`,族区间宽度 = 表数 × 5(与旧实现单 job 宽 5 一致);
+- **每表 transform 携带本表全部业务参数**(logical_table/task_id/field_mapping/row_chain/business_key_fields/key_columns/bucket_count/snapshot_start_position),合 job 只合并引擎外壳,业务配置表级隔离;
+- **sink**:partition_key_fields=["__bucket"]、AT_LEAST_ONCE;
+- **多流水线写同一 topic 仅出现在多源合流**:同一逻辑表多源表任务 topic 相同,靠下游写者列裁判吸收跨流水线乱序;
+- **CdcSeqTransform 无需改造**:无状态 transform,单表内有序性由「一条 binlog 流 + parallelism=1」保证,跨表无顺序要求,跨源乱序由消费端写者列裁判解决——合并动作对 transform 透明。
+
+### 9.3 D2:独立实例定向提交与判死迁移
+
+**矛盾**:2.3.x Zeta 集群模式下提交作业无法指定运行节点(Hazelcast 自行调度),且待办 1 已实证集群 master 宕机后 job 消失不自动恢复。
+
+**落地链**:
+
+1. `cdc_worker`(worker_id/rest_url/enabled)登记实例;`cdc_job_family` 以 (datasource_id, source_db) 唯一键记录 族→worker_id/server_id_range/sea_tunnel_job_id/running;
+2. 首绑:`ensureFamily` → `pickLeastLoadedWorker`(enabled=1 中作业族数最少,并列取登记最早);日常加表/加列只动族内配置,绑定不动;
+3. 定向提交:`SeaTunnelClient` per-baseUrl 重载,`startFamily` 时 baseUrl = workerUrl(worker_id),未登记回退默认 URL(兼容旧部署);
+4. 判死迁移:watchdog 每 60s 巡检,per-worker `engineReachable` **连续 3 次不可达** → `migrateFamilyAway`:选最闲 worker(排除死 worker)→ 换 worker_id → startFamily 定向重提;**server-id 区间随族迁移、不变不漂移**(防重领撞车互踢);
+5. 可恢复性前提:checkpoint 切 MinIO S3 共享存储(外层 `type: hdfs` SPI + plugin-config `storage.type: s3` + `s3a://` bucket 前缀),迁移后新 worker 才能带 savepoint 续跑;
+6. 提交入口 nginx LB 为部署层兜底:worker 未登记时 `dcp.seatunnel.url` 默认值指向 LB 入口。
+
+### 9.4 D3/D4:字段级回补通道与写者裁判
+
+**B 类场景**:同一任务后加列——实时 CDC 从加列起才带新列数据,存量行该列需要回补。
+
+**形态(backend 内,零新组件)**:
+
+```
+register() 比对旧/新 field_mapping 源列集 → 新增列登记 sync_backfill_run(PENDING, 查重)
+  ↓
+runPending: @Scheduled(60s) + @SchedulerLock("backfillRun")  ← ShedLock 防多实例重跑
+  ↓
+executeOne: 读任务行(business_key_fields/key_columns/bucket_count)
+  → 逻辑表(table_prefix/table_count/target_database)
+  → 写者列 = SyncMappingRules.writerColOf(taskId, datasourceId, sourceDb, sourceTable)
+  → 主键区间分片读源表: WHERE (b1,b2) > (v1,v2) ORDER BY bk LIMIT n(仅 MySQL/PG)
+  → 每行: businessKey=join("\u0000") → RouteUtil.route(桶/物理表,与实时链路同路由)
+  → 逐列 upsert(见下)
+  → cursor_json 断点续跑;单轮上限 MAX_BATCHES_PER_ROUND=100 批,跨轮续跑(天然限速)
+```
+
+**写者裁判(回补专用小号)**:
+
+```sql
+INSERT INTO db.phys (keyCols..., targetCol, writerCol) VALUES (..., ?, 1)
+ON DUPLICATE KEY UPDATE
+  targetCol = IF(COALESCE(writerCol,0) < VALUES(writerCol), VALUES(targetCol), targetCol),
+  writerCol = IF(COALESCE(writerCol,0) < VALUES(writerCol), VALUES(writerCol), writerCol)
+```
+
+- seq = BACKFILL_SEQ = 1L,小于一切流号(实时 seq 是位点即序号的编码,恒 > 1);
+- 目标行不存在 → INSERT 回补值先落;已有实时值(writerCol > 1)→ 回补判负不动;
+- 回补先落、实时后到 → 实时覆盖;实时先写、回补后到 → 回补判负。**最终值恒等于实时值**,回补职责只是填实时链路永远看不到的存量初值;
+- 用任务自己的写者列(不新开身份):回补 = 现有 LWW 裁判体系里的「低优先级写者」,与多源合流共用一套裁判,零侵入。
+
+### 9.5 D5:sync_mode 混编(用户拍板)
+
+- 族 job 恒 `job.mode=STREAMING`,mode 差异下沉表级:snapshot-only 表 source 加 `debezium.snapshot.mode=initial_only`,快照完该 source 自行结束,其余流水线继续;
+- 收敛条件族级化:`familyAutoStop` = 族内**全部**任务 autoStop 且族 job FINISHED,watchdog 才收敛标记(不重启);只要有增量型任务,族 job 丢失就带 savepoint 重提;主键告警 OPEN 不重启;
+- **风险(未实证)**:Zeta 多 source 场景下「单个 source 完成、job 继续跑」的行为未实证,待部署验证;若 Zeta 误判整 job 失败,族会被 watchdog 反复重提——这是 H 演练的第一个验证点。
+
+### 9.6 落地表名映射(设计文档 → 实际落地)
+
+| 设计文档命名 | 实际落地表 | 说明 |
+|---|---|---|
+| source_assign 分派表 | `cdc_job_family` + `cdc_worker` | 绑定关系拆两表:族表(源库→worker) + worker 实例登记 |
+| server-id 全局分配表 | `server_id_pool` | 区间池:领取/切分/回收/自动扩容(POOL_BASE_START=5400, 扩容步长 100) |
+| 回补任务表 | `sync_backfill_run` | 状态机 PENDING→BACKFILLING→DONE/FAILED |
+| 任务归属 | `cdc_st_task.family_id` | 加列,0=未归属(存量兼容) |
+
+## 十、面试口径(一页纸)
+
+> 「Kafka 之前的采集侧:源库按作业族组织——一源库一作业族,绑定一个 worker、一个 server-id 区间,消灭多流浪费(binlog 按全量流传输、过滤在客户端,N 作业 = N 倍带宽与 dump 线程;PG 槽排他、SQLServer 实例约束更是硬冲突)。页面任务经三分类判定后合并进 job-json,停旧启新提交:旧表 checkpoint 续跑、新表快照回放追平、共用一个 binlog 流;加列则改白名单重启、增量自然出现、存量按需字段级回补。转换层做位点透传(位点即序号)+ 列裁剪白名单;输出层按主键哈希定桶、Kafka 分区器路由。并行度上增量恒 1 保序、吞吐靠作业族横向扩。迁移触发两类:worker 判死(作业族独立迁移、server-id 随迁、checkpoint 续跑)与主动缩容(排空追平);三段式 HA 中平台重提与 S3 checkpoint 已落地代码,3 节点集群选主属部署态未演练。」
