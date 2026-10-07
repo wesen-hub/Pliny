@@ -301,7 +301,10 @@ services:
     entrypoint: >
       /bin/sh -c "mc alias set local http://dcp-minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin123}
       && mc mb -p local/dcp-seatunnel-checkpoint
-      && mc anonymous set none local/dcp-seatunnel-checkpoint"
+      && mc anonymous set none local/dcp-seatunnel-checkpoint
+      && mc mb -p local/dcp-logic-repo
+      && mc version enable local/dcp-logic-repo
+      && mc anonymous set none local/dcp-logic-repo"
 
   # SeaTunnel Zeta 执行引擎（设计文档 §3.4; checkpoint 已切 MinIO S3 共享存储, 判死迁移/HA 前提）
   seatunnel:
@@ -443,7 +446,11 @@ services:
       OUTLET_META_USERNAME: root
       OUTLET_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
       OUTLET_KAFKA_BOOTSTRAP: outlet-kafka:19092
-      OUTLET_LOGIC_REPO: /app/logic-repo
+      OUTLET_LOGIC_S3_ENDPOINT: http://dcp-minio:9000
+      OUTLET_LOGIC_S3_BUCKET: dcp-logic-repo
+      OUTLET_LOGIC_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      OUTLET_LOGIC_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      OUTLET_LOGIC_CACHE_DIR: /tmp/outlet-logic-cache
       TZ: Asia/Shanghai
     ports:
       - "8095:8095"

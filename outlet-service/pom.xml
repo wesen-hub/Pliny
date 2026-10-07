@@ -47,6 +47,12 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- M7: LogicService 制品仓库迁 MinIO 共享桶(PutObject 原子 + 桶版本化; 与 backend 同版 aws sdk) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.25.30</version>
+        </dependency>
         <!-- 微服务治理: Nacos 注册发现 + Sentinel 限流 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>

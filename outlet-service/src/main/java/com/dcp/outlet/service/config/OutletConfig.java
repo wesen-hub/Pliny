@@ -5,6 +5,9 @@ import com.dcp.outlet.control.*;
 import com.dcp.outlet.sdk.InMemoryLogicRegistry;
 import com.dcp.outlet.sdk.LogicLoader;
 import com.dcp.outlet.sdk.SdkLogger;
+import com.dcp.outlet.service.logic.LogicArtifactStore;
+import com.dcp.outlet.service.logic.MinioArtifactStore;
+import com.dcp.outlet.service.logic.MinioLogicRepository;
 import com.dcp.outlet.worker.ClasspathLogicLoader;
 import com.dcp.outlet.worker.CompositeLogicLoader;
 import com.dcp.outlet.worker.DeadLetterSink;
@@ -18,8 +21,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 
 import javax.sql.DataSource;
+import java.net.URI;
 import java.nio.file.Path;
 
 /**
@@ -126,12 +135,34 @@ public class OutletConfig {
     @Bean
     public LogicCatalog logicCatalog(DataSource ds) { return new JdbcLogicCatalog(ds); }
 
+    /** M7: 逻辑制品仓库生产实现——MinIO 共享桶(PutObject 原子 + 桶版本化)。 */
+    @Bean
+    public LogicArtifactStore logicArtifactStore(S3Client logicS3Client,
+                                                 @Value("${outlet.logic.s3.bucket}") String bucket) {
+        return new MinioArtifactStore(logicS3Client, bucket);
+    }
+
+    /** M7: 逻辑制品的 S3 客户端(path-style, MinIO 专用; 与 backend 侧 S3 用途隔离)。 */
+    @Bean
+    public S3Client logicS3Client(@Value("${outlet.logic.s3.endpoint}") String endpoint,
+                                  @Value("${outlet.logic.s3.region}") String region,
+                                  @Value("${outlet.logic.s3.access-key}") String accessKey,
+                                  @Value("${outlet.logic.s3.secret-key}") String secretKey) {
+        return S3Client.builder()
+                .endpointOverride(URI.create(endpoint))
+                .region(Region.of(region))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKey, secretKey)))
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .build();
+    }
+
     /** 逻辑管理服务:上传发布一次动作(七步)+ 列表 / 版本列表 / 启停 / 删除 / 下载。 */
     @Bean
     public com.dcp.outlet.service.logic.LogicService logicService(LogicCatalog logicCatalog, DataSource ds,
-                                                                  @Value("${outlet.logic.repo}") String repoRoot,
+                                                                  LogicArtifactStore logicArtifactStore,
                                                                   @Value("${outlet.logic.max-jar-bytes:52428800}") long maxJarBytes) {
-        return new com.dcp.outlet.service.logic.LogicService(logicCatalog, ds, Path.of(repoRoot), maxJarBytes);
+        return new com.dcp.outlet.service.logic.LogicService(logicCatalog, ds, logicArtifactStore, maxJarBytes);
     }
 
     /** startPolicy=latest 的"最新 TSO" = 水位表(不猜时点;取不到=0)。 */
@@ -187,11 +218,14 @@ public class OutletConfig {
         return new HttpSnapshotSource(baseUrl);
     }
 
-    /** 逻辑加载:与计算面同构(jar 优先 + SPI + classpath),批/增量用同一份 logic。 */
+    /** 逻辑加载:与计算面同构(jar 优先 + SPI + classpath),批/增量用同一份 logic。
+     *  M7: jar 优先链改从 MinIO 共享桶拉取(本地 sha256 内容寻址缓存), 多实例同源。 */
     @Bean
-    public LogicLoader logicLoader(@Value("${outlet.logic.repo}") String repoRoot) {
+    public LogicLoader logicLoader(S3Client logicS3Client,
+                                   @Value("${outlet.logic.s3.bucket}") String bucket,
+                                   @Value("${outlet.logic.cache-dir}") String cacheDir) {
         return new CompositeLogicLoader(
-                new JarLogicLoader(new FileLogicRepository(Path.of(repoRoot))),
+                new JarLogicLoader(new MinioLogicRepository(logicS3Client, bucket, Path.of(cacheDir))),
                 new SpiLogicLoader(),
                 new ClasspathLogicLoader(new InMemoryLogicRegistry()));
     }

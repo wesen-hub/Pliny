@@ -32,7 +32,7 @@ public final class LogicServiceCheck {
 
         StubCatalog catalog = new StubCatalog();
         // DataSource 传 null:发布拒绝路径不查 consumer_task(引用检查才用,不在本测试范围)
-        LogicService svc = new LogicService(catalog, null, work.resolve("repo"));
+        LogicService svc = new LogicService(catalog, null, new FileArtifactStore(work.resolve("repo")));
 
         // ① 发布成功
         LogicService.PublishResult r = svc.publish(Files.readAllBytes(goodJar), "toy-logic", "1.0.0", "d", "wesen");

@@ -69,7 +69,14 @@ outlet:
   snapshot:                                  # 快照源(平台既有快照 API,AS OF T0);身份 = 任务契约的 consumer_id(批/增量一致,不再配置服务级身份)
     base-url: ${OUTLET_SNAPSHOT_BASE_URL:http://127.0.0.1:8081}
   logic:
-    repo: ${OUTLET_LOGIC_REPO:./logic-repo}   # <repo>/<logicId>/<version>.jar
+    # M7: 制品仓库迁 MinIO 共享桶(发布 PutObject 原子 + 桶版本化; 消费端拉取本地 sha256 内容寻址缓存)
+    s3:
+      endpoint: ${OUTLET_LOGIC_S3_ENDPOINT:http://127.0.0.1:9000}
+      bucket: ${OUTLET_LOGIC_S3_BUCKET:dcp-logic-repo}
+      region: ${OUTLET_LOGIC_S3_REGION:us-east-1}
+      access-key: ${OUTLET_LOGIC_S3_ACCESS_KEY:minioadmin}
+      secret-key: ${OUTLET_LOGIC_S3_SECRET_KEY:minioadmin123}
+    cache-dir: ${OUTLET_LOGIC_CACHE_DIR:./logic-cache}
   epoch: ${OUTLET_EPOCH:1}                    # 水位/锚点 epoch(与索引器一致)
   indexer:                                   # 锚点索引器常驻启动器(栅栏方案前置条件)
     enabled: ${OUTLET_INDEXER_ENABLED:true}  # 常驻消费全量变更流;false=不启动(起点查询退化 earliest,慢不错)

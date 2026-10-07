@@ -13,20 +13,22 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 逻辑管理生产化:把"手工五步"收编为一次发布动作(七步),并提供列表 / 版本列表 / 启停 / 删除 / 下载。
  *
  * <p>七步:① 接收+大小/魔数校验 → ② 试加载预检(算哈希+独立 ClassLoader 加载+声明一致)→ ③ 算 sha256
- * → ④ 写仓库(临时名→sidecar→原子改名)→ ⑤ 事务登记 → ⑥ 审计 → ⑦ 缺哈希 fail-closed(加载端闭环)。
+ * → ④ 写仓库(PutObject 原子 / 临时名→sidecar→原子改名, 见 LogicArtifactStore 实现)→ ⑤ 事务登记
+ * → ⑥ 审计 → ⑦ 缺哈希 fail-closed(加载端闭环)。
  *
- * <p>本类不依赖 Spring;依赖通过构造注入(LogicCatalog 端口 + 仓库根目录 + 元库 DataSource 用于引用检查)。
+ * <p>M7: 制品仓库抽象为 {@link LogicArtifactStore} 端口——生产走 MinIO 共享桶
+ * ({@link MinioArtifactStore}), 单机/测试走本地 ({@link FileArtifactStore})。
+ *
+ * <p>本类不依赖 Spring;依赖通过构造注入(LogicCatalog 端口 + 制品仓库 + 元库 DataSource 用于引用检查)。
  */
 public class LogicService {
 
@@ -39,17 +41,17 @@ public class LogicService {
 
     private final LogicCatalog catalog;
     private final DataSource ds;
-    private final Path repoRoot;
+    private final LogicArtifactStore store;
     private final long maxJarBytes;
 
-    public LogicService(LogicCatalog catalog, DataSource ds, Path repoRoot) {
-        this(catalog, ds, repoRoot, DEFAULT_MAX_JAR_BYTES);
+    public LogicService(LogicCatalog catalog, DataSource ds, LogicArtifactStore store) {
+        this(catalog, ds, store, DEFAULT_MAX_JAR_BYTES);
     }
 
-    public LogicService(LogicCatalog catalog, DataSource ds, Path repoRoot, long maxJarBytes) {
+    public LogicService(LogicCatalog catalog, DataSource ds, LogicArtifactStore store, long maxJarBytes) {
         this.catalog = catalog;
         this.ds = ds;
-        this.repoRoot = repoRoot;
+        this.store = store;
         this.maxJarBytes = maxJarBytes;
     }
 
@@ -86,14 +88,13 @@ public class LogicService {
         // ② 试加载预检(算哈希 + 独立 ClassLoader 加载 + 声明一致)③ 返回 sha256
         String sha256 = preflightAndHash(jar, logicId, version);
 
-        // ④ 写仓库:临时名 → sidecar → 原子改名(防半成品对消费端可见)
-        Path jarPath = repoRoot.resolve(logicId).resolve(version + ".jar");
-        writeArtifact(jarPath, jar, sha256, version);
+        // ④ 写仓库(PutObject 原子 / 临时名→sidecar→原子改名, 见 store 实现)
+        store.putArtifact(logicId, version, jar, sha256);
 
         // ⑤ 事务登记(版本冲突兜底由 register 抛出)→ 失败回滚刚写入的制品
         LogicInfo info = LogicInfo.builder(logicId, version)
                 .status(LogicInfo.STATUS_ACTIVE)
-                .artifactUri("repo:" + jarPath)
+                .artifactUri(store.describe(logicId, version))
                 .artifactHash(sha256)
                 .publishedBy(operator)
                 .jarSize((long) jar.length)
@@ -103,8 +104,7 @@ public class LogicService {
         try {
             catalog.register(info);
         } catch (LogicPublishException e) {
-            deleteQuietly(jarPath);
-            deleteQuietly(jarPath.resolveSibling(version + ".jar.sha256"));
+            store.deleteArtifact(logicId, version);
             throw e;
         }
 
@@ -197,16 +197,8 @@ public class LogicService {
     /** 下载 jar(带审计)。 */
     public Download download(String logicId, String version, String operator) {
         ensureVersion(logicId, version);
-        Path jarPath = repoRoot.resolve(logicId).resolve(version + ".jar");
-        if (!Files.isRegularFile(jarPath)) {
-            throw new LogicPublishException("jar 不存在于仓库:" + logicId + "@" + version);
-        }
-        try {
-            catalog.audit(logicId, version, "download", operator, "download jar");
-            return new Download(Files.readAllBytes(jarPath), version + ".jar");
-        } catch (IOException e) {
-            throw new LogicPublishException("读取 jar 失败:" + jarPath, e);
-        }
+        catalog.audit(logicId, version, "download", operator, "download jar");
+        return new Download(store.getArtifact(logicId, version), version + ".jar");
     }
 
     /* ------------------------------------------------ 内部 */
@@ -260,36 +252,6 @@ public class LogicService {
         if (!zip) throw new LogicPublishException("文件魔数不符,非有效 jar");
     }
 
-    /** 写制品:临时名 → sidecar → 原子改名(无覆盖,防半成品对消费端可见)。 */
-    private void writeArtifact(Path jarPath, byte[] jar, String sha256, String version) {
-        try {
-            Path dir = jarPath.getParent();
-            Files.createDirectories(dir);
-            Path tmpJar = dir.resolve(version + ".jar.tmp-" + UUID.randomUUID());
-            Path tmpSide = dir.resolve(version + ".jar.sha256.tmp-" + UUID.randomUUID());
-            try {
-                Files.write(tmpJar, jar);
-                Files.writeString(tmpSide, sha256 + "  " + version + ".jar\n");
-                // sidecar 先落地,jar 最后原子改名 → jar 可见 ⟹ sidecar 已可见(fail-closed 闭环)
-                moveNoReplace(tmpSide, dir.resolve(version + ".jar.sha256"));
-                moveNoReplace(tmpJar, jarPath);
-            } finally {
-                deleteQuietly(tmpJar);
-                deleteQuietly(tmpSide);
-            }
-        } catch (IOException e) {
-            throw new LogicPublishException("写仓库失败:" + jarPath, e);
-        }
-    }
-
-    private void moveNoReplace(Path from, Path to) throws IOException {
-        try {
-            Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
-        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-            Files.move(from, to); // 退化为普通改名(仍无覆盖)
-        }
-    }
-
     private void ensureVersion(String logicId, String version) {
         if (catalog.find(logicId, version).isEmpty()) {
             throw new LogicPublishException("版本不存在:" + logicId + "@" + version);
@@ -335,11 +297,6 @@ public class LogicService {
     }
 
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
-
-    private static void deleteQuietly(Path p) {
-        if (p == null) return;
-        try { Files.deleteIfExists(p); } catch (IOException ignored) { }
-    }
 
     private static void deleteRecursivelyQuietly(Path p) {
         if (p == null || !Files.exists(p)) return;
