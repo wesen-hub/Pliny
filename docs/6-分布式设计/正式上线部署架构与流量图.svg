@@ -1,0 +1,226 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1620" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <!-- ================= 背景与标题 ================= -->
+  <rect x="0" y="0" width="1500" height="1620" fill="#f8fafc"/>
+  <text x="750" y="42" font-size="22" font-weight="bold" fill="#0f172a" text-anchor="middle">正式上线部署架构与端到端流量账(100 亿条 / 50 源库 / 单库 10MB/s / 专网直连)</text>
+  <text x="750" y="64" font-size="11" fill="#64748b" text-anchor="middle">每卡片:组件名 + 实例数 × 每实例资源 + 流量承担 · SeaTunnel 集中目标侧 · TiDB 永久保留 · 混合部署(有状态裸机 + 无状态 K8s)</text>
+
+  <!-- ================= ① 源端接入层 ================= -->
+  <rect x="40" y="84" width="1420" height="150" rx="10" fill="#eff6ff" stroke="#2d6cdf" stroke-width="1.5"/>
+  <text x="60" y="110" font-size="15" font-weight="bold" fill="#1e40af">① 源端接入层 · 平台外(50 源库跨机房分散 · 每机房千兆出口)</text>
+
+  <rect x="60" y="122" width="340" height="94" rx="8" fill="#ffffff" stroke="#2d6cdf" stroke-width="1.5"/>
+  <text x="230" y="144" font-size="13" font-weight="bold" fill="#1e40af" text-anchor="middle">50 源库(分散机房)</text>
+  <text x="230" y="172" font-size="19" font-weight="bold" fill="#2d6cdf" text-anchor="middle">每库 10MB/s 全量</text>
+  <text x="230" y="192" font-size="10" fill="#475569" text-anchor="middle">80Mbps = 千兆出口 8% · 92% 留给业务</text>
+  <text x="230" y="206" font-size="10" fill="#64748b" text-anchor="middle">合计 500MB/s = 50 万行/s · 增量 10 万 QPS 全量结束后切换</text>
+
+  <rect x="420" y="122" width="520" height="94" rx="8" fill="#dbeafe" stroke="#2d6cdf" stroke-width="1.5"/>
+  <text x="680" y="144" font-size="13" font-weight="bold" fill="#1e40af" text-anchor="middle">专网直连(源机房 → 目标机房)</text>
+  <text x="680" y="174" font-size="19" font-weight="bold" fill="#2d6cdf" text-anchor="middle">峰值 500MB/s = 4Gbps</text>
+  <text x="680" y="194" font-size="10" fill="#1e40af" text-anchor="middle">纯全量(增量不与全量并发)· 未压缩流(压缩只发生在写 Kafka 时)</text>
+  <text x="680" y="208" font-size="10" fill="#1e40af" text-anchor="middle">全量后增量常态 100MB/s = 800Mbps · 万兆专网峰值占 40%</text>
+
+  <rect x="960" y="122" width="480" height="94" rx="8" fill="#ffffff" stroke="#2d6cdf" stroke-width="1.5"/>
+  <text x="1200" y="144" font-size="12" font-weight="bold" fill="#1e40af" text-anchor="middle">说明</text>
+  <text x="1200" y="166" font-size="10" fill="#1e40af" text-anchor="middle">· 单库限速 read_limit 2.5MB/s × 4 线程(chunk 并行)</text>
+  <text x="1200" y="184" font-size="10" fill="#1e40af" text-anchor="middle">· 时序: 先全量(5.56h)→ 全量后增量从快照起点位点补窗口期变更</text>
+  <text x="1200" y="202" font-size="10" fill="#1e40af" text-anchor="middle">· 每库 2 亿条 = 200GB · 全量峰值覆盖增量常态, 只按全量设计</text>
+
+  <!-- ================= ② 采集引擎层 ================= -->
+  <rect x="40" y="244" width="1420" height="130" rx="10" fill="#e0eaff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="60" y="270" font-size="15" font-weight="bold" fill="#1e3a8a">② 采集引擎层 · SeaTunnel Zeta(目标侧 K8s · 无状态,checkpoint 存 S3)</text>
+
+  <rect x="60" y="282" width="340" height="74" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="230" y="304" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">SeaTunnel Zeta master</text>
+  <text x="230" y="330" font-size="18" font-weight="bold" fill="#2563eb" text-anchor="middle">× 3 · 每 8C/16G</text>
+  <text x="230" y="348" font-size="10" fill="#64748b" text-anchor="middle">作业调度 / 位点管理</text>
+
+  <rect x="420" y="282" width="520" height="74" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="680" y="304" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">SeaTunnel Zeta worker</text>
+  <text x="680" y="330" font-size="18" font-weight="bold" fill="#2563eb" text-anchor="middle">× 18 · 每 8C/16G(全量段 12 忙 → 增量段 6 忙)</text>
+  <text x="680" y="348" font-size="10" fill="#64748b" text-anchor="middle">全量各 4.17 万行/s=41.7MB/s(70%)· 增量各 1.67 万条/s(83%)</text>
+
+  <rect x="960" y="282" width="480" height="74" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="1200" y="304" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">出入流量</text>
+  <text x="1200" y="330" font-size="14" font-weight="bold" fill="#2563eb" text-anchor="middle">入 600MB/s(专网)/ 出 150MB/s(内网)</text>
+  <text x="1200" y="348" font-size="10" fill="#64748b" text-anchor="middle">producer 压缩 4:1 → 全量 125 + 增量 25 MB/s 写 Kafka</text>
+
+  <!-- ================= ③ 缓冲层 ================= -->
+  <rect x="40" y="384" width="1420" height="150" rx="10" fill="#e0eaff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="60" y="410" font-size="15" font-weight="bold" fill="#1e3a8a">③ 缓冲层 · Kafka 双栈(裸机 · RF3 · NVMe · 压缩落盘)</text>
+
+  <rect x="60" y="422" width="560" height="94" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="340" y="444" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">Kafka 平台栈(采集 → 同步缓冲)</text>
+  <text x="340" y="472" font-size="17" font-weight="bold" fill="#2563eb" text-anchor="middle">× 3 broker · 每 8C/32G · NVMe 3.84T×4</text>
+  <text x="340" y="492" font-size="10" fill="#475569" text-anchor="middle">写入 50 万条/s = 125MB/s 压缩后(每 broker 16.7 万条/s · 41.7MB/s)</text>
+  <text x="340" y="506" font-size="10" fill="#64748b" text-anchor="middle">256 分区 → 1953 条/s/分区(20%)· CPU 2.1 万条/s/核 ⚠ 偏紧 · &gt;70% 告警</text>
+
+  <rect x="640" y="422" width="560" height="94" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="920" y="444" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">Kafka 出口栈(同步链路 → 消费底座,主路径)</text>
+  <text x="920" y="472" font-size="17" font-weight="bold" fill="#2563eb" text-anchor="middle">× 6 broker · 每 32C/128G · NVMe 3.84T×6</text>
+  <text x="920" y="492" font-size="10" fill="#475569" text-anchor="middle">写入 25 万条/s = 62.5MB/s 压缩后(每 broker 4.2 万条/s · 10.4MB/s)</text>
+  <text x="920" y="506" font-size="10" fill="#64748b" text-anchor="middle">零压力 · 7d retention · 全量 7.5TB + 增量 45TB ≈ 53TB(容量 115TB ✓)</text>
+
+  <rect x="1220" y="422" width="220" height="94" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="1330" y="446" font-size="12" font-weight="bold" fill="#1e3a8a" text-anchor="middle">分区预算</text>
+  <text x="1330" y="470" font-size="10" fill="#1e3a8a" text-anchor="middle">峰值 50 万条/s</text>
+  <text x="1330" y="488" font-size="10" fill="#1e3a8a" text-anchor="middle">÷ 单分区 1 万/s</text>
+  <text x="1330" y="506" font-size="10" fill="#1e3a8a" text-anchor="middle">→ 128-256 · 热点表 32-64 起</text>
+
+  <!-- ================= ④ 同步与消费层 ================= -->
+  <rect x="40" y="544" width="1420" height="200" rx="10" fill="#f0fdf4" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="60" y="570" font-size="15" font-weight="bold" fill="#047857">④ 同步与消费层 · 主消化路径(全量积压唯一发生点,设计内)</text>
+
+  <rect x="60" y="582" width="700" height="72" rx="8" fill="#ffffff" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="410" y="602" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">同步链路 dcp-synclink(消费平台栈 → 写 TiDB + 投递出口栈)</text>
+  <text x="410" y="628" font-size="17" font-weight="bold" fill="#10a37f" text-anchor="middle">× 17 实例 · 每 8C/16G · 消费 25 万 QPS</text>
+  <text x="410" y="646" font-size="10" fill="#64748b" text-anchor="middle">每实例 1.47 万条/s(74%)· 写 TiDB 250MB/s 攒批 + 出口栈 25 万条/s</text>
+
+  <rect x="780" y="582" width="660" height="72" rx="8" fill="#dcfce7" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="1110" y="602" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">★ 全量窗口积压账(设计内,非故障; 增量不与全量并发)</text>
+  <text x="1110" y="624" font-size="10" fill="#047857" text-anchor="middle">窗口 5.56h 写入纯全量 100 亿条 · C=25 万时同步链路同期吃掉 50 亿</text>
+  <text x="1110" y="640" font-size="10" fill="#047857" text-anchor="middle">积压峰值 50 亿条(压缩后 1.25TB×RF3,平台栈 38.4TB ✓)→ 净消化 15 万/s 追平 9.3h</text>
+  <text x="1110" y="654" font-size="9" fill="#047857" text-anchor="middle">总历时 = 5.56h + 9.3h = 14.8h(净消化 = 25 万 − 增量 10 万)</text>
+
+  <rect x="60" y="664" width="1380" height="62" rx="8" fill="#ffffff" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="750" y="686" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">消费底座 dcp-worker 执行体池(ns 分池:sync 之外 indexer / outlet / tag / sub / lake / ingest)</text>
+  <text x="750" y="712" font-size="15" font-weight="bold" fill="#10a37f" text-anchor="middle">× 15-17 实例 · 每 8C/16G · 消费 25 万条/s</text>
+
+  <!-- ================= ⑤ 数据层 ================= -->
+  <rect x="40" y="754" width="1420" height="320" rx="10" fill="#fff7ed" stroke="#d97706" stroke-width="1.5"/>
+  <text x="60" y="780" font-size="15" font-weight="bold" fill="#9a3412">⑤ 数据层 · 有状态存储(裸机装箱: 32C/256G 机型 · TiKV 每台 2 节点 · 基础设施每台混 PD+Nacos+etcd+MySQL+Redis)</text>
+
+  <rect x="60" y="792" width="240" height="118" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="180" y="814" font-size="13" font-weight="bold" fill="#9a3412" text-anchor="middle">TiDB Server</text>
+  <text x="180" y="842" font-size="18" font-weight="bold" fill="#d97706" text-anchor="middle">× 3 · 每 8C/16G</text>
+  <text x="180" y="864" font-size="10" fill="#475569" text-anchor="middle">各 8.3 万条/s 攒批</text>
+  <text x="180" y="884" font-size="10" fill="#64748b" text-anchor="middle">SQL 入口 · 无状态可扩</text>
+  <text x="180" y="900" font-size="9" fill="#64748b" text-anchor="middle">写 250MB/s 总,无压力</text>
+
+  <rect x="320" y="792" width="240" height="118" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="440" y="814" font-size="13" font-weight="bold" fill="#9a3412" text-anchor="middle">TiDB PD</text>
+  <text x="440" y="842" font-size="18" font-weight="bold" fill="#d97706" text-anchor="middle">× 3 · 每 4C/8G</text>
+  <text x="440" y="864" font-size="10" fill="#475569" text-anchor="middle">region 调度 / TSO 发号</text>
+  <text x="440" y="884" font-size="10" fill="#64748b" text-anchor="middle">流量极低</text>
+
+  <rect x="580" y="792" width="340" height="118" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="750" y="814" font-size="13" font-weight="bold" fill="#9a3412" text-anchor="middle">TiDB TiKV ★ 永久保留</text>
+  <text x="750" y="844" font-size="18" font-weight="bold" fill="#d97706" text-anchor="middle">× 20 · 每 16C/64G · NVMe 3.84T×4</text>
+  <text x="750" y="866" font-size="10" fill="#9a3412" text-anchor="middle">写 250MB/s 逻辑 → 压缩后 ~83MB/s 物理</text>
+  <text x="750" y="884" font-size="10" fill="#b45309" text-anchor="middle">★ 含存量+30 天 = 269TB÷20 节点 = 88% 水位;永久保留月 +17 节点(年 +205)</text>
+  <text x="750" y="900" font-size="9" fill="#9a3412" text-anchor="middle">备选:热 30 天 + 湖仓永久归档(防容量爆炸)</text>
+
+  <rect x="940" y="792" width="240" height="118" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="1060" y="814" font-size="13" font-weight="bold" fill="#9a3412" text-anchor="middle">元库 MySQL MGR</text>
+  <text x="1060" y="842" font-size="18" font-weight="bold" fill="#d97706" text-anchor="middle">× 3 · 每 8C/32G</text>
+  <text x="1060" y="864" font-size="10" fill="#475569" text-anchor="middle">shedlock / 任务判据</text>
+  <text x="1060" y="884" font-size="10" fill="#64748b" text-anchor="middle">流量低,单主写</text>
+
+  <rect x="1200" y="792" width="240" height="118" rx="8" fill="#dbeafe" stroke="#d97706" stroke-width="1.5"/>
+  <text x="1320" y="814" font-size="12" font-weight="bold" fill="#9a3412" text-anchor="middle">TiDB 容量账</text>
+  <text x="1320" y="840" font-size="10" fill="#9a3412" text-anchor="middle">日增逻辑 8.64TB</text>
+  <text x="1320" y="858" font-size="10" fill="#9a3412" text-anchor="middle">RocksDB 3:1 → RF3</text>
+  <text x="1320" y="876" font-size="10" fill="#9a3412" text-anchor="middle">= 8.6TB 物理/天</text>
+  <text x="1320" y="896" font-size="10" fill="#9a3412" text-anchor="middle">年 3.1PB 物理</text>
+
+  <rect x="60" y="922" width="300" height="118" rx="8" fill="#ffffff" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="210" y="944" font-size="13" font-weight="bold" fill="#6b21a8" text-anchor="middle">数据湖 MinIO</text>
+  <text x="210" y="974" font-size="18" font-weight="bold" fill="#9333ea" text-anchor="middle">× 8 · 每 16C/64G · HDD 12T×12</text>
+  <text x="210" y="996" font-size="10" fill="#475569" text-anchor="middle">湖批 Parquet 日 2.16TB</text>
+  <text x="210" y="1016" font-size="10" fill="#64748b" text-anchor="middle">年 790TB · 按年扩 8 节点</text>
+  <text x="210" y="1032" font-size="9" fill="#64748b" text-anchor="middle">文件通道 + 冷归档主载体</text>
+
+  <rect x="380" y="922" width="240" height="118" rx="8" fill="#ffffff" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="500" y="944" font-size="13" font-weight="bold" fill="#991b1b" text-anchor="middle">Redis 哨兵</text>
+  <text x="500" y="974" font-size="18" font-weight="bold" fill="#dc2626" text-anchor="middle">× 3 · 每 16C/64G</text>
+  <text x="500" y="996" font-size="10" fill="#475569" text-anchor="middle">tag:online 命中路径</text>
+  <text x="500" y="1016" font-size="10" fill="#64748b" text-anchor="middle">打标在线层</text>
+
+  <rect x="640" y="922" width="240" height="118" rx="8" fill="#ffffff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="760" y="944" font-size="13" font-weight="bold" fill="#3730a3" text-anchor="middle">Neo4j(血缘)</text>
+  <text x="760" y="974" font-size="18" font-weight="bold" fill="#4f46e5" text-anchor="middle">× 1 · 每 32C/256G</text>
+  <text x="760" y="996" font-size="10" fill="#475569" text-anchor="middle">资产/血缘图谱</text>
+  <text x="760" y="1016" font-size="10" fill="#64748b" text-anchor="middle">流量低</text>
+
+  <rect x="900" y="922" width="240" height="118" rx="8" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+  <text x="1020" y="944" font-size="13" font-weight="bold" fill="#334155" text-anchor="middle">etcd(调度底座)</text>
+  <text x="1020" y="974" font-size="18" font-weight="bold" fill="#64748b" text-anchor="middle">× 3 · 每 8C/32G</text>
+  <text x="1020" y="996" font-size="10" fill="#475569" text-anchor="middle">判死 / 迁移 / 租约</text>
+  <text x="1020" y="1016" font-size="10" fill="#64748b" text-anchor="middle">流量低</text>
+
+  <rect x="1160" y="922" width="280" height="118" rx="8" fill="#fffbeb" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="1300" y="944" font-size="12" font-weight="bold" fill="#6b21a8" text-anchor="middle">湖仓容量账</text>
+  <text x="1300" y="970" font-size="10" fill="#6b21a8" text-anchor="middle">EC 后有效 ~760TB</text>
+  <text x="1300" y="988" font-size="10" fill="#6b21a8" text-anchor="middle">够 ~1 年增长</text>
+  <text x="1300" y="1006" font-size="10" fill="#6b21a8" text-anchor="middle">若走冷热分层:</text>
+  <text x="1300" y="1024" font-size="10" fill="#6b21a8" text-anchor="middle">TiDB 30 天后全量归档</text>
+
+  <!-- ================= ⑥ 微服务治理层 ================= -->
+  <rect x="40" y="1084" width="1420" height="120" rx="10" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="60" y="1110" font-size="15" font-weight="bold" fill="#115e59">⑥ 微服务治理层(M1-M8 已代码落地)</text>
+
+  <rect x="60" y="1122" width="340" height="64" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="230" y="1144" font-size="13" font-weight="bold" fill="#115e59" text-anchor="middle">Nacos 注册 + 配置</text>
+  <text x="230" y="1170" font-size="16" font-weight="bold" fill="#0d9488" text-anchor="middle">× 3 · 每 4C/8G</text>
+
+  <rect x="420" y="1122" width="340" height="64" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="590" y="1144" font-size="13" font-weight="bold" fill="#115e59" text-anchor="middle">API 网关 + Sentinel 内嵌</text>
+  <text x="590" y="1170" font-size="16" font-weight="bold" fill="#0d9488" text-anchor="middle">× 2 · 每 8C/16G</text>
+
+  <rect x="780" y="1122" width="340" height="64" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="950" y="1144" font-size="13" font-weight="bold" fill="#115e59" text-anchor="middle">Zipkin 链路追踪</text>
+  <text x="950" y="1170" font-size="16" font-weight="bold" fill="#0d9488" text-anchor="middle">× 1 · 每 8C/32G · 采样 1%</text>
+
+  <rect x="1140" y="1122" width="300" height="64" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="1290" y="1146" font-size="11" font-weight="bold" fill="#115e59" text-anchor="middle">网关统一 JWT 验签</text>
+  <text x="1290" y="1166" font-size="10" fill="#115e59" text-anchor="middle">outlet/delivery 无 JWT 链</text>
+
+  <!-- ================= ⑦ 应用服务层 ================= -->
+  <rect x="40" y="1214" width="1420" height="170" rx="10" fill="#f0fdf4" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="60" y="1240" font-size="15" font-weight="bold" fill="#047857">⑦ 应用服务层 · K8s 计算节点(无状态全混部)</text>
+
+  <rect x="60" y="1252" width="340" height="112" rx="8" fill="#ffffff" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="230" y="1274" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">K8s 计算节点</text>
+  <text x="230" y="1302" font-size="18" font-weight="bold" fill="#10a37f" text-anchor="middle">× 12 · 每 64C/512G</text>
+  <text x="230" y="1324" font-size="10" fill="#475569" text-anchor="middle">合计 768C / 6TB · 水位 78%</text>
+  <text x="230" y="1344" font-size="10" fill="#64748b" text-anchor="middle">承载全部无状态容器</text>
+
+  <rect x="420" y="1252" width="560" height="112" rx="8" fill="#ffffff" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="700" y="1274" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">混部容器(~70 个)</text>
+  <text x="700" y="1300" font-size="11" fill="#047857" text-anchor="middle">SeaTunnel 21 · 同步链路 17 · worker 执行体 15-17</text>
+  <text x="700" y="1320" font-size="11" fill="#047857" text-anchor="middle">控制面 6 服务 ×2-3 · 网关 2 · 监控 3</text>
+  <text x="700" y="1344" font-size="10" fill="#64748b" text-anchor="middle">CPU 合计 ~600C · 含 TiDB Server ×3(无状态入 K8s)</text>
+
+  <rect x="1000" y="1252" width="440" height="112" rx="8" fill="#dcfce7" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="1220" y="1276" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">控制面 6 服务(实例数)</text>
+  <text x="1220" y="1300" font-size="10" fill="#047857" text-anchor="middle">backend ×3 · outlet ×3 · subscription ×3</text>
+  <text x="1220" y="1318" font-size="10" fill="#047857" text-anchor="middle">tagengine ×3 · asset ×2 · delivery ×2</text>
+  <text x="1220" y="1340" font-size="10" fill="#047857" text-anchor="middle">ShedLock 域级锁保互斥 · 单实例宕自动转移</text>
+
+  <!-- ================= ⑧ 监控运维层 ================= -->
+  <rect x="40" y="1394" width="1420" height="110" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+  <text x="60" y="1420" font-size="15" font-weight="bold" fill="#334155">⑧ 监控运维层</text>
+
+  <rect x="60" y="1432" width="240" height="54" rx="8" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+  <text x="180" y="1454" font-size="12" font-weight="bold" fill="#334155" text-anchor="middle">Prometheus</text>
+  <text x="180" y="1476" font-size="14" font-weight="bold" fill="#64748b" text-anchor="middle">× 2 · 每 4C/16G</text>
+
+  <rect x="320" y="1432" width="240" height="54" rx="8" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+  <text x="440" y="1454" font-size="12" font-weight="bold" fill="#334155" text-anchor="middle">Grafana</text>
+  <text x="440" y="1476" font-size="14" font-weight="bold" fill="#64748b" text-anchor="middle">× 2 · 每 2C/4G</text>
+
+  <rect x="580" y="1432" width="860" height="54" rx="8" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+  <text x="1010" y="1454" font-size="12" font-weight="bold" fill="#334155" text-anchor="middle">告警重点</text>
+  <text x="1010" y="1476" font-size="10" fill="#64748b" text-anchor="middle">平台栈 broker CPU 水位(超 70% 错峰)· 专网带宽 · TiKV 容量水位 · 全量窗口同步链路 lag</text>
+
+  <!-- ================= 物理资源总览 ================= -->
+  <rect x="40" y="1516" width="1420" height="80" rx="10" fill="#0f172a"/>
+  <text x="70" y="1544" font-size="14" font-weight="bold" fill="#94a3b8">物理资源总览</text>
+  <text x="70" y="1566" font-size="10" fill="#64748b">(在用 35 台: 64C×15 + 32C×20 · 余 15 台 = Spark 批池 + TiKV 永久保留扩容(月 +17 节点需 5 台 64C 各 4 节点)+ HA 备用)</text>
+  <text x="250" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">50 台物理机</text>
+  <text x="420" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">64C/512G×25 + 32C/256G×25</text>
+  <text x="620" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">2400 核 / 19.2TB 内存</text>
+  <text x="830" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">≈ 470TB NVMe</text>
+  <text x="1020" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">1.15PB HDD(湖)</text>
+  <text x="1210" y="1556" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">万兆专网 + 25GbE · 3 机柜</text>
+</svg>
