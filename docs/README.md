@@ -8,7 +8,9 @@ docs/
 ├── 0-总览/
 │   └── 核心子系统设计总结.md     子系统全景与关系(入口阅读)
 ├── 1-数据采集/
-│   └── TiDB-nochange-实测手册.md TiCDC nochange 特性实测结论
+│   ├── SeaTunnel采集侧方案与作业族设计.md  采集侧(Kafka 之前):作业族/分派/迁移/加表加列
+│   ├── TiCDC-Kafka协议说明.md            TiCDC canal-json 协议细节
+│   └── TiDB-nochange-实测手册.md         TiCDC nochange 特性实测结论
 ├── 2-同步链路/
 │   └── 同步链路消费者端设计.md   backend sync 模块:一组一 topic、写者判定、ODKU 写库
 ├── 3-索引器/
