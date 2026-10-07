@@ -1,0 +1,82 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: dcp-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+  config:
+    import:
+      # M1: 配置中心外迁(optional: Nacos 不可达时回退本地 yml, 本地开发/降级不阻断启动)
+      - optional:nacos:dcp-common.yml
+      - optional:nacos:${spring.application.name}.yml
+    gateway:
+      # 路由表与 frontend/nginx.conf 的 location 一一对应(唯一入口收敛到本网关)
+      routes:
+        # 出口交付域(N10)两条: 变更流数据面 + 契约
+        - id: delivery-chg
+          uri: lb://delivery-service
+          predicates:
+            - Path=/api/chg/**
+        - id: delivery-contracts
+          uri: lb://delivery-service
+          predicates:
+            - Path=/api/outlet/contracts/**
+        # 出口控制域: outlet-service(注册名 dcp-outlet-control)
+        - id: outlet-control
+          uri: lb://dcp-outlet-control
+          predicates:
+            - Path=/api/outlet/**
+        # 订阅域(N11)
+        - id: subscription
+          uri: lb://subscription-service
+          predicates:
+            - Path=/api/data-sub/**
+        # 资产+血缘域(N12): 目录 + 血缘 + 资产详情 + 标签体系(拆分后补齐归 asset-service)
+        - id: asset-catalog
+          uri: lb://asset-service
+          predicates:
+            - Path=/api/asset-catalog/**
+        - id: asset-lineage
+          uri: lb://asset-service
+          predicates:
+            - Path=/api/lineage/**
+        - id: assets
+          uri: lb://asset-service
+          predicates:
+            - Path=/api/assets/**
+        - id: tags
+          uri: lb://asset-service
+          predicates:
+            - Path=/api/tags/**
+        # 订阅中心(订阅=标签条件命中资产; 拆分后补齐归 subscription-service)
+        - id: subscriptions
+          uri: lb://subscription-service
+          predicates:
+            - Path=/api/subscriptions/**
+        # 打标引擎域(N9)两条: 打标 + 数据权限
+        - id: tagengine
+          uri: lb://tagengine-service
+          predicates:
+            - Path=/api/tagengine/**
+        - id: data-policy
+          uri: lb://tagengine-service
+          predicates:
+            - Path=/api/data-policy/**
+        # 统一调度框架管理 API(dcp-worker 承载; 拆分后补齐, 此前兜底 backend 404/9000)
+        - id: scheduler-admin
+          uri: lb://dcp-worker
+          predicates:
+            - Path=/api/scheduler/**
+        # 主控制面(兜底)
+        - id: backend
+          uri: lb://backend
+          predicates:
+            - Path=/api/**
