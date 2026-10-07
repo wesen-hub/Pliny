@@ -12,6 +12,8 @@ spring:
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
         namespace: ${NACOS_NAMESPACE:dcp}
+    sentinel:
+      eager: true   # M4: 网关限流靠本地 GlobalFilter 手动 SphU.entry, 规则注册后即时生效
   config:
     import:
       # M1: 配置中心外迁(optional: Nacos 不可达时回退本地 yml, 本地开发/降级不阻断启动)
@@ -102,3 +104,11 @@ dcp:
         - GET:/api/data-sub/*/changes
         - POST:/api/data-sub/*/export
         - GET:/api/data-sub/export-task/**
+    sentinel:
+      # M4: 网关限流规则(全内嵌, 格式 "路径前缀:QPS"; 请求按最长前缀匹配取资源名,
+      # 命中资源则按 QPS 限流, 超限返回 429)。default 为全量兜底。
+      rules:
+        - "/api/auth/login:20"     # 登录防爆破
+        - "/api/sync/cdc-st:20"    # CDC 启停控制(与 backend 控制面限流双保险)
+        - "/api/outlet:100"        # 出口控制域
+        - "default:500"            # 全局兜底

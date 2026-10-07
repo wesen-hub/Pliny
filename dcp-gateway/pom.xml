@@ -51,6 +51,11 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
         </dependency>
+        <!-- M4: Sentinel 网关限流(全内嵌: 规则存 yml, 无 Dashboard) -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
         <!-- 微服务治理 M1: Nacos Config 配置中心(敏感配置外迁, optional import 可回退本地) -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>

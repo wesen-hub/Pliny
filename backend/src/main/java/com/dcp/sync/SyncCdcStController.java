@@ -1,5 +1,7 @@
 package com.dcp.sync;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.dcp.common.ApiResponse;
 
 import org.springframework.web.bind.annotation.*;
@@ -60,22 +62,26 @@ public class SyncCdcStController {
         }
     }
 
+    @SentinelResource(value = "api-cdc-st-control", blockHandler = "controlBlocked")
     @PostMapping("/start/{logicalTable}")
     public ApiResponse<Map<String, Object>> start(@PathVariable String logicalTable) {
         return ApiResponse.ok(service.start(logicalTable));
     }
 
+    @SentinelResource(value = "api-cdc-st-control", blockHandler = "controlBlocked")
     @PostMapping("/stop/{logicalTable}")
     public ApiResponse<Map<String, Object>> stop(@PathVariable String logicalTable) {
         return ApiResponse.ok(service.stop(logicalTable));
     }
 
     /** 实例级控制: 同(逻辑,源)多任务实例并存时精确启/停某一个 */
+    @SentinelResource(value = "api-cdc-st-control", blockHandler = "controlInstanceBlocked")
     @PostMapping("/start-instance/{taskId}")
     public ApiResponse<Map<String, Object>> startInstance(@PathVariable Long taskId) {
         return ApiResponse.ok(service.startInstance(taskId));
     }
 
+    @SentinelResource(value = "api-cdc-st-control", blockHandler = "controlInstanceBlocked")
     @PostMapping("/stop-instance/{taskId}")
     public ApiResponse<Map<String, Object>> stopInstance(@PathVariable Long taskId) {
         return ApiResponse.ok(service.stopInstance(taskId));
@@ -97,5 +103,14 @@ public class SyncCdcStController {
         }
         service.alertDdlChange(logicalTable, ddlKind, detail);
         return ApiResponse.ok(Map.of("alerted", true, "logicalTable", logicalTable));
+    }
+
+    /** M4: 启停控制限流兜底(与网关限流双保险), 超限返回 429 */
+    public ApiResponse<Map<String, Object>> controlBlocked(String logicalTable, BlockException ex) {
+        return ApiResponse.error(429, "操作过于频繁, 请稍后重试");
+    }
+
+    public ApiResponse<Map<String, Object>> controlInstanceBlocked(Long taskId, BlockException ex) {
+        return ApiResponse.error(429, "操作过于频繁, 请稍后重试");
     }
 }
