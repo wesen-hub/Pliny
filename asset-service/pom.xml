@@ -65,6 +65,19 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- M6: 链路追踪(Brave → Zipkin: 采集/网关/控制面全链路) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-reporter-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-sender-urlconnection</artifactId>
+        </dependency>
         <!-- 全接口 JWT(打标管理面 @perm.isAdmin; 血缘/目录读接口也需登录) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

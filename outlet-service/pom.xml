@@ -108,6 +108,19 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- M6: 链路追踪(Brave → Zipkin: 采集/网关/控制面全链路) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-reporter-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-sender-urlconnection</artifactId>
+        </dependency>
         <!-- ShedLock: 定时任务多实例互斥(锁表 shedlock 在元库, 与 backend 共用一份) -->
         <dependency>
             <groupId>net.javacrumbs.shedlock</groupId>

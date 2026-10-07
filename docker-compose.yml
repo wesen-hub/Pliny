@@ -43,6 +43,23 @@ services:
       retries: 20
       start_period: 30s
 
+  # M6: Zipkin 链路追踪(治理层): 内存存储, 9411 Web UI + /api/v2/spans 上报
+  zipkin:
+    image: openzipkin/zipkin:3
+    container_name: dcp-zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
+    environment:
+      STORAGE_TYPE: mem
+      JAVA_OPTS: -Xms256m -Xmx512m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9411/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
   # 微服务治理网关(阶段 A): 唯一 API 入口, lb:// 路由到各控制面服务
   dcp-gateway:
     build: ./dcp-gateway
@@ -53,6 +70,7 @@ services:
         condition: service_healthy
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       TZ: Asia/Shanghai
     ports:
       - "8088:8088"
@@ -328,6 +346,7 @@ services:
         condition: service_started
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       # 本地实测无需 Nacos 注册(发现注册关闭; 生产三机环境用 nacos 服务发现)
       SPRING_CLOUD_NACOS_DISCOVERY_ENABLED: ${SPRING_CLOUD_NACOS_DISCOVERY_ENABLED:-false}
       # 调度实例注册/对账(与 dcp-worker 同款, 缺省指向 compose 内 etcd)
@@ -418,6 +437,7 @@ services:
         condition: service_healthy
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       DCP_WORKER_URL: ${DCP_WORKER_URL:-http://dcp-worker:8097}
       OUTLET_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       OUTLET_META_USERNAME: root
@@ -446,6 +466,7 @@ services:
         condition: service_healthy
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       DELIVERY_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       DELIVERY_META_USERNAME: root
       DELIVERY_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
@@ -481,6 +502,7 @@ services:
         condition: service_started
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       SUBSCRIPTION_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SUBSCRIPTION_META_USERNAME: root
       SUBSCRIPTION_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
@@ -520,6 +542,7 @@ services:
         condition: service_healthy
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       ASSET_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       ASSET_META_USERNAME: root
       ASSET_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
@@ -560,6 +583,7 @@ services:
         condition: service_started
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       TAGENGINE_META_JDBC_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       TAGENGINE_META_USERNAME: root
       TAGENGINE_META_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}
@@ -625,6 +649,7 @@ services:
         condition: service_started
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       DCP_ETCD: ${DCP_ETCD:-http://dcp-etcd:2379}
       DCP_WORKER_INSTANCE_ID: ${DCP_WORKER_INSTANCE_ID:-dcp-worker-1}
       # tag/lake/sub/ingest = 消费底座多 ns 拆分(底座任务按部署器归 ns; ingest 消费平台栈, 其余出口栈)
@@ -676,6 +701,7 @@ services:
       - backend
     environment:
       DCP_AGENT_PLATFORM_URL: http://dcp-backend:8080
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       DCP_AGENT_REGISTER_CODE: ${DCP_AGENT_REGISTER_CODE:-}
       DCP_AGENT_DATA_DIR: /var/lib/dcp-agent
       DCP_AGENT_HEARTBEAT_SEC: "20"
@@ -764,6 +790,7 @@ services:
         condition: service_started
     environment:
       NACOS_ADDR: nacos:8848
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置: 请在 .env 中配置}

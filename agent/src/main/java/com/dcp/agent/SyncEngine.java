@@ -254,6 +254,9 @@ public final class SyncEngine {
     private void doExecute(Map<String, Object> task, String trigger) {
         long tid = ((Number) task.get("taskId")).longValue();
         long t0 = System.currentTimeMillis();
+        brave.Span span = AgentTracing.tracer().nextSpan().name("task-execute").start();
+        span.tag("task.id", String.valueOf(tid));
+        span.tag("task.trigger", trigger);
         String runId = AgentConfig.newRunId();
         List<Map<String, Object>> files = new ArrayList<>();
         int failN = 0;
@@ -432,6 +435,13 @@ public final class SyncEngine {
         run.put("error", errorTail);
         enqueuePending(run);
         updateLocalStatus(tid, runStatus, t0);
+        span.tag("run.status", runStatus);
+        span.tag("run.op", opUsed == null ? "copy" : opUsed);
+        span.tag("run.ok", String.valueOf(okN));
+        span.tag("run.failed", String.valueOf(failN));
+        span.tag("run.duration-ms", String.valueOf(System.currentTimeMillis() - t0));
+        if (failN > 0) span.tag("error", String.valueOf(failN));
+        span.finish();
         log("任务 " + tid + " 执行完 " + trigger + ": " + runStatus + " ok=" + okN + " fail=" + failN);
     }
 

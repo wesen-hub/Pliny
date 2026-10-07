@@ -79,6 +79,15 @@ management:
       exposure:
         include: health,info,prometheus
       base-path: /api/actuator
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+    propagation:
+      consume: b3
+      produce: b3_multi
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://127.0.0.1:9411/api/v2/spans}
   health:
     mail:
       enabled: false

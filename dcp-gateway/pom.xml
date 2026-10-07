@@ -74,6 +74,19 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- M6: 链路追踪(Brave → Zipkin: 采集/网关/控制面全链路) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-reporter-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-sender-urlconnection</artifactId>
+        </dependency>
         <!-- M2: 网关统一 JWT 验签(与 backend 同版 jjwt, 只验不签; 后端保留自验兜底) -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

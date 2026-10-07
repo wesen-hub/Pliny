@@ -88,6 +88,15 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+    propagation:
+      consume: b3
+      produce: b3_multi
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://127.0.0.1:9411/api/v2/spans}
   # M5: 网关自身 actuator 保持默认 /actuator——base-path 若设 /api/actuator 会与
   # Path=/api/** 兜底路由冲突(请求被转发到 backend);Prometheus 经容器网络直连 8088 抓取
 

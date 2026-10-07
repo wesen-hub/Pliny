@@ -34,6 +34,9 @@ public final class PlatformClient {
     }
 
     private JsonNode call(String method, String path, String secret, Object body, Duration timeout) {
+        brave.Span span = AgentTracing.tracer().nextSpan().name("agent-api").start();
+        span.tag("http.method", method);
+        span.tag("http.path", path);
         try {
             HttpRequest.Builder b = HttpRequest.newBuilder()
                     .uri(URI.create(cfg.platformUrl + path))
@@ -55,11 +58,16 @@ public final class PlatformClient {
             if (code != 0) {
                 throw new ApiException(code, root.path("message").asText("平台错误 code=" + code));
             }
+            span.tag("api.code", String.valueOf(code));
             return root.path("data");
         } catch (ApiException e) {
+            span.tag("error", e.code > 0 ? "api-" + e.code : "unreachable");
             throw e;
         } catch (Exception e) {
+            span.tag("error", "unreachable");
             throw new ApiException(-1, "平台不可达(" + cfg.platformUrl + "): " + e.getMessage());
+        } finally {
+            span.finish();
         }
     }
 

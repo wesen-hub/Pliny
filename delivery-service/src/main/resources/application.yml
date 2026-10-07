@@ -36,6 +36,15 @@ management:
         include: health,info,prometheus
       # M5: 统一挂 /api/actuator(与网关白名单 ANY:/api/actuator/** 对齐, Prometheus 直连抓取不受 JWT 拦截)
       base-path: /api/actuator
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+    propagation:
+      consume: b3
+      produce: b3_multi
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://127.0.0.1:9411/api/v2/spans}
 
 mybatis-plus:
   configuration:
