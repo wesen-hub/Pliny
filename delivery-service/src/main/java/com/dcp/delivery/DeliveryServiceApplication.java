@@ -1,6 +1,7 @@
 package com.dcp.delivery;
 
 import com.dcp.outlet.adapters.JdbcContractViewSource;
+import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -22,6 +23,7 @@ import javax.sql.DataSource;
 @MapperScan("com.dcp.module.outlet.mapper")  // 收窄到 outlet mapper 包, 避免 com.dcp 下其他接口(如 BatchExecutor SPI)被误注册为 mapper
 @EnableDiscoveryClient
 @EnableScheduling
+@EnableSchedulerLock(defaultLockAtMostFor = "10m")  // M3: 定时任务多实例互斥(锁表 shedlock 共用元库)
 public class DeliveryServiceApplication {
 
     public static void main(String[] args) {

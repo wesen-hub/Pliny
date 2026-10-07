@@ -63,6 +63,17 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- M3 ShedLock: 出口栈指标采集定时任务多实例互斥(锁表 shedlock 在元库, 全平台共用一份) -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>5.16.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>5.16.0</version>
+        </dependency>
         <!-- ORM(消费方/契约/快照 mapper) -->
         <dependency>
             <groupId>com.baomidou</groupId>

@@ -5,6 +5,7 @@ import com.dcp.module.outlet.source.ChangeStreamSource;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.DescribeTopicsResult;
@@ -106,6 +107,8 @@ public class OutletStackCollector {
 
     @Scheduled(fixedDelayString = "${dcp.outlet.monitor.interval-ms:20000}",
             initialDelayString = "${dcp.outlet.monitor.initial-delay-ms:20000}")
+    @SchedulerLock(name = "outletStackCollect",
+            lockAtMostFor = "5m", lockAtLeastFor = "30s")  // M3: 多实例只跑一份(采集间隔 20s, 锁持有上限防宕机漏释放)
     public void collect() {
         boolean roundOk;
         try {
