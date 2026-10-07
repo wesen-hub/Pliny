@@ -32,7 +32,7 @@ public class SeaTunnelClient {
 
     /** 提交任务, 返回 SeaTunnel jobId（POST /submit-job?jobId=<数字> body=裸配置JSON, §6.1） */
     public String submitJob(String jobId, Map<String, Object> jobConfig) {
-        return submitJob(jobId, jobConfig, false);
+        return submitJob(baseUrl, jobId, jobConfig, false);
     }
 
     /**
@@ -40,6 +40,11 @@ public class SeaTunnelClient {
      * 同 jobId 重启时从上次 checkpoint 恢复(CDC 位点/offset 续采)。
      */
     public String submitJob(String jobId, Map<String, Object> jobConfig, boolean startWithSavepoint) {
+        return submitJob(baseUrl, jobId, jobConfig, startWithSavepoint);
+    }
+
+    /** 定向提交到指定 worker 实例(baseUrl = 该 worker REST 入口; 独立实例定向提交) */
+    public String submitJob(String baseUrl, String jobId, Map<String, Object> jobConfig, boolean startWithSavepoint) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -55,7 +60,7 @@ public class SeaTunnelClient {
                 throw new IllegalStateException("SeaTunnel submit 失败: " + data.get("error"));
             }
             Object sid = data == null ? null : data.get("jobId");
-            log.info("SeaTunnel 提交成功 jobId={} seatunnelJobId={}", jobId, sid);
+            log.info("SeaTunnel 提交成功 baseUrl={} jobId={} seatunnelJobId={}", baseUrl, jobId, sid);
             return String.valueOf(sid);
         } catch (Exception e) {
             throw new IllegalStateException("SeaTunnel 提交失败: " + e.getMessage(), e);
@@ -64,6 +69,11 @@ public class SeaTunnelClient {
 
     /** 查询任务状态（GET /job-info/{id}, 2.3.12 REST 无 hazelcast 前缀） */
     public JobInfo jobInfo(String seatunnelJobId) {
+        return jobInfo(baseUrl, seatunnelJobId);
+    }
+
+    /** 定向查询指定 worker 上的任务状态 */
+    public JobInfo jobInfo(String baseUrl, String seatunnelJobId) {
         try {
             ResponseEntity<Map> resp = rest.getForEntity(
                     baseUrl + "/job-info/" + seatunnelJobId, Map.class);
@@ -82,6 +92,11 @@ public class SeaTunnelClient {
     }
 
     public void stopJob(String seatunnelJobId) {
+        stopJob(baseUrl, seatunnelJobId);
+    }
+
+    /** 定向停止指定 worker 上的任务 */
+    public void stopJob(String baseUrl, String seatunnelJobId) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -95,6 +110,12 @@ public class SeaTunnelClient {
     /** 运行中任务列表（对账用, GET /running-jobs） */
     @SuppressWarnings("unchecked")
     public List<String> runningJobs() {
+        return runningJobs(baseUrl);
+    }
+
+    /** 定向查询指定 worker 的运行中任务列表 */
+    @SuppressWarnings("unchecked")
+    public List<String> runningJobs(String baseUrl) {
         try {
             ResponseEntity<List> resp = rest.getForEntity(
                     baseUrl + "/running-jobs", List.class);
@@ -114,6 +135,11 @@ public class SeaTunnelClient {
 
     /** 引擎整体可达性（GET /overview, 巡检用: 区分"引擎挂"与"单 job 丢失"） */
     public boolean engineReachable() {
+        return engineReachable(baseUrl);
+    }
+
+    /** 定向探测指定 worker 可达性 */
+    public boolean engineReachable(String baseUrl) {
         try {
             ResponseEntity<Map> resp = rest.getForEntity(baseUrl + "/overview", Map.class);
             return resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null;

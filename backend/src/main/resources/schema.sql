@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS cdc_st_task (
   row_chain           JSON NULL COMMENT '行级转换链(该源表: 仅 filter/filter-kind, 向导 Step4 产物)',
   sea_tunnel_job_id   VARCHAR(64) NULL COMMENT 'SeaTunnel jobId(重启同 id 恢复 checkpoint)',
   snapshot_start_position VARCHAR(255) NULL COMMENT '快照起点位点(方案 A: 首次 start 读源库当前位点持久化, 重放复用保证 S 恒定)',
+  family_id         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '所属作业族(cdc_job_family.id, 0=未归属)',
   running             TINYINT NOT NULL DEFAULT 0 COMMENT '1=运行中',
   update_time         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   sync_task_id        BIGINT NOT NULL DEFAULT 0 COMMENT '所属 UI 任务(sync_task.id; 0=逻辑表直建)',
@@ -290,6 +291,64 @@ CREATE TABLE IF NOT EXISTS sync_field_flow (
   KEY idx_task (sync_task_id),
   KEY idx_logical (logical_table)
 ) ENGINE=InnoDB COMMENT='字段流注册: 同一源列只能有一条采集流(跨任务唯一)';
+
+-- ============================================================
+-- 采集作业族与分派(一源库一作业族; 源库单点约束 + 判死迁移)
+-- ============================================================
+
+-- 采集作业族: 一源库一作业族(datasource_id+source_db 唯一), 绑定 worker + server-id 区间
+CREATE TABLE IF NOT EXISTS cdc_job_family (
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  datasource_id    BIGINT NOT NULL COMMENT '源数据源 id',
+  source_db        VARCHAR(64) NOT NULL COMMENT '源库名',
+  worker_id        VARCHAR(64) NOT NULL COMMENT '绑定 worker(cdc_worker.worker_id, 独立 SeaTunnel 实例)',
+  server_id_range  VARCHAR(64) NOT NULL COMMENT 'server-id 区间(从 server_id_pool 领取, 如 5400-5449)',
+  sea_tunnel_job_id VARCHAR(64) NULL COMMENT 'SeaTunnel jobId(作业族级, 重启同 id 恢复 checkpoint)',
+  running          TINYINT NOT NULL DEFAULT 0 COMMENT '1=运行中',
+  update_time      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_family (datasource_id, source_db),
+  KEY idx_worker (worker_id)
+) ENGINE=InnoDB COMMENT='采集作业族: 一源库一作业族, 绑定 worker + server-id 区间';
+
+-- SeaTunnel worker 实例登记(独立实例定向提交; 运维初始化, 无记录时回退默认单 URL)
+CREATE TABLE IF NOT EXISTS cdc_worker (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  worker_id   VARCHAR(64) NOT NULL UNIQUE COMMENT 'worker 标识(如 worker-1)',
+  rest_url    VARCHAR(255) NOT NULL COMMENT 'REST 提交入口(http://host:8081)',
+  enabled     TINYINT NOT NULL DEFAULT 1 COMMENT '1=可用, 0=下线排空',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB COMMENT='SeaTunnel worker 实例登记(独立实例定向提交)';
+
+-- server-id 区间池(全局唯一分配: 分派时领取, 释放回收; 区间宽度=表数×5)
+CREATE TABLE IF NOT EXISTS server_id_pool (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  start_id     BIGINT NOT NULL COMMENT '区间起点(含)',
+  end_id       BIGINT NOT NULL COMMENT '区间终点(含)',
+  owner_family BIGINT UNSIGNED NULL COMMENT '归属作业族(cdc_job_family.id), NULL=空闲',
+  update_time  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_owner (owner_family)
+) ENGINE=InnoDB COMMENT='server-id 区间池(全局唯一分配, 释放回收)';
+
+-- 字段级回补任务(后加列存量: 主键区间分片 + 游标断点续跑 + 回补小号 seq)
+CREATE TABLE IF NOT EXISTS sync_backfill_run (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  logical_table VARCHAR(128) NOT NULL COMMENT '逻辑表',
+  sync_task_id  BIGINT UNSIGNED NOT NULL COMMENT '归属页面任务(sync_task.id)',
+  task_id       BIGINT NOT NULL COMMENT '归属采集任务实例(cdc_st_task.task_id, 写者列来源)',
+  datasource_id BIGINT NOT NULL COMMENT '源数据源',
+  source_db     VARCHAR(64) NOT NULL COMMENT '源库',
+  source_table  VARCHAR(64) NOT NULL COMMENT '源表',
+  source_col    VARCHAR(128) NOT NULL COMMENT '回补源列',
+  target_col    VARCHAR(128) NOT NULL COMMENT '目标列(modelField)',
+  cursor_json   TEXT NULL COMMENT '主键游标(JSON: 最后一行主键值, 断点续跑)',
+  status        VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING|BACKFILLING|DONE|FAILED',
+  total_rows    BIGINT NULL COMMENT '预估总行数(探测值, 参考)',
+  processed_rows BIGINT NOT NULL DEFAULT 0 COMMENT '已处理行数',
+  error_msg     VARCHAR(1024) NULL,
+  update_time   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_status (status),
+  KEY idx_logical (logical_table)
+) ENGINE=InnoDB COMMENT='字段级回补任务(后加列存量, 游标断点续跑)';
 
 -- 同步链路告警表(2026-10-04 新方案: 减列/主键修改等异常告警, 人工确认闭环)
 CREATE TABLE IF NOT EXISTS sync_alert (
@@ -504,3 +563,8 @@ CREATE TABLE IF NOT EXISTS shedlock (
   locked_by VARCHAR(255) NOT NULL,
   PRIMARY KEY (name)
 ) ENGINE=InnoDB COMMENT='ShedLock 分布式锁(定时任务多实例互斥)';
+
+-- ============ SeaTunnel worker 登记种子(2026-10-07): 独立实例定向提交 ============
+-- 单机演示环境登记 worker-1(容器内 REST 入口); 多 worker 由运维在页面/元库追加登记,
+-- 平台按最闲分派作业族, 判死后自动迁移。rest_url 必须是 backend 可达地址。
+INSERT IGNORE INTO cdc_worker (worker_id, rest_url, enabled) VALUES ('worker-1', 'http://seatunnel:8081', 1);
