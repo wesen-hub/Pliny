@@ -71,6 +71,8 @@ services:
     environment:
       NACOS_ADDR: nacos:8848
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      # 网关验签密钥(M2 JwtAuthGlobalFilter, 与后端各服务同 secret, 需 >=32 字节)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置: 请在 .env 或环境变量中配置随机密钥}
       TZ: Asia/Shanghai
     ports:
       - "8088:8088"
@@ -352,8 +354,6 @@ services:
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       # 本地实测无需 Nacos 注册(发现注册关闭; 生产三机环境用 nacos 服务发现)
       SPRING_CLOUD_NACOS_DISCOVERY_ENABLED: ${SPRING_CLOUD_NACOS_DISCOVERY_ENABLED:-false}
-      # 调度实例注册/对账(与 dcp-worker 同款, 缺省指向 compose 内 etcd)
-      DCP_ETCD: ${DCP_ETCD:-http://dcp-etcd:2379}
       # cdc-st 作业 sink Kafka(生产缺省三机 outlet; 本地 compose 覆盖为栈内 kafka)
       SYNC_CDCST_KAFKA_BOOTSTRAP: ${SYNC_CDCST_KAFKA_BOOTSTRAP:-kafka:9092}
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
