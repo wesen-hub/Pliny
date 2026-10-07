@@ -7,13 +7,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -51,6 +50,8 @@ public class IngestTaskDeployer {
 
     private final JdbcTemplate metaJdbc;
     private final String controlUrl;
+    /** 控制面调用客户端(GovernanceConfig @LoadBalanced: 服务名 → Nacos 轮询, IP → 直连降级) */
+    private final RestClient rest;
     /** 底座容器内可达的元库地址(seq_counter/logical_table/dlt_message 所在,与 backend 同库不同视角) */
     private final String metaJdbcUrl;
     private final String metaUser;
@@ -59,13 +60,19 @@ public class IngestTaskDeployer {
     private final String kafkaBootstrap;
 
     public IngestTaskDeployer(JdbcTemplate metaJdbc,
-                              @Value("${dcp.ingest.outlet-control-url:http://127.0.0.1:8095}") String controlUrl,
+                              RestClient.Builder loadBalancedBuilder,
+                              @Value("${dcp.ingest.outlet-control-url:http://dcp-outlet-control}") String controlUrl,
                               @Value("${dcp.ingest.meta-jdbc-url:}") String metaJdbcUrl,
                               @Value("${dcp.ingest.meta-user:root}") String metaUser,
                               @Value("${dcp.ingest.meta-password:}") String metaPassword,
                               @Value("${dcp.ingest.kafka-bootstrap:localhost:9092}") String kafkaBootstrap) {
         this.metaJdbc = metaJdbc;
         this.controlUrl = controlUrl.endsWith("/") ? controlUrl.substring(0, controlUrl.length() - 1) : controlUrl;
+        // 中危-4: 默认无超时; 连接 5s / 读 15s 与 WorkerClient 同口径
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        this.rest = loadBalancedBuilder.baseUrl(this.controlUrl).requestFactory(factory).build();
         this.metaJdbcUrl = metaJdbcUrl;
         this.metaUser = metaUser;
         this.metaPassword = metaPassword;
@@ -137,7 +144,7 @@ public class IngestTaskDeployer {
             }
 
             // ⑤ 建任务(登记态:desiredState=stopped → 内核只登记不调度)
-            String resp = httpPost(controlUrl + "/api/outlet/tasks", taskJson(logicalTable));
+            String resp = httpPost("/api/outlet/tasks", taskJson(logicalTable));
             out.put("created", true);
             out.put("status", "STOPPED");
             out.put("response", resp);
@@ -168,7 +175,7 @@ public class IngestTaskDeployer {
             return;
         }
         try {
-            httpPost(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable) + "/actions/stop", "");
+            httpPost("/api/outlet/tasks/" + taskIdOf(logicalTable) + "/actions/stop", "");
             log.info("[ingest-task] 入站底座任务已停 {} (无启用应用)", taskIdOf(logicalTable));
         } catch (Exception e) {
             log.warn("[ingest-task] 停任务失败 {}: {}", logicalTable, e.getMessage());
@@ -180,7 +187,7 @@ public class IngestTaskDeployer {
     /** 底座任务状态视图(status 字段;控制面不可达 → UNKNOWN)。 */
     public String statusOf(String logicalTable) {
         try {
-            String body = httpGet(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable));
+            String body = httpGet("/api/outlet/tasks/" + taskIdOf(logicalTable));
             JsonNode n = OM.readTree(body);
             if (n.has("error")) {
                 return "UNKNOWN";
@@ -194,7 +201,7 @@ public class IngestTaskDeployer {
     /** 底座任务消费滞后(进度页 lagRows 求和;不可达/无进度 → -1)。 */
     public long lagOf(String logicalTable) {
         try {
-            String body = httpGet(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable) + "/progress");
+            String body = httpGet("/api/outlet/tasks/" + taskIdOf(logicalTable) + "/progress");
             JsonNode n = OM.readTree(body);
             if (!n.has("progress") || !n.get("progress").isArray()) {
                 return -1;
@@ -245,42 +252,37 @@ public class IngestTaskDeployer {
         }
     }
 
-    private static String httpPost(String url, String body) {
+    private String httpPost(String path, String body) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
+            return rest.post().uri(path)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode() + " " + resp.body());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+                    .body(body == null ? "" : body)
+                    .retrieve()
+                    .onStatus(s -> s.value() / 100 != 2,
+                            (req2, resp2) -> {
+                                throw new IllegalStateException("HTTP " + resp2.getStatusCode() + " " + resp2.getBody());
+                            })
+                    .body(String.class);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("HTTP 失败:" + url, e);
+            throw new IllegalStateException("HTTP 失败:" + path, e);
         }
     }
 
-    private static String httpGet(String url) {
+    private String httpGet(String path) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+            return rest.get().uri(path)
+                    .retrieve()
+                    .onStatus(s -> s.value() / 100 != 2,
+                            (req2, resp2) -> {
+                                throw new IllegalStateException("HTTP " + resp2.getStatusCode());
+                            })
+                    .body(String.class);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("HTTP 失败:" + url, e);
+            throw new IllegalStateException("HTTP 失败:" + path, e);
         }
     }
 }

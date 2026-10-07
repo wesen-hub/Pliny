@@ -1,8 +1,10 @@
 package com.dcp.tagengine;
 
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -12,7 +14,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * 全部接口走用户 JWT + @perm.isAdmin(与 backend 同套安全套件), 仅 actuator permitAll;
  * 任务发布后的 v2 登记(TagV2Deployer)与 Flink 流作业(StreamJobService)均直连 outlet-service REST。
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.dcp")
+@MapperScan("com.dcp.module.system.mapper")
+@EnableDiscoveryClient
 @EnableScheduling
 @EnableSchedulerLock(defaultLockAtMostFor = "10m")
 public class TagEngineServiceApplication {

@@ -7,13 +7,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,13 +51,18 @@ public class LakeTaskDeployer {
 
     private final JdbcTemplate metaJdbc;
     private final String controlUrl;
+    /** 控制面调用客户端(GovernanceConfig @LoadBalanced: 服务名 → Nacos 轮询, IP → 直连降级) */
+    private final RestClient rest;
     /** 底座容器内可达的元库地址(logical_table 业务键读 / dlt_message 落库) */
     private final String metaJdbcUrl;
     private final String metaUser;
     private final String metaPassword;
-    /** lake 段(与 LakeSyncService 同源配置: REST catalog + S3) */
+    /** lake 段(与 LakeSyncService 同源配置: catalog + S3; rest=RESTCatalog(Polaris) / hadoop=HadoopCatalog 直连 S3) */
+    private final String catalogType;
+    private final String catalogName;
     private final String catalogCredential;
     private final String catalogUri;
+    private final String catalogJdbcUri;
     private final String catalogWarehouse;
     private final String catalogNamespace;
     private final String s3Endpoint;
@@ -66,12 +70,16 @@ public class LakeTaskDeployer {
     private final String s3SecretKey;
 
     public LakeTaskDeployer(JdbcTemplate metaJdbc,
-                            @Value("${dcp.lakesync.outlet-control-url:http://127.0.0.1:8095}") String controlUrl,
+                            RestClient.Builder loadBalancedBuilder,
+                            @Value("${dcp.lakesync.outlet-control-url:http://dcp-outlet-control}") String controlUrl,
                             @Value("${dcp.lakesync.meta-jdbc-url:}") String metaJdbcUrl,
                             @Value("${dcp.lakesync.meta-user:root}") String metaUser,
                             @Value("${dcp.lakesync.meta-password:}") String metaPassword,
+                            @Value("${dcp.lakesync.catalog.type:rest}") String catalogType,
+                            @Value("${dcp.lakesync.catalog.name:demo}") String catalogName,
                             @Value("${dcp.lakesync.catalog.credential:root:s3cr3t}") String catalogCredential,
                             @Value("${dcp.lakesync.catalog.uri:}") String catalogUri,
+                            @Value("${dcp.lakesync.catalog.jdbc-uri:}") String catalogJdbcUri,
                             @Value("${dcp.lakesync.catalog.warehouse:demo}") String catalogWarehouse,
                             @Value("${dcp.lakesync.catalog.namespace:dcp}") String catalogNamespace,
                             @Value("${dcp.lakesync.catalog.s3.endpoint:http://dcp-minio:9000}") String s3Endpoint,
@@ -79,11 +87,19 @@ public class LakeTaskDeployer {
                             @Value("${dcp.lakesync.catalog.s3.secret-key:minioadmin123}") String s3SecretKey) {
         this.metaJdbc = metaJdbc;
         this.controlUrl = controlUrl.endsWith("/") ? controlUrl.substring(0, controlUrl.length() - 1) : controlUrl;
+        // 中危-4: 默认无超时; 连接 5s / 读 15s 与 WorkerClient 同口径
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        this.rest = loadBalancedBuilder.baseUrl(this.controlUrl).requestFactory(factory).build();
         this.metaJdbcUrl = metaJdbcUrl;
         this.metaUser = metaUser;
         this.metaPassword = metaPassword;
+        this.catalogType = catalogType;
+        this.catalogName = catalogName;
         this.catalogCredential = catalogCredential;
         this.catalogUri = catalogUri;
+        this.catalogJdbcUri = catalogJdbcUri;
         this.catalogWarehouse = catalogWarehouse;
         this.catalogNamespace = catalogNamespace;
         this.s3Endpoint = s3Endpoint;
@@ -126,7 +142,7 @@ public class LakeTaskDeployer {
         try {
             // ① 流登记:控制面扫描(TiCDC topic dcp.cdc.{库}.{表} 自动登记为流, 带回真实分区数与出口栈地址)
             try {
-                httpPost(controlUrl + "/api/outlet/streams/scan", "");
+                httpPost("/api/outlet/streams/scan", "");
             } catch (Exception e) {
                 log.warn("[lake-task] 流扫描失败(继续尝试建任务,建任务时会暴露流未登记) {}: {}",
                         logicalTable, e.getMessage());
@@ -157,7 +173,7 @@ public class LakeTaskDeployer {
             }
 
             // ⑤ 建任务(登记态:desiredState=stopped → 内核只登记不调度)
-            String resp = httpPost(controlUrl + "/api/outlet/tasks", taskJson(logicalTable, keyColumns));
+            String resp = httpPost("/api/outlet/tasks", taskJson(logicalTable, keyColumns));
             out.put("created", true);
             out.put("status", "STOPPED");
             out.put("response", resp);
@@ -188,7 +204,7 @@ public class LakeTaskDeployer {
             return;
         }
         try {
-            httpPost(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable) + "/actions/stop", "");
+            httpPost("/api/outlet/tasks/" + taskIdOf(logicalTable) + "/actions/stop", "");
             log.info("[lake-task] 湖增量底座任务已停 {} (湖同步任务删除)", taskIdOf(logicalTable));
         } catch (Exception e) {
             log.warn("[lake-task] 停任务失败 {}: {}", logicalTable, e.getMessage());
@@ -200,7 +216,7 @@ public class LakeTaskDeployer {
     /** 底座任务状态视图(status 字段;控制面不可达 → UNKNOWN)。 */
     public String statusOf(String logicalTable) {
         try {
-            String body = httpGet(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable));
+            String body = httpGet("/api/outlet/tasks/" + taskIdOf(logicalTable));
             JsonNode n = OM.readTree(body);
             if (n.has("error")) {
                 return "UNKNOWN";
@@ -214,7 +230,7 @@ public class LakeTaskDeployer {
     /** 底座任务消费滞后(进度页 lagRows 求和;不可达/无进度 → -1)。 */
     public long lagOf(String logicalTable) {
         try {
-            String body = httpGet(controlUrl + "/api/outlet/tasks/" + taskIdOf(logicalTable) + "/progress");
+            String body = httpGet("/api/outlet/tasks/" + taskIdOf(logicalTable) + "/progress");
             JsonNode n = OM.readTree(body);
             if (!n.has("progress") || !n.get("progress").isArray()) {
                 return -1;
@@ -264,15 +280,24 @@ public class LakeTaskDeployer {
                 params.put("password", metaPassword);
             }
             ObjectNode lake = params.putObject("lake");
-            lake.put("catalog", catalogWarehouse.isBlank() ? "demo" : catalogWarehouse);
+            lake.put("catalog", catalogName);
             lake.put("namespace", catalogNamespace);
             lake.put("table", logicalTable);
-            lake.put("type", "rest");
-            lake.put("uri", catalogUri);
-            lake.put("warehouse", catalogWarehouse);
-            // 长驻进程推荐形态: credential + scope → RESTCatalog 自动换 token(批作业用短时 token, 同源)
-            lake.put("credential", catalogCredential);
-            lake.put("scope", "PRINCIPAL_ROLE:ALL");
+            lake.put("type", catalogType);
+            if ("hadoop".equalsIgnoreCase(catalogType)) {
+                // HadoopCatalog 直连 S3(无 REST catalog 服务场景): warehouse = s3://基路径
+                lake.put("warehouse", catalogWarehouse);
+            } else if ("jdbc".equalsIgnoreCase(catalogType)) {
+                // JDBC Catalog: 元数据存 RDS(免 Hadoop fs/s3 scheme 注册), 数据与 metadata 文件走 S3FileIO
+                lake.put("uri", catalogJdbcUri);
+                lake.put("warehouse", catalogWarehouse);
+            } else {
+                lake.put("uri", catalogUri);
+                lake.put("warehouse", catalogWarehouse);
+                // 长驻进程推荐形态: credential + scope → RESTCatalog 自动换 token(批作业用短时 token, 同源)
+                lake.put("credential", catalogCredential);
+                lake.put("scope", "PRINCIPAL_ROLE:ALL");
+            }
             lake.put("ioImpl", "org.apache.iceberg.aws.s3.S3FileIO");
             ObjectNode s3 = lake.putObject("s3");
             s3.put("endpoint", s3Endpoint);
@@ -286,42 +311,37 @@ public class LakeTaskDeployer {
         }
     }
 
-    private static String httpPost(String url, String body) {
+    private String httpPost(String path, String body) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
+            return rest.post().uri(path)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode() + " " + resp.body());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+                    .body(body == null ? "" : body)
+                    .retrieve()
+                    .onStatus(s -> s.value() / 100 != 2,
+                            (req2, resp2) -> {
+                                throw new IllegalStateException("HTTP " + resp2.getStatusCode() + " " + resp2.getBody());
+                            })
+                    .body(String.class);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("HTTP 失败:" + url, e);
+            throw new IllegalStateException("HTTP 失败:" + path, e);
         }
     }
 
-    private static String httpGet(String url) {
+    private String httpGet(String path) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+            return rest.get().uri(path)
+                    .retrieve()
+                    .onStatus(s -> s.value() / 100 != 2,
+                            (req2, resp2) -> {
+                                throw new IllegalStateException("HTTP " + resp2.getStatusCode());
+                            })
+                    .body(String.class);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("HTTP 失败:" + url, e);
+            throw new IllegalStateException("HTTP 失败:" + path, e);
         }
     }
 }

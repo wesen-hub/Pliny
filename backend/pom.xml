@@ -22,9 +22,51 @@
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
     <jjwt.version>0.12.5</jjwt.version>
     <aviator.version>5.4.3</aviator.version>
+    <spring-cloud-alibaba.version>2023.0.1.0</spring-cloud-alibaba.version>
+    <spring-cloud.version>2023.0.1</spring-cloud.version>
   </properties>
 
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.alibaba.cloud</groupId>
+        <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+        <version>${spring-cloud-alibaba.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- M1: lb:// 服务名路由的 LoadBalancer 实现(nacos-discovery 只传递 optional, 运行时需显式引入) -->
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
   <dependencies>
+    <!-- 微服务治理: Nacos 注册发现 + 配置中心 -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+    </dependency>
+    <!-- M1: @LoadBalanced RestClient 的 LB 实现(缺此 jar 时 lb:// 服务名调用运行时不可用) -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
+    <!-- 微服务治理 M1: Nacos Config 配置中心(敏感配置外迁, optional import 可回退本地) -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+    <!-- 微服务治理: Sentinel 限流(控制台可选, 默认本地规则) -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+    </dependency>
     <!-- 整包拷贝 P0: S3(MinIO) 源扫描 -->
     <dependency>
       <groupId>software.amazon.awssdk</groupId>

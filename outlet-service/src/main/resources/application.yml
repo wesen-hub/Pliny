@@ -4,11 +4,27 @@ server:
 spring:
   application:
     name: dcp-outlet-control
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+    sentinel:
+      eager: false
+  config:
+    import:
+      # M1: 配置中心外迁(optional: Nacos 不可达时回退本地 yml, 本地开发/降级不阻断启动)
+      - optional:nacos:dcp-common.yml
+      - optional:nacos:${spring.application.name}.yml
 
 dcp:
   # dcp-worker 执行体服务(方案 §9:TaskSpec 提交/注销/探针读均走 REST,不再直连 etcd)
+  # 服务发现模式: 填服务名 http://dcp-worker → @LoadBalanced Nacos 轮询; 显式 IP → 直连降级
   worker:
-    url: ${DCP_WORKER_URL:http://127.0.0.1:8097}
+    url: ${DCP_WORKER_URL:http://dcp-worker}
 
 outlet:
   # 元数据库(彻底版元数据表:consumer_task(纯业务登记) / chg_anchor / chg_watermark_latest /
@@ -25,13 +41,10 @@ outlet:
     topic-prefix: dcp.cdc.
   start-offset:
     max-scan-rows: 200000
-  # 计算面服务地址(CreateUnit 下发目标);可多实例时改为网关/负载均衡地址
-  worker:
-    url: ${OUTLET_WORKER_URL:http://127.0.0.1:8096}
   # 批阶段 T0 三适配器
   ticdc:                                     # R1:changefeed start_ts(TiCDC OpenAPI v2)
     base-url: ${OUTLET_TICDC_BASE_URL:http://127.0.0.1:18300}
-    changefeed-id: ${OUTLET_TICDC_CHANGEFEED_ID:chg-target-db-v4}
+    changefeed-id: ${OUTLET_TICDC_CHANGEFEED_ID:chg-target-db}
   tidb:                                      # R2:TiDB GC safe point(只读)
     jdbc-url: ${OUTLET_TIDB_JDBC_URL:jdbc:mysql://127.0.0.1:14000/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${OUTLET_TIDB_USERNAME:root}

@@ -10,8 +10,16 @@ spring:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
         namespace: ${NACOS_NAMESPACE:dcp}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
     sentinel:
       eager: false
+  config:
+    import:
+      # M1: 配置中心外迁(optional: Nacos 不可达时回退本地 yml, 本地开发/降级不阻断启动)
+      - optional:nacos:dcp-common.yml
+      - optional:nacos:${spring.application.name}.yml
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:root}

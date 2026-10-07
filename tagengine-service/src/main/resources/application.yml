@@ -4,6 +4,21 @@ server:
 spring:
   application:
     name: tagengine-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dcp}
+    sentinel:
+      eager: false
+  config:
+    import:
+      # M1: 配置中心外迁(optional: Nacos 不可达时回退本地 yml, 本地开发/降级不阻断启动)
+      - optional:nacos:dcp-common.yml
+      - optional:nacos:${spring.application.name}.yml
   # 元数据库(dcp 库: tag_task/tag_rule/tag_dict/tag_fact/tag_notify/sys_* 等)
   datasource:
     url: ${TAGENGINE_META_JDBC_URL:jdbc:mysql://127.0.0.1:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8}

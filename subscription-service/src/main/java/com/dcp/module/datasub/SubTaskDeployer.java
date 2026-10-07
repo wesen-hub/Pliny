@@ -6,13 +6,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -64,6 +63,8 @@ public class SubTaskDeployer {
 
     private final JdbcTemplate metaJdbc;
     private final String controlUrl;
+    /** 控制面调用客户端(GovernanceConfig @LoadBalanced: 服务名 → Nacos 轮询, IP → 直连降级) */
+    private final RestClient rest;
     /** 底座容器内可达的元库地址(tag 契约 exclude 剔除回查 tag_fact_view) */
     private final String metaJdbcUrl;
     private final String metaUser;
@@ -74,7 +75,8 @@ public class SubTaskDeployer {
     private final String tagEventsKafkaBootstrap;
 
     public SubTaskDeployer(JdbcTemplate metaJdbc,
-                           @Value("${dcp.subscription.outlet-control-url:http://127.0.0.1:8095}") String controlUrl,
+                           RestClient.Builder loadBalancedBuilder,
+                           @Value("${dcp.subscription.outlet-control-url:http://dcp-outlet-control}") String controlUrl,
                            @Value("${dcp.subscription.meta-jdbc-url:}") String metaJdbcUrl,
                            @Value("${dcp.subscription.meta-user:root}") String metaUser,
                            @Value("${dcp.subscription.meta-password:}") String metaPassword,
@@ -82,6 +84,11 @@ public class SubTaskDeployer {
                            @Value("${dcp.subscription.tag-events-kafka-bootstrap:outlet-kafka:19092}") String tagEventsKafkaBootstrap) {
         this.metaJdbc = metaJdbc;
         this.controlUrl = controlUrl.endsWith("/") ? controlUrl.substring(0, controlUrl.length() - 1) : controlUrl;
+        // 中危-4: 默认无超时; 连接 5s / 读 15s 与 WorkerClient 同口径
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        this.rest = loadBalancedBuilder.baseUrl(this.controlUrl).requestFactory(factory).build();
         this.metaJdbcUrl = metaJdbcUrl;
         this.metaUser = metaUser;
         this.metaPassword = metaPassword;
@@ -152,7 +159,7 @@ public class SubTaskDeployer {
                 }
                 if (!streams.isEmpty()) {
                     try {
-                        httpPost(controlUrl + "/api/outlet/streams/scan", "");
+                        httpPost("/api/outlet/streams/scan", "");
                     } catch (Exception e) {
                         log.warn("[sub-task] 流扫描失败(继续尝试建任务,建任务时会暴露流未登记) contractId={}: {}",
                                 contractId, e.getMessage());
@@ -202,7 +209,7 @@ public class SubTaskDeployer {
             }
 
             // ⑤ 建任务(登记态: desiredState=stopped → 内核只登记不调度)
-            String resp = httpPost(controlUrl + "/api/outlet/tasks", taskJson(contractId, c, isLogical, streams));
+            String resp = httpPost("/api/outlet/tasks", taskJson(contractId, c, isLogical, streams));
             out.put("created", true);
             out.put("status", "STOPPED");
             out.put("response", resp);
@@ -233,7 +240,7 @@ public class SubTaskDeployer {
             return;
         }
         try {
-            httpPost(controlUrl + "/api/outlet/tasks/" + taskIdOf(contractId) + "/actions/stop", "");
+            httpPost("/api/outlet/tasks/" + taskIdOf(contractId) + "/actions/stop", "");
             log.info("[sub-task] 订阅推送底座任务已停 {} (契约停用)", taskIdOf(contractId));
         } catch (Exception e) {
             log.warn("[sub-task] 停任务失败 contractId={}: {}", contractId, e.getMessage());
@@ -325,23 +332,21 @@ public class SubTaskDeployer {
         return params;
     }
 
-    private static String httpPost(String url, String body) {
+    private String httpPost(String path, String body) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
+            return rest.post().uri(path)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                    .build();
-            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new IllegalStateException("HTTP " + resp.statusCode() + " " + resp.body());
-            }
-            return resp.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("HTTP 中断:" + url, e);
+                    .body(body == null ? "" : body)
+                    .retrieve()
+                    .onStatus(s -> s.value() / 100 != 2,
+                            (req2, resp2) -> {
+                                throw new IllegalStateException("HTTP " + resp2.getStatusCode() + " " + resp2.getBody());
+                            })
+                    .body(String.class);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("HTTP 失败:" + url, e);
+            throw new IllegalStateException("HTTP 失败:" + path, e);
         }
     }
 }

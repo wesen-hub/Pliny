@@ -1,7 +1,9 @@
 package com.dcp.asset;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 /**
  * 资产目录 + 血缘域独立服务(方案 N12)。
@@ -10,7 +12,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 打标管理面走用户 JWT + @perm.isAdmin(与 backend 同套安全套件),
  * 目录/血缘读接口与血缘重建也需登录(前端带 token), 仅 actuator permitAll。
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.dcp")
+@MapperScan("com.dcp.module.system.mapper")
+@EnableDiscoveryClient
 public class AssetServiceApplication {
 
     public static void main(String[] args) {
