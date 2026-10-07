@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # 数据采集平台 V3 同步链路 — SeaTunnel CDC 采集端演示
-# 链路: MySQL binlog(connector-cdc-mysql 全量+增量) → CdcSeqTransform(seq打标+桶路由)
+# 链路: MySQL binlog(connector-cdc-mysql 全量+增量) → CdcSeqTransform(采集转换+位点发号+桶路由)
 #        → Kafka → Spring Kafka 消费(原子幂等写) → 分表 → 权威副本追平
 # 用法: bash scripts/demo_cdc_st.sh   (可重复执行, 幂等)
 # ============================================================

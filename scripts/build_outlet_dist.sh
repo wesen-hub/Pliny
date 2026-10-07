@@ -21,6 +21,7 @@ for a in outlet-sdk outlet-control outlet-worker outlet-adapters; do
 done
 cp dcp-scheduler/dcp-scheduler-api/target/dcp-scheduler-api-0.1.0.jar outlet-service/dist/
 cp dcp-scheduler/dcp-scheduler-api/pom.xml outlet-service/dist/dcp-scheduler-api-pom.xml
+cp dcp-scheduler/pom.xml outlet-service/dist/dcp-scheduler-parent-pom.xml
 
 echo "[3/4] 预置 dcp-worker/dist(scheduler-api + scheduler-core + rclone 二进制)"
 mkdir -p dcp-worker/dist
@@ -28,11 +29,13 @@ cp dcp-scheduler/dcp-scheduler-api/target/dcp-scheduler-api-0.1.0.jar dcp-worker
 cp dcp-scheduler/dcp-scheduler-api/pom.xml dcp-worker/dist/dcp-scheduler-api-pom.xml
 cp dcp-scheduler/dcp-scheduler-core/target/dcp-scheduler-core-0.1.0.jar dcp-worker/dist/
 cp dcp-scheduler/dcp-scheduler-core/pom.xml dcp-worker/dist/dcp-scheduler-core-pom.xml
+cp dcp-scheduler/pom.xml dcp-worker/dist/dcp-scheduler-parent-pom.xml
 cp backend/dist/rclone dcp-worker/dist/rclone
 
 echo "[4/4] 预置 backend/dist(仅 scheduler-api;tag-kie 与 rclone 保持既有预置)"
 mkdir -p backend/dist
 cp dcp-scheduler/dcp-scheduler-api/target/dcp-scheduler-api-0.1.0.jar backend/dist/
 cp dcp-scheduler/dcp-scheduler-api/pom.xml backend/dist/dcp-scheduler-api-pom.xml
+cp dcp-scheduler/pom.xml backend/dist/dcp-scheduler-parent-pom.xml
 
 echo "完成。构建镜像: docker compose build outlet-service dcp-worker backend"

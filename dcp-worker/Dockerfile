@@ -7,6 +7,10 @@ COPY settings-docker.xml /root/.m2/settings.xml
 COPY pom.xml .
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B -DskipTests dependency:go-offline || true
 COPY dist/dcp-scheduler-api-0.1.0.jar /tmp/
+# parent pom 先装(dcp-scheduler-parent), 否则 api/core pom 的 <parent> 解析失败
+COPY dist/dcp-scheduler-parent-pom.xml /tmp/
+RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+    -Dfile=/tmp/dcp-scheduler-parent-pom.xml -DgroupId=com.dcp -DartifactId=dcp-scheduler-parent -Dversion=0.1.0 -Dpackaging=pom
 COPY dist/dcp-scheduler-core-0.1.0.jar /tmp/
 COPY dist/dcp-scheduler-api-pom.xml /tmp/
 COPY dist/dcp-scheduler-core-pom.xml /tmp/

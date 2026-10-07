@@ -29,6 +29,7 @@ subscription-service/target/
 tagengine-service/target/
 delivery-service/target/
 dcp-worker/target/
+dcp-gateway/target/
 dcp-scheduler/target/
 dcp-scheduler/*/target/
 dcp-filesync-rt/target/
@@ -54,3 +55,12 @@ demo-agent-dir/*
 *.log
 nohup.out
 docker-compose.override.yml
+
+# 部署资产: 私钥/大体积镜像包/临时脚本(不入库)
+deploy/wireguard/gen/
+deploy/image-tars/
+deploy/starter.jar
+deploy/tmp_*.sh
+deploy/tmp_*.py
+deploy/mysqlex/
+deploy/patchbuild/

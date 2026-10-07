@@ -54,6 +54,8 @@ export const dltDetail = (id) => request.get(`/sync/dlt/${id}`)
 export const dltReplay = (id) => request.post(`/sync/dlt/${id}/replay`)
 export const dltReplayBatch = (ids) => request.post('/sync/dlt/replay-batch', { ids })
 export const dltIgnore = (id) => request.post(`/sync/dlt/${id}/ignore`)
+export const dltIgnoreBatch = (ids) => request.post('/sync/dlt/ignore-batch', { ids })
+export const getSyncOverview = () => request.get('/sync/overview')
 
 // ---------- 任务 ----------
 export const listJobs = (params) => request.get('/jobs', { params })

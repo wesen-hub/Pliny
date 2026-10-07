@@ -11,6 +11,10 @@ COPY dist/dcp-outlet-control-2.0.0-SNAPSHOT.jar /tmp/
 COPY dist/dcp-outlet-worker-2.0.0-SNAPSHOT.jar /tmp/
 COPY dist/dcp-outlet-adapters-2.0.0-SNAPSHOT.jar /tmp/
 COPY dist/dcp-scheduler-api-0.1.0.jar /tmp/
+# parent pom 先装(dcp-scheduler-parent), 否则 api pom 的 <parent> 解析失败
+COPY dist/dcp-scheduler-parent-pom.xml /tmp/
+RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+    -Dfile=/tmp/dcp-scheduler-parent-pom.xml -DgroupId=com.dcp -DartifactId=dcp-scheduler-parent -Dversion=0.1.0 -Dpackaging=pom
 COPY dist/dcp-outlet-sdk-pom.xml /tmp/
 COPY dist/dcp-outlet-control-pom.xml /tmp/
 COPY dist/dcp-outlet-worker-pom.xml /tmp/
@@ -27,7 +31,7 @@ RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.pl
 RUN --mount=type=cache,target=/root/.m2/repository mvn -B -q org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
     -Dfile=/tmp/dcp-scheduler-api-0.1.0.jar -DpomFile=/tmp/dcp-scheduler-api-pom.xml -DgroupId=com.dcp -DartifactId=dcp-scheduler-api -Dversion=0.1.0 -Dpackaging=jar
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2/repository mvn -B package -DskipTests
+RUN --mount=type=cache,target=/root/.m2/repository mvn -B package -DskipTests -Dstyle.color=never
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
