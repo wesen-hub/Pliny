@@ -1,0 +1,385 @@
+# 腾讯云编排(10.66.0.3): 17 容器, host 网络
+# 含 Redis 从库、MySQL 元库从库(binlog 复制)、scheduler-console。
+name: dcp-tencent
+
+services:
+  # ============ TiDB 集群(PD/TiKV 节点 3) ============
+  pd-3:
+    image: pingcap/pd:v7.5.0
+    container_name: pd-3
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --name=pd-3
+      - --data-dir=/data
+      - --client-urls=http://10.66.0.3:2379
+      - --advertise-client-urls=http://10.66.0.3:2379
+      - --peer-urls=http://10.66.0.3:2380
+      - --advertise-peer-urls=http://10.66.0.3:2380
+      - --initial-cluster=pd-1=http://mac.wg:2380,pd-2=http://10.66.0.2:2380,pd-3=http://10.66.0.3:2380
+      - --log-level=warn
+    volumes: [pd3-data:/data]
+    mem_limit: 400m
+
+  tikv-3:
+    image: pingcap/tikv:v7.5.0
+    container_name: tikv-3
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --addr=10.66.0.3:20160
+      - --advertise-addr=10.66.0.3:20160
+      - --pd-endpoints=mac.wg:2379,10.66.0.2:2379,10.66.0.3:2379
+      - --data-dir=/data
+      - --capacity=50GB
+      - --config=/tikv-config.toml
+      - --log-level=warn
+    volumes: [tikv3-data:/data, ./tikv-config.toml:/tikv-config.toml:ro]
+    mem_limit: 1600m
+
+  # ============ 基础中间件 ============
+  etcd-3:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd-3
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      /usr/local/bin/etcd
+      --name etcd-3
+      --data-dir /etcd-data
+      --listen-client-urls http://10.66.0.3:22379
+      --advertise-client-urls http://10.66.0.3:22379
+      --listen-peer-urls http://10.66.0.3:22380
+      --initial-advertise-peer-urls http://10.66.0.3:22380
+      --initial-cluster etcd-1=http://mac.wg:22380,etcd-2=http://10.66.0.2:22380,etcd-3=http://10.66.0.3:22380
+      --initial-cluster-state new
+      --initial-cluster-token dcp-etcd
+      --log-level warn
+    volumes: [etcd3-data:/etcd-data]
+    mem_limit: 300m
+
+  kafka-3:
+    image: apache/kafka:3.7.0
+    container_name: kafka-3
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      KAFKA_CLUSTER_ID: "x9kX3z2v9cB8aQ0fY5uL1g"
+      KAFKA_NODE_ID: "3"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@mac.wg:9093,2@10.66.0.2:9093,3@10.66.0.3:9093
+      KAFKA_LISTENERS: PLAINTEXT://10.66.0.3:9092,CONTROLLER://10.66.0.3:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://10.66.0.3:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms256m
+    volumes: [kafka3-data:/var/lib/kafka/data]
+    mem_limit: 768m
+
+  redis-slave:
+    image: redis:7
+    container_name: redis-slave
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      redis-server --bind 10.66.0.3 --port 6379
+      --replicaof 10.66.0.2 6379
+      --appendonly yes --maxmemory 256mb
+    volumes: [redis-slave-data:/data]
+    mem_limit: 400m
+
+  sentinel-3:
+    image: redis:7
+    container_name: sentinel-3
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      redis-server /etc/redis/sentinel.conf
+      --sentinel
+      --bind 10.66.0.3
+      --port 26379
+      --sentinel monitor mymaster 10.66.0.2 6379 2
+      --sentinel down-after-milliseconds mymaster 5000
+      --sentinel failover-timeout mymaster 15000
+      --sentinel parallel-syncs mymaster 1
+    volumes: [./sentinel/sentinel-tencent.conf:/etc/redis/sentinel.conf]
+    mem_limit: 150m
+
+  # MinIO 集群 4 节点全放两台云机(host 网络): 阿里云 9000+9002, 腾讯云 9000+9002
+  minio-4:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: minio-4
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      server
+      --address 10.66.0.3:9000
+      --console-address 10.66.0.3:9001
+      http://10.66.0.2:9000/data
+      http://10.66.0.2:9002/data
+      http://10.66.0.3:9000/data
+      http://10.66.0.3:9002/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes: [minio4-data:/data]
+    mem_limit: 400m
+
+  minio-3b:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: minio-3b
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      server
+      --address 10.66.0.3:9002
+      --console-address 10.66.0.3:9003
+      http://10.66.0.2:9000/data
+      http://10.66.0.2:9002/data
+      http://10.66.0.3:9000/data
+      http://10.66.0.3:9002/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes: [minio3b-data:/data]
+    mem_limit: 400m
+
+  nacos-3:
+    image: nacos/nacos-server:v2.3.2
+    container_name: nacos-3
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: 10.66.0.2:8848 10.66.0.3:8848
+      NACOS_SERVER_IP: 10.66.0.3
+      NACOS_APPLICATION_PORT: "8848"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_ENABLE: "false"
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: ${RDS_HOST}
+      MYSQL_SERVICE_PORT: "3306"
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: ${RDS_USER:-dcp}
+      MYSQL_SERVICE_PASSWORD: ${RDS_PASSWORD}
+    mem_limit: 700m
+
+  # MySQL 元库从库(binlog 复制自 RDS; 只读副本, 演练 H4 读写分离验证)
+  mysql-slave:
+    image: mysql:8.0
+    container_name: mysql-slave
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_SLAVE_ROOT_PASSWORD:-dcp-slave-root}
+    command:
+      - --bind-address=10.66.0.3
+      - --server-id=100
+      - --relay-log=relay-bin
+      - --read-only=ON
+      - --gtid_mode=ON
+      - --enforce-gtid-consistency=ON
+      - --replicate-wild-ignore-table=mysql.ha_health_check
+      - --max_connections=200
+    volumes:
+      - mysql-slave-data:/var/lib/mysql
+      - ./mysql-slave-init:/docker-entrypoint-initdb.d:ro
+    mem_limit: 700m
+
+  # ============ 数据面 ============
+  seatunnel-3:
+    image: dcp-seatunnel:cluster-x86
+    container_name: seatunnel-3
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SEATUNNEL_ENGINE_CLUSTER_MEMBER: 10.66.0.3
+      SEATUNNEL_ENGINE_CLUSTER_MEMBERS: mac.wg:5801,10.66.0.2:5801,10.66.0.3:5801
+      SEATUNNEL_ENGINE_CHECKPOINT_STORAGE: s3
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_ENDPOINT: http://10.66.0.2:9000
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_BUCKET: seatunnel-checkpoint
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_ACCESS_KEY: minioadmin
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_SECRET_KEY: minioadmin123
+    volumes:
+      - ./seatunnel-config/hazelcast.yaml:/opt/config/hazelcast.yaml:ro
+      - ./seatunnel-config/seatunnel.yaml:/opt/config/seatunnel.yaml:ro
+      - ./seatunnel-config/hazelcast-client.yaml:/opt/config/hazelcast-client.yaml:ro
+      - ./seatunnel-jobs:/opt/seatunnel/jobs:ro
+    # 引擎(heap 192m) + 提交/savepoint 客户端 JVM 同容器运行, 768m 会触发 cgroup OOM 杀客户端(exit 137)
+    mem_limit: 1536m
+
+  # ============ 治理与应用 ============
+  gateway-2:
+    image: dcp-gateway:cluster-x86
+    container_name: gateway-2
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      NACOS_ADDR: 10.66.0.2:8848,10.66.0.3:8848
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: 10.66.0.3
+    depends_on: [nacos-3]
+    mem_limit: 500m
+
+  # frontend nginx: 公网 80 主前端 + 8085 scheduler-console(双站点镜像), 转本机 gateway
+  nginx-2:
+    image: dcp-frontend:cluster-x86
+    container_name: nginx-2
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 100m
+
+  # ============ 应用: 控制面 3 + worker ============
+  outlet-2:
+    image: dcp-outlet-service:cluster-x86
+    container_name: outlet-2
+    restart: unless-stopped
+    network_mode: host
+    environment: &app-common
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      SERVER_ADDRESS: 10.66.0.3
+      NACOS_ADDR: 10.66.0.2:8848,10.66.0.3:8848
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: 10.66.0.3
+      SPRING_DATASOURCE_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: ${RDS_USER:-dcp}
+      SPRING_DATASOURCE_PASSWORD: ${RDS_PASSWORD}
+      INGEST_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      SYNC_TOPICS: dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync
+      OUTLET_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      OUTLET_TIDB_JDBC_URL: jdbc:mysql://10.66.0.1:4002/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      OUTLET_META_USERNAME: ${RDS_USER:-dcp}
+      OUTLET_META_PASSWORD: ${RDS_PASSWORD}
+      OUTLET_TIDB_USERNAME: root
+      OUTLET_TIDB_PASSWORD: ""
+      OUTLET_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      OUTLET_WORKER_URL: http://10.66.0.3:8097
+      OUTLET_TICDC_BASE_URL: http://10.66.0.2:8300
+      OUTLET_SNAPSHOT_BASE_URL: http://10.66.0.1:8098
+      OUTLET_LOGIC_REPO: /app/logic-repo
+      KAFKA_BOOTSTRAP_SERVERS: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      SEATUNNEL_URL: http://10.66.0.3:8081
+      SYNC_TARGET_URL: jdbc:mysql://${RDS_HOST}:3306/dcp_dst?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      SYNC_TARGET_USERNAME: ${RDS_USER:-dcp}
+      SYNC_TARGET_PASSWORD: ${RDS_PASSWORD}
+      SYNC_CDCST_ALERT_DB_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SYNC_CDCST_ALERT_DB_USER: ${RDS_USER:-dcp}
+      SYNC_CDCST_ALERT_DB_PASSWORD: ${RDS_PASSWORD}
+      SYNC_CDCST_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      OUTLET_CONTROL_URL: http://10.66.0.3:8095
+      INGEST_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      INGEST_META_USER: ${RDS_USER:-dcp}
+      INGEST_META_PASSWORD: ${RDS_PASSWORD}
+      LAKESYNC_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      LAKESYNC_META_USER: ${RDS_USER:-dcp}
+      LAKESYNC_META_PASSWORD: ${RDS_PASSWORD}
+      DELIVERY_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      DELIVERY_META_USERNAME: ${RDS_USER:-dcp}
+      DELIVERY_META_PASSWORD: ${RDS_PASSWORD}
+      DELIVERY_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      TAGENGINE_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      TAGENGINE_META_USERNAME: ${RDS_USER:-dcp}
+      TAGENGINE_META_PASSWORD: ${RDS_PASSWORD}
+      TAGENGINE_REDIS_HOST: 10.66.0.2
+      TAGENGINE_REDIS_PORT: "6379"
+      TAGENGINE_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_TAGSTREAM_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      DCP_TAGSTREAM_REDIS_HOST: 10.66.0.2
+      DCP_TAGSTREAM_REDIS_PORT: "6379"
+      DCP_TAGSTREAM_TAG_EVENTS_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      # 底座激活开关: 打标事件流发射 + 增量打标切流底座 TagLogic(unit)
+      DCP_TAGSTREAM_TAG_EVENTS_ENABLED: "true"
+      DCP_TAGENGINE_INCREMENTAL_ENGINE: unit
+      DCP_OUTLET_CONTROL_URL: http://10.66.0.3:8095
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      DCP_WORKER_URL: http://10.66.0.3:8097
+      DCP_LAKESYNC_CATALOG_S3_ENDPOINT: http://10.66.0.2:9000
+      DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY: minioadmin
+      DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: minioadmin123
+    depends_on: [nacos-3]
+
+  backend-3:
+    image: dcp-backend:cluster-x86
+    container_name: backend-3
+    restart: unless-stopped
+    network_mode: host
+    environment: *app-common
+    depends_on: [nacos-3]
+
+  tag-2:
+    image: dcp-tagengine-service:cluster-x86
+    container_name: tag-2
+    restart: unless-stopped
+    network_mode: host
+    environment: *app-common
+    depends_on: [nacos-3]
+
+  deliv-2:
+    image: dcp-delivery-service:cluster-x86
+    container_name: deliv-2
+    restart: unless-stopped
+    network_mode: host
+    environment: *app-common
+    depends_on: [nacos-3]
+
+  worker-3:
+    image: dcp-worker:cluster-x86
+    container_name: worker-3
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      SERVER_ADDRESS: 10.66.0.3
+      NACOS_ADDR: 10.66.0.2:8848,10.66.0.3:8848
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: 10.66.0.3
+      DCP_WORKER_INSTANCE_ID: dcp-worker-3
+      # bundle 声明(ns@/path): 不声明则不装载, 挂载了 jar 但未声明 = ns 空转(此前默认只起 filesync 的 bundles=1 缺陷)
+      DCP_WORKER_BUNDLES: "sync@/opt/dcp/bundles/dcp-synclink.jar,indexer@/opt/dcp/bundles/dcp-indexer-rt.jar,outlet@/opt/dcp/bundles/dcp-outlet-rt.jar,filesync@/opt/dcp/bundles/dcp-filesync-rt.jar"
+      DCP_ETCD: http://10.66.0.1:22379,http://10.66.0.2:22379,http://10.66.0.3:22379
+      DCP_WORKER_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      DCP_WORKER_META_USERNAME: ${RDS_USER:-dcp}
+      DCP_WORKER_META_PASSWORD: ${RDS_PASSWORD}
+      DCP_WORKER_KAFKA_SYNC: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_INDEXER: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_OUTLET: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_TAG: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_LAKE: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_SUB: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_INGEST: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_MINIO_ENDPOINT: http://10.66.0.2:9000
+      DCP_WORKER_MINIO_ACCESS_KEY: minioadmin
+      DCP_WORKER_MINIO_SECRET_KEY: minioadmin123
+      DCP_WORKER_SYNC_TARGET_URL: jdbc:mysql://${RDS_HOST}:3306/dcp_dst
+      DCP_WORKER_SYNC_TARGET_USERNAME: ${RDS_USER:-dcp}
+      DCP_WORKER_SYNC_TARGET_PASSWORD: ${RDS_PASSWORD}
+      DCP_WORKER_OUTLET_LOGIC_REPO: /app/logic-repo
+      DCP_WORKER_OUTLET_CONTROL_URL: http://10.66.0.3:8096   # 契约下发在 deliv-2(delivery-service 8096)
+      DCP_FILESYNC_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      DCP_FILESYNC_TARGET_ENDPOINT: http://10.66.0.2:9000
+      DCP_FILESYNC_TARGET_ACCESS_KEY: minioadmin
+      DCP_FILESYNC_TARGET_SECRET_KEY: minioadmin123
+    volumes:
+      - /opt/dcp/bundles/dcp-synclink.jar:/opt/dcp/bundles/dcp-synclink.jar:ro
+      - /opt/dcp/bundles/dcp-indexer-rt.jar:/opt/dcp/bundles/dcp-indexer-rt.jar:ro
+      - /opt/dcp/bundles/dcp-outlet-rt.jar:/opt/dcp/bundles/dcp-outlet-rt.jar:ro
+      - /opt/dcp/bundles/dcp-filesync-rt.jar:/opt/dcp/bundles/dcp-filesync-rt.jar:ro
+      - /opt/dcp/logic-repo:/app/logic-repo:ro
+    depends_on: [nacos-3]
+
+volumes:
+  pd3-data: {}
+  tikv3-data: {}
+  etcd3-data: {}
+  kafka3-data: {}
+  redis-slave-data: {}
+  minio4-data: {}
+  minio3b-data: {}
+  mysql-slave-data: {}

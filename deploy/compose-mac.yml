@@ -1,0 +1,372 @@
+# Mac 本机编排(mac.wg): 22 容器
+# 中间件 8 + 数据面 3 + 应用 11。云机经 WireGuard 访问本机映射端口。
+# 跨机地址统一用 WireGuard IP；Mac 容器出网经主机 NAT 可达 10.66.0.2/3。
+name: dcp-mac
+
+services:
+  # ============ TiDB 集群(PD/TiKV 各 1 节点在本机) ============
+  pd-1:
+    image: pingcap/pd:v7.5.0
+    container_name: pd-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command:
+      - --name=pd-1
+      - --data-dir=/data
+      - --client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://mac.wg:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-peer-urls=http://mac.wg:2380
+      - --initial-cluster=pd-1=http://mac.wg:2380,pd-2=http://10.66.0.2:2380,pd-3=http://10.66.0.3:2380
+      - --log-level=warn
+    ports: ["2379:2379", "2380:2380"]
+    volumes: [pd1-data:/data]
+    mem_limit: 400m
+
+  tikv-1:
+    image: pingcap/tikv:v7.5.0
+    container_name: tikv-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=mac.wg:20160
+      - --pd-endpoints=mac.wg:2379,10.66.0.2:2379,10.66.0.3:2379
+      - --data-dir=/data
+      - --capacity=50GB
+      - --config=/tikv-config.toml
+      - --log-level=warn
+    ports: ["20160:20160"]
+    volumes: [tikv1-data:/data, ./tikv-config.toml:/tikv-config.toml:ro]
+    mem_limit: 1600m
+
+  # TiDB SQL 入口(Mac, 4002 避开 demo-tidb 4000)
+  tidb-server:
+    image: pingcap/tidb:v7.5.0
+    container_name: tidb-server
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command:
+      - --store=tikv
+      - --path=mac.wg:2379,10.66.0.2:2379,10.66.0.3:2379
+      - -P=4002
+      - -L=warn
+    ports: ["4002:4002"]
+    depends_on: [pd-1]
+    mem_limit: 800m
+
+  # demo 源库 TiDB(单机 standalone, 4000)
+  demo-tidb:
+    image: pingcap/tidb:v7.5.0
+    container_name: demo-tidb
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command:
+      - --store=tikv
+      - --path=mac.wg:2379,10.66.0.2:2379,10.66.0.3:2379
+      - -P=4000
+      - -L=warn
+    ports: ["4000:4000"]
+    mem_limit: 600m
+
+  # ============ 基础中间件 ============
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command: >
+      /usr/local/bin/etcd
+      --name etcd-1
+      --data-dir /etcd-data
+      --listen-client-urls http://0.0.0.0:22379
+      --advertise-client-urls http://mac.wg:22379
+      --listen-peer-urls http://0.0.0.0:22380
+      --initial-advertise-peer-urls http://mac.wg:22380
+      --initial-cluster etcd-1=http://mac.wg:22380,etcd-2=http://10.66.0.2:22380,etcd-3=http://10.66.0.3:22380
+      --initial-cluster-state new
+      --initial-cluster-token dcp-etcd
+      --log-level warn
+    ports: ["22379:22379", "22380:22380"]
+    volumes: [etcd1-data:/etcd-data]
+    mem_limit: 300m
+
+  kafka-1:
+    image: apache/kafka:3.7.0
+    container_name: kafka-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment:
+      KAFKA_CLUSTER_ID: "x9kX3z2v9cB8aQ0fY5uL1g"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@mac.wg:9093,2@10.66.0.2:9093,3@10.66.0.3:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://mac.wg:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms256m
+    ports: ["9092:9092", "9093:9093"]
+    volumes: [kafka1-data:/var/lib/kafka/data]
+    mem_limit: 1g
+
+  sentinel-1:
+    image: redis:7
+    container_name: sentinel-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    command: >
+      redis-server /etc/redis/sentinel.conf
+      --sentinel
+      --port 26379
+      --sentinel monitor mymaster 10.66.0.2 6379 2
+      --sentinel down-after-milliseconds mymaster 5000
+      --sentinel failover-timeout mymaster 15000
+      --sentinel parallel-syncs mymaster 1
+    ports: ["26379:26379"]
+    volumes: [./sentinel/sentinel-mac.conf:/etc/redis/sentinel.conf]
+    mem_limit: 150m
+
+  # MinIO 集群全部放到两台云机(host 网络), Mac bridge 网络无法让 MinIO 识别 WireGuard IP 为本地接口
+  # (grid: local host not found), 故 Mac 侧不部署 MinIO 节点
+  # Nacos 官方镜像无 arm64, Rosetta 模拟下 JVM 崩溃, 故 Nacos 双节点落云机, Mac 应用直连云机 8848
+
+  # ============ 数据面 ============
+  seatunnel-1:
+    build: ../seatunnel
+    container_name: seatunnel-1
+    restart: unless-stopped
+    # Hazelcast 成员通告用 hazelcast.yaml 的 public-address: 10.66.0.1(云机经端口映射进容器)
+    # 注: 容器内直连 10.66.0.1 会黑洞(Docker Desktop utun 限制), 故 join 只列两台云机
+    # mac.wg 容器内解析为 host-gateway(Docker 网桥网关): 容器内直连 10.66.0.1 会黑洞(utun 限制),
+    # 但经网关回宿主机端口映射可通(云机侧 /etc/hosts 仍解析 10.66.0.1, 各自可达)
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]
+    environment:
+      SEATUNNEL_ENGINE_CLUSTER_MEMBER: mac.wg
+      SEATUNNEL_ENGINE_CLUSTER_MEMBERS: mac.wg:5801,10.66.0.2:5801,10.66.0.3:5801
+      SEATUNNEL_ENGINE_CHECKPOINT_STORAGE: s3
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_ENDPOINT: http://10.66.0.2:9000
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_BUCKET: seatunnel-checkpoint
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_ACCESS_KEY: minioadmin
+      SEATUNNEL_ENGINE_CHECKPOINT_S3_SECRET_KEY: minioadmin123
+    ports: ["5801:5801", "8081:8081"]
+    volumes:
+      - ./seatunnel-config/hazelcast.yaml:/opt/config/hazelcast.yaml:ro
+      - ./seatunnel-config/seatunnel.yaml:/opt/config/seatunnel.yaml:ro
+      - ./seatunnel-config/hazelcast-client.yaml:/opt/config/hazelcast-client.yaml:ro
+      - ./seatunnel-jobs:/opt/seatunnel/jobs:ro
+    # 引擎(heap 192m) + 提交/savepoint 客户端 JVM 同容器运行, 768m 会触发 cgroup OOM 杀客户端
+    mem_limit: 1536m
+
+  # ============ 应用: 控制面 6 + worker + agent ============
+  backend-1:
+    image: dcp-backend:cluster
+    build: ../backend
+    container_name: backend-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: &app-common
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      NACOS_ADDR: 10.66.0.2:8848,10.66.0.3:8848
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: mac.wg
+      LINEAGE_NEO4J_URI: bolt://10.66.0.2:7687
+      SPRING_DATASOURCE_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: ${RDS_USER:-dcp}
+      SPRING_DATASOURCE_PASSWORD: ${RDS_PASSWORD}
+      INGEST_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      SYNC_TOPICS: dcp.biz_orders,dcp.rt_orders_b,dcp.rt_sync_c,dcp.t_oms_sync
+      OUTLET_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      OUTLET_TIDB_JDBC_URL: jdbc:mysql://mac.wg:4002/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      OUTLET_TIDB_URL: jdbc:mysql://mac.wg:4002/target_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      OUTLET_META_USERNAME: ${RDS_USER:-dcp}
+      OUTLET_META_PASSWORD: ${RDS_PASSWORD}
+      OUTLET_TIDB_USERNAME: root
+      OUTLET_TIDB_PASSWORD: ""
+      OUTLET_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      OUTLET_WORKER_URL: http://dcp-worker:8097
+      OUTLET_TICDC_BASE_URL: http://10.66.0.2:8300
+      OUTLET_TICDC_CHANGEFEED_ID: chg-target-db
+      OUTLET_SNAPSHOT_BASE_URL: http://deliv-1:8096
+      OUTLET_LOGIC_REPO: /app/logic-repo
+      KAFKA_BOOTSTRAP_SERVERS: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      SEATUNNEL_URL: http://mac.wg:8081
+      SYNC_TARGET_URL: jdbc:mysql://${RDS_HOST}:3306/dcp_dst?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      SYNC_TARGET_USERNAME: ${RDS_USER:-dcp}
+      SYNC_TARGET_PASSWORD: ${RDS_PASSWORD}
+      SYNC_CDCST_ALERT_DB_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SYNC_CDCST_ALERT_DB_USER: ${RDS_USER:-dcp}
+      SYNC_CDCST_ALERT_DB_PASSWORD: ${RDS_PASSWORD}
+      SYNC_CDCST_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      OUTLET_CONTROL_URL: http://dcp-outlet-control:8095
+      INGEST_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      INGEST_META_USER: ${RDS_USER:-dcp}
+      INGEST_META_PASSWORD: ${RDS_PASSWORD}
+      LAKESYNC_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      LAKESYNC_META_USER: ${RDS_USER:-dcp}
+      LAKESYNC_META_PASSWORD: ${RDS_PASSWORD}
+      ASSET_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      ASSET_META_USERNAME: ${RDS_USER:-dcp}
+      ASSET_META_PASSWORD: ${RDS_PASSWORD}
+      SUBSCRIPTION_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      SUBSCRIPTION_META_USERNAME: ${RDS_USER:-dcp}
+      SUBSCRIPTION_META_PASSWORD: ${RDS_PASSWORD}
+      DCP_SUB_PUSH_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      DCP_SUB_PUSH_META_USER: ${RDS_USER:-dcp}
+      DCP_SUB_PUSH_META_PASSWORD: ${RDS_PASSWORD}
+      DCP_SUB_PUSH_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DELIVERY_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      DELIVERY_META_USERNAME: ${RDS_USER:-dcp}
+      DELIVERY_META_PASSWORD: ${RDS_PASSWORD}
+      DELIVERY_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      TAGENGINE_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      TAGENGINE_META_USERNAME: ${RDS_USER:-dcp}
+      TAGENGINE_META_PASSWORD: ${RDS_PASSWORD}
+      TAGENGINE_REDIS_HOST: 10.66.0.2
+      TAGENGINE_REDIS_PORT: "6379"
+      TAGENGINE_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_TAGSTREAM_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      DCP_TAGSTREAM_JDBC_USER: ${RDS_USER:-test111}
+      DCP_TAGSTREAM_JDBC_PASSWORD: ${RDS_PASSWORD}
+      DCP_TAGSTREAM_REDIS_HOST: 10.66.0.2
+      DCP_TAGSTREAM_REDIS_PORT: "6379"
+      DCP_TAGSTREAM_TAG_EVENTS_KAFKA_BOOTSTRAP: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      # 底座激活开关: 打标事件流发射(tag 契约订阅推送数据源) + 增量打标切流底座 TagLogic(unit)
+      DCP_TAGSTREAM_TAG_EVENTS_ENABLED: "true"
+      DCP_TAGENGINE_INCREMENTAL_ENGINE: unit
+      DCP_OUTLET_CONTROL_URL: http://dcp-outlet-control:8095
+      PLATFORM_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      JWT_SECRET: ${JWT_SECRET:-dcp-jwt-secret-0123456789abcdef0123456789}
+      DCP_WORKER_URL: http://dcp-worker:8097
+      # 湖目录:三机无 Polaris REST catalog 服务 → jdbc 型 JdbcCatalog(元数据存 RDS, 免 Hadoop fs/s3 scheme 注册)
+      DCP_LAKESYNC_CATALOG_TYPE: jdbc
+      DCP_LAKESYNC_CATALOG_JDBC_URI: jdbc:mysql://test111:Qwert1234_@rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      DCP_LAKESYNC_CATALOG_WAREHOUSE: s3://dcp-lake/demo
+      DCP_LAKESYNC_CATALOG_S3_ENDPOINT: http://10.66.0.2:9000
+      DCP_LAKESYNC_CATALOG_S3_ACCESS_KEY: minioadmin
+      DCP_LAKESYNC_CATALOG_S3_SECRET_KEY: minioadmin123
+    ports: ["8080:8080"]
+
+  outlet-1:
+    image: dcp-outlet-service:cluster
+    build: ../outlet-service
+    container_name: outlet-1
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [dcp-outlet-control]   # 控制面固定别名(backend/worker 按此名寻址)
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: *app-common
+    ports: ["8095:8095"]
+    volumes:
+      - ../dcp-outlet-rt/logic-repo:/app/logic-repo:ro
+
+  sub-1:
+    image: dcp-subscription-service:cluster
+    build: ../subscription-service
+    container_name: sub-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: *app-common
+    ports: ["8098:8098"]
+
+  tag-1:
+    image: dcp-tagengine-service:cluster
+    build: ../tagengine-service
+    container_name: tag-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: *app-common
+    ports: ["8100:8100"]
+
+  asset-1:
+    image: dcp-asset-service:cluster
+    build: ../asset-service
+    container_name: asset-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: *app-common
+    ports: ["8099:8099"]
+
+  deliv-1:
+    image: dcp-delivery-service:cluster
+    build: ../delivery-service
+    container_name: deliv-1
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment: *app-common
+    ports: ["8096:8096"]
+
+  worker-1:
+    image: dcp-worker:cluster
+    build: ../dcp-worker
+    container_name: worker-1
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [dcp-worker]   # 控制面固定别名(outlet-control 按此名寻址)
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      NACOS_ADDR: 10.66.0.2:8848,10.66.0.3:8848
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: mac.wg
+      # bundle 声明(ns@/path): 不声明则不装载, 挂载了 jar 但未声明 = ns 空转(此前默认只起 filesync 的 bundles=1 缺陷)
+      DCP_WORKER_BUNDLES: "sync@/opt/dcp/bundles/dcp-synclink.jar,indexer@/opt/dcp/bundles/dcp-indexer-rt.jar,outlet@/opt/dcp/bundles/dcp-outlet-rt.jar,filesync@/opt/dcp/bundles/dcp-filesync-rt.jar"
+      DCP_ETCD: http://mac.wg:22379,http://10.66.0.2:22379,http://10.66.0.3:22379
+      DCP_WORKER_META_JDBC_URL: jdbc:mysql://${RDS_HOST}:3306/dcp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      DCP_WORKER_META_USERNAME: ${RDS_USER:-dcp}
+      DCP_WORKER_META_PASSWORD: ${RDS_PASSWORD}
+      DCP_WORKER_KAFKA_SYNC: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_INDEXER: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_OUTLET: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_TAG: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_LAKE: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_SUB: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_INGEST: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_KAFKA_FILESYNC: mac.wg:9092,10.66.0.2:9092,10.66.0.3:9092
+      DCP_WORKER_MINIO_ENDPOINT: http://10.66.0.2:9000
+      DCP_WORKER_MINIO_ACCESS_KEY: minioadmin
+      DCP_WORKER_MINIO_SECRET_KEY: minioadmin123
+      DCP_WORKER_SYNC_TARGET_URL: jdbc:mysql://${RDS_HOST}:3306/dcp_dst
+      DCP_WORKER_SYNC_TARGET_USERNAME: ${RDS_USER:-dcp}
+      DCP_WORKER_SYNC_TARGET_PASSWORD: ${RDS_PASSWORD}
+      DCP_WORKER_OUTLET_LOGIC_REPO: /app/logic-repo
+      DCP_WORKER_OUTLET_CONTROL_URL: http://deliv-1:8096   # 契约下发在 delivery-service(8096), 非 outlet-service
+      DCP_FILESYNC_ENC_KEY: ${PLATFORM_ENC_KEY:-dev-enc-key-0123456789abcdef}
+      DCP_FILESYNC_TARGET_ENDPOINT: http://10.66.0.2:9000
+      DCP_FILESYNC_TARGET_ACCESS_KEY: minioadmin
+      DCP_FILESYNC_TARGET_SECRET_KEY: minioadmin123
+    ports: ["8097:8097"]
+    volumes:
+      - ../dcp-synclink/target/dcp-synclink.jar:/opt/dcp/bundles/dcp-synclink.jar:ro
+      - ../dcp-indexer-rt/target/dcp-indexer-rt.jar:/opt/dcp/bundles/dcp-indexer-rt.jar:ro
+      - ../dcp-outlet-rt/target/dcp-outlet-rt.jar:/opt/dcp/bundles/dcp-outlet-rt.jar:ro
+      - ../dcp-filesync-rt/target/dcp-filesync-rt.jar:/opt/dcp/bundles/dcp-filesync-rt.jar:ro
+      - ../dcp-outlet-rt/logic-repo:/app/logic-repo:ro
+
+  agent:
+    build: ../agent
+    container_name: dcp-agent
+    restart: unless-stopped
+    extra_hosts: ["mac.wg:host-gateway", "rm-bp19av6aigxn7190c4o.mysql.rds.aliyuncs.com:121.41.134.22"]  # 容器内访问本机 utun IP 走宿主 gateway
+    environment:
+      DCP_AGENT_PLATFORM_URL: http://mac.wg:8080
+      DCP_AGENT_REGISTER_CODE: ${DCP_AGENT_REGISTER_CODE:-}
+      DCP_AGENT_DATA_DIR: /var/lib/dcp-agent
+      DCP_AGENT_HEARTBEAT_SEC: "20"
+    volumes:
+      - agent-data:/var/lib/dcp-agent
+      - ../demo-agent-dir:/data
+    depends_on: [backend-1]
+
+volumes:
+  pd1-data: {}
+  tikv1-data: {}
+  etcd1-data: {}
+  kafka1-data: {}
+  agent-data: {}

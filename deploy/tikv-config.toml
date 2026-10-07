@@ -1,0 +1,13 @@
+# TiKV v7.5 最小内存控制配置(三机共享)
+# v7.5 已移除命令行 --memory-usage-limit/--rocksdb.* 参数, 全部走 config 文件
+[storage]
+block-cache.capacity = "256MB"
+
+[rocksdb.defaultcf]
+block-cache-size = "256MB"
+
+[rocksdb.writecf]
+block-cache-size = "256MB"
+
+[raftdb.defaultcf]
+block-cache-size = "64MB"

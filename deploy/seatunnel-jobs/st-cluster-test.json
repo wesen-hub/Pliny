@@ -1,0 +1,19 @@
+env {
+  job.mode = "BATCH"
+  checkpoint.interval = 5000
+}
+source {
+  FakeSource {
+    result_table_name = "fake"
+    row.num = 100
+    schema = {
+      fields {
+        id = int
+        name = string
+      }
+    }
+  }
+}
+sink {
+  Console {}
+}

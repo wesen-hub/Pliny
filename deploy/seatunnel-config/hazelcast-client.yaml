@@ -1,0 +1,14 @@
+# SeaTunnel 客户端配置(三机统一): 提交入口多成员 failover
+# 客户端启动时依次尝试全部成员, 任一节点存活即可提交(H16: 任意节点宕机不影响提交)
+hazelcast-client:
+  cluster-name: seatunnel
+  properties:
+    hazelcast.logging.type: log4j2
+  connection-strategy:
+    connection-retry:
+      cluster-connect-timeout-millis: 3000
+  network:
+    cluster-members:
+      - mac.wg:5801
+      - 10.66.0.2:5801
+      - 10.66.0.3:5801

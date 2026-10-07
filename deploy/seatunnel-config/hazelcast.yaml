@@ -1,0 +1,25 @@
+hazelcast:
+  cluster-name: seatunnel
+  network:
+    rest-api:
+      enabled: true
+      endpoint-groups:
+        CLUSTER_WRITE:
+          enabled: true
+        DATA:
+          enabled: true
+    # Mac(Docker Desktop 无 host 网络):容器 IP 对云机不可达, public-address 通告宿主机 WG 地址
+    # (云机经 10.66.0.1:5801 端口映射进容器)
+    public-address: 10.66.0.1
+    join:
+      tcp-ip:
+        enabled: true
+        member-list:
+          - 10.66.0.2:5801
+          - 10.66.0.3:5801
+    port:
+      auto-increment: false
+      port: 5801
+      port-count: 100
+  properties:
+    hazelcast.logging.type: log4j2
