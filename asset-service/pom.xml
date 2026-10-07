@@ -60,6 +60,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- M5: Prometheus 指标暴露(/actuator/prometheus) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- 全接口 JWT(打标管理面 @perm.isAdmin; 血缘/目录读接口也需登录) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

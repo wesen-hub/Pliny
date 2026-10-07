@@ -7,6 +7,12 @@
 #
 # target 说明:Prometheus 与 backend 同处外部网络 data-collect-platform_default,
 # 走服务名 backend:8080(容器内端口),不是宿主 8081。
+#
+# M5(2026-10-07)扩展: 治理层监控——抓取全部 7 个控制面服务:
+#   - 6 个业务服务统一暴露 /api/actuator/prometheus(与网关白名单 ANY:/api/actuator/** 对齐)
+#   - dcp-gateway 自身 actuator 保持默认 /actuator(base-path 若设 /api/actuator
+#     会与 Path=/api/** 兜底路由冲突, 请求被转发到 backend)
+#   - 全部走容器网络服务名直连, 不经网关(JWT 不拦)
 # ============================================================================
 global:
   scrape_interval: 15s
@@ -28,3 +34,22 @@ scrape_configs:
         labels:
           service: dcp-backend
           component: outlet
+
+  # ---------------------------------------------------------------- M5: 治理层其余 5 个业务服务
+  - job_name: dcp-services
+    metrics_path: /api/actuator/prometheus
+    static_configs:
+      - targets:
+          - "outlet-service:8095"        # 注册名 dcp-outlet-control
+          - "delivery-service:8096"
+          - "subscription-service:8098"
+          - "asset-service:8099"
+          - "tagengine-service:8100"
+
+  # ---------------------------------------------------------------- M5: 网关(默认 /actuator)
+  - job_name: dcp-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["dcp-gateway:8088"]
+        labels:
+          service: dcp-gateway

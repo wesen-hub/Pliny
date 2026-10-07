@@ -83,6 +83,14 @@ spring:
           predicates:
             - Path=/api/**
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  # M5: 网关自身 actuator 保持默认 /actuator——base-path 若设 /api/actuator 会与
+  # Path=/api/** 兜底路由冲突(请求被转发到 backend);Prometheus 经容器网络直连 8088 抓取
+
 dcp:
   # 管理面 JWT 验签 secret(与 backend 同源 env; 只验不签, 缺失/长度不足 32 字节启动失败)
   jwt-secret: ${JWT_SECRET}
@@ -94,6 +102,7 @@ dcp:
       whitelist:
         - ANY:/api/auth/login
         - ANY:/api/actuator/**
+        - ANY:/actuator/**        # M5: 网关自身监控端点(默认 base-path, 不转发)
         - POST:/api/ingest/*
         - GET:/api/ingest/meta/*
         - ANY:/api/agents/**

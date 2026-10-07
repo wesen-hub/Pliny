@@ -25,6 +25,24 @@ services:
       retries: 20
       start_period: 30s
 
+  # M5: Prometheus 监控(治理层): 容器网络直连抓取 7 个服务指标(6 业务服务 /api/actuator/prometheus + 网关 /actuator/prometheus)
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: dcp-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
   # 微服务治理网关(阶段 A): 唯一 API 入口, lb:// 路由到各控制面服务
   dcp-gateway:
     build: ./dcp-gateway
@@ -765,6 +783,7 @@ services:
       start_period: 60s
 
 volumes:
+  prometheus-data:
   etcd-data:
   agent-data:
   seatunnel-checkpoint:

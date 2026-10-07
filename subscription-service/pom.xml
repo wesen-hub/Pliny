@@ -73,6 +73,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- M5: Prometheus 指标暴露(/actuator/prometheus) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- 管理面 JWT 过滤链 + @PreAuthorize(与 backend 同套安全套件) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

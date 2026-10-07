@@ -20,6 +20,14 @@ spring:
       - optional:nacos:dcp-common.yml
       - optional:nacos:${spring.application.name}.yml
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      # M5: 统一挂 /api/actuator(与网关白名单 ANY:/api/actuator/** 对齐, Prometheus 直连抓取不受 JWT 拦截)
+      base-path: /api/actuator
+
 dcp:
   # dcp-worker 执行体服务(方案 §9:TaskSpec 提交/注销/探针读均走 REST,不再直连 etcd)
   # 服务发现模式: 填服务名 http://dcp-worker → @LoadBalanced Nacos 轮询; 显式 IP → 直连降级

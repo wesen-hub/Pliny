@@ -29,6 +29,14 @@ spring:
   kafka:
     bootstrap-servers: ${DELIVERY_KAFKA_BOOTSTRAP:127.0.0.1:9092}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      # M5: 统一挂 /api/actuator(与网关白名单 ANY:/api/actuator/** 对齐, Prometheus 直连抓取不受 JWT 拦截)
+      base-path: /api/actuator
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

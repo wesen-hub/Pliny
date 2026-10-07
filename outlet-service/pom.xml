@@ -103,6 +103,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- M5: Prometheus 指标暴露(/actuator/prometheus) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- ShedLock: 定时任务多实例互斥(锁表 shedlock 在元库, 与 backend 共用一份) -->
         <dependency>
             <groupId>net.javacrumbs.shedlock</groupId>
