@@ -99,7 +99,7 @@ public final class DrlGenerator {
             for (JsonNode row : rows) {
                 String op = row.path("op").asText("");
                 String th = row.path("th").asText("");
-                String val = row.path("val").asText("");
+                String val = first(row, "val", "value");
                 String cond = numericCond(field, kind, op, th, errors, loc + " 档位行" + n);
                 if (cond == null) return;
                 if (val.isEmpty()) {
@@ -113,7 +113,7 @@ public final class DrlGenerator {
                 n++;
             }
         }
-        String elseVal = t.path("elseVal").asText("");
+        String elseVal = first(t, "elseVal", "elseValue");
         if (elseVal.isEmpty()) {
             if (n == 0) errors.add(loc + " 决策表至少一个档位行或兜底值");
             return;
@@ -140,7 +140,8 @@ public final class DrlGenerator {
                 for (JsonNode c : g.path("conds")) {
                     String field = c.path("field").asText("");
                     String op = c.path("op").asText("");
-                    String val = c.path("val").asText("");
+                    // 条件值键兼容: 现行契约为 val, 历史资产(tag_rule.def_json)遗留 value → 缺 val 回退 value
+                    String val = first(c, "val", "value");
                     if (field.isEmpty()) continue;
                     if (!fieldKinds.containsKey(field)) {
                         errors.add(loc + " 可视化条件字段不在事实字段域: " + field);
@@ -165,7 +166,7 @@ public final class DrlGenerator {
                     then.append("  halt();\n");
                 } else {
                     String tag = a.path("tag").asText("");
-                    String val = a.path("val").asText("");
+                    String val = first(a, "val", "value");
                     if (tag.isEmpty()) {
                         errors.add(loc + " THEN 打标签动作缺标签");
                         return;
@@ -309,6 +310,17 @@ public final class DrlGenerator {
             if (!p.isEmpty()) out.add(p);
         }
         return out;
+    }
+
+    /** 键兼容读取: 依序取第一个非空键值(条件值 val←value, 档值 elseVal←elseValue 契约兼容) */
+    private static String first(JsonNode node, String... keys) {
+        for (String k : keys) {
+            String v = node.path(k).asText("");
+            if (!v.isEmpty()) {
+                return v;
+            }
+        }
+        return "";
     }
 
     /** DRL 字符串字面量(转义) */

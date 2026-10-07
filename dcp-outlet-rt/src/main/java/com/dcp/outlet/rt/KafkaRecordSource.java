@@ -54,7 +54,7 @@ public class KafkaRecordSource implements RecordSource {
         ConsumerRecords<byte[], byte[]> recs = consumer.poll(Duration.ofMillis(Math.max(1, timeoutMillis)));
         List<RawMessage> out = new ArrayList<>();
         for (ConsumerRecord<byte[], byte[]> r : recs) {
-            out.add(new RawMessage(r.partition(), r.offset(), r.value()));
+            out.add(new RawMessage(r.topic(), r.partition(), r.offset(), r.value()));
             positions.put(r.partition(), r.offset() + 1);
         }
         return out;

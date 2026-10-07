@@ -58,7 +58,7 @@
             <artifactId>dcp-outlet-sdk</artifactId>
             <version>2.0.0-SNAPSHOT</version>
         </dependency>
-        <!-- Iceberg Java API: core(表/快照/RESTCatalog/HadoopCatalog) + data(GenericRecord/Appender/Generics) + parquet(读写) + aws(S3FileIO) -->
+        <!-- Iceberg Java API: core(表/快照/RESTCatalog/HadoopCatalog 均在 core) + data(GenericRecord/Appender/Generics) + parquet(读写) + aws(S3FileIO) -->
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
@@ -86,6 +86,24 @@
             <artifactId>iceberg-aws</artifactId>
             <version>${iceberg.version}</version>
         </dependency>
+        <!-- iceberg-aws 的 maven pom 不声明 awssdk(依赖在 gradle metadata 里), 需自备 AWS SDK v2:
+             s3 + url-connection-client(http 客户端 SPI, S3Client.builder 自动发现) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.29.26</version>
+        </dependency>
+        <!-- S3FileIO 凭证链含 AssumeRole → AwsProperties.toStsTags 引用 sts 模块类 -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+            <version>2.29.26</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+            <version>2.29.26</version>
+        </dependency>
         <!-- Parquet 写依赖 hadoop Configuration(iceberg-parquet 的 pom 不含 hadoop, 需自备;
              hadoop-common 传递依赖 hadoop-shaded-guava/protobuf 均为隔离包, 无冲突) -->
         <dependency>
@@ -93,6 +111,8 @@
             <artifactId>hadoop-common</artifactId>
             <version>3.3.6</version>
         </dependency>
+        <!-- JDBC Catalog(JdbcCatalog 在 iceberg-core 的 org.apache.iceberg.jdbc 包, 无独立模块):
+             元数据存 RDS(免 Hadoop fs/s3 scheme 注册), 数据与 metadata 文件仍走 S3FileIO -->
         <!-- 元库(logical_table 业务键读 / dlt_message 落库) -->
         <dependency>
             <groupId>com.mysql</groupId>

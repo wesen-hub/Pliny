@@ -35,7 +35,8 @@ public final class ContractViewCodec {
         m.put("stream", stream == null ? "" : stream);
         m.put("maxLevel", String.valueOf(maxLevel));
         m.put("rowCondition", rowCondition == null ? "" : rowCondition);
-        m.put("allowedColumns", allowedColumns == null ? "" : String.join(",", allowedColumns));
+        // null = 全放行(内部平台任务整行透传形态), 编码为 "*"(与 dcp-outlet-rt 计算面 codec 对齐)
+        m.put("allowedColumns", allowedColumns == null ? "*" : String.join(",", allowedColumns));
         StringBuilder masks = new StringBuilder();
         if (maskRules != null) {
             maskRules.forEach((k, v) -> {
@@ -72,11 +73,12 @@ public final class ContractViewCodec {
         String stream = kv.getOrDefault("stream", "");
         Set<String> cols = new LinkedHashSet<>();
         String csv = kv.getOrDefault("allowedColumns", "");
-        if (!csv.isBlank()) {
+        if (!csv.isBlank() && !"*".equals(csv)) {
             for (String c : csv.split(",")) if (!c.isBlank()) cols.add(c.trim());
         }
         Map<String, Set<String>> whitelist = new LinkedHashMap<>();
-        whitelist.put(stream, cols);
+        // "*" = 全放行(null → DefaultContractFilter 不裁剪; 内部平台任务整行透传形态)
+        whitelist.put(stream, "*".equals(csv) ? null : cols);
 
         Map<String, String> masks = new LinkedHashMap<>();
         String mr = kv.getOrDefault("maskRules", "");

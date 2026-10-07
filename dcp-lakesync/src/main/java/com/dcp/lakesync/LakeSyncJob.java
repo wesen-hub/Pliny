@@ -143,7 +143,8 @@ public final class LakeSyncJob {
                     "pathStyleAccess", "s3.path-style-access",
                     "accessKey", "s3.access-key-id",
                     "secretKey", "s3.secret-access-key",
-                    "region", "s3.region");
+                    // iceberg-aws 1.7.1 起 region 键从 s3.region 迁到 AwsClientProperties.CLIENT_REGION(client.region)
+                    "region", "client.region");
             L.s3.forEach((k, v) -> {
                 String prop = map.getOrDefault(k, "s3." + k);
                 if (v != null) b.config(p + "." + prop, v);

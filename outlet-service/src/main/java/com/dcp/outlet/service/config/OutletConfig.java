@@ -171,12 +171,13 @@ public class OutletConfig {
         return new WatermarkStoreLatestTs(watermarkStore, epoch);
     }
 
-    /** 批边界 T0 三规则。 */
+    /** 批边界 T0 三规则(R2 带 GC 安全余量, 默认 2 分钟; 见 T0Selector 注释)。 */
     @Bean
     public T0Selector t0Selector(T0Selector.ChangefeedStartTs changefeedStartTs,
                                  T0Selector.GcSafePoint gcSafePoint,
-                                 T0Selector.LatestTs t0LatestTs) {
-        return new T0Selector(changefeedStartTs, gcSafePoint, t0LatestTs);
+                                 T0Selector.LatestTs t0LatestTs,
+                                 @Value("${outlet.t0-gc-margin-ms:120000}") long gcSafeMarginMs) {
+        return new T0Selector(changefeedStartTs, gcSafePoint, t0LatestTs, gcSafeMarginMs);
     }
 
     /** 快照源:平台既有快照 API(AS OF T0)。 */

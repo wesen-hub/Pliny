@@ -247,7 +247,14 @@ public final class TagBatchJob {
             AssetPlan p = plan.assets.get(i);
             long hit = m.getOrDefault("hit:" + i, 0L);
             long tag = m.getOrDefault("tag:" + i, 0L);
-            if (hit == 0 && tag == 0) continue;
+            if (hit == 0 && tag == 0) {
+                // 0 命中哨兵: 数据行存在但资产未命中 = 条件恒假/字段域错配, 必须可见(无数据时 0 命中属正常)
+                if (m.getOrDefault("rows", 0L) > 0) {
+                    Log.warn("[0命中] 资产 " + p.name + "(" + p.kind + "#" + p.id + " v" + p.ver
+                            + ") 批阶段 0 命中: 数据行存在但条件未命中, 请核对条件(字段域/值域/契约)或数据形态");
+                }
+                continue;
+            }
             sb.append(first ? "" : ", ").append(p.name).append("(").append(p.kind).append("#").append(p.id)
                     .append("): 命中行=").append(hit).append(" 标签行=").append(tag);
             first = false;

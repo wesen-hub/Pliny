@@ -53,6 +53,12 @@
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
         </dependency>
+        <!-- fat jar 自足: 生产解码器 JSON 解析(TiCDC canal-json / 打标事件流) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.16.2</version>
+        </dependency>
         <!-- 测试 -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

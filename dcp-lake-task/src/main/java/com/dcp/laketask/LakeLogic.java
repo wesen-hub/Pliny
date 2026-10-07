@@ -62,6 +62,9 @@ public class LakeLogic implements ConsumerLogic {
 
     @Override
     public void init(LogicInitContext ctx) {
+        // 湖 jar 内 hadoop 反射(fs.s3.impl/credentials provider)与 FileSystem static CACHE 的 Key
+        // 解析均走 TCCL; 本 unit 线程全程切到 jar 类加载器, 否则后续 metadata 读写 cache miss 后反射失败
+        Thread.currentThread().setContextClassLoader(LakeLogic.class.getClassLoader());
         this.cfg = OM.convertValue(ctx.params(), LakeParams.class);   // 失败抛
         if (cfg == null || cfg.logicalTable == null || cfg.logicalTable.isBlank()
                 || cfg.jdbcUrl == null || cfg.jdbcUrl.isBlank()

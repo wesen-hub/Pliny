@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <pre>
  *   组装链(与迁出前 WorkerSchedulerRuntime 构造同构):
  *   LogicLoader = JarLogicLoader(逻辑仓库) → SpiLogicLoader(部署期 SPI) → ClasspathLogicLoader
- *   → SdkEventDecoder + DefaultContractFilter(真裁剪:表达式求值 + 脱敏)
+ *   → ProductionMessageDecoder(按 topic 分发: TiCDC 行数据/打标事件流/文本回退) + DefaultContractFilter(真裁剪:表达式求值 + 脱敏)
  *   → KafkaRecordSource.Factory(kafkaBootstrap) + 内存水位 + 内存死信 + 指标
  *   → UnitRunner(框架版, 租约/心跳已由统一调度框架收编)。
  *
@@ -67,7 +67,7 @@ public class OutletComponents {
         };
 
         this.runner = new UnitRunner(loader,
-                new SdkEventDecoder(),
+                new ProductionMessageDecoder(),
                 new DefaultContractFilter(new ExpressionRowConditionEvaluator(), new PlatformMasker(), null),
                 new KafkaRecordSource.Factory(env.kafkaBootstrap("outlet")),
                 watermarks,

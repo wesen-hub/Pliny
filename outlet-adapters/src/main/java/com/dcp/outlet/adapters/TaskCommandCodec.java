@@ -58,7 +58,7 @@ public final class TaskCommandCodec {
         for (int p : partitions) m.put("partition." + p, String.valueOf(p));
         startOffsets.forEach((p, off) -> m.put("startOffset." + p, String.valueOf(off)));
         if (startTsos != null) startTsos.forEach((p, tso) -> m.put("startTso." + p, String.valueOf(tso)));
-        t.params().forEach((k, v) -> m.put("param." + k, String.valueOf(v)));
+        t.params().forEach((k, v) -> m.put("param." + k, encodeParam(v)));
         m.put("failure.maxRetries", String.valueOf(t.failure().maxRetries()));
         m.put("failure.backoffMs", String.valueOf(t.failure().backoffMillis()));
         m.put("failure.onFailure", t.failure().onFailure());
@@ -87,7 +87,7 @@ public final class TaskCommandCodec {
             if (k.startsWith("partition.")) partitions.add(Integer.parseInt(e.getValue()));
             else if (k.startsWith("startOffset.")) starts.put(Integer.parseInt(k.substring(12)), Long.parseLong(e.getValue()));
             else if (k.startsWith("startTso.")) tsos.put(Integer.parseInt(k.substring(9)), Long.parseLong(e.getValue()));
-            else if (k.startsWith("param.")) params.put(k.substring(6), e.getValue());
+            else if (k.startsWith("param.")) params.put(k.substring(6), decodeParam(e.getValue()));
         }
         partitions.sort(Integer::compareTo);
         cmd.partitions(partitions).startOffsets(starts).startTsos(tsos).params(params);
@@ -98,6 +98,24 @@ public final class TaskCommandCodec {
                         ? FailurePolicy.OnFailure.SKIP : FailurePolicy.OnFailure.STOP));
         cmd.pollMillis(Long.parseLong(m.getOrDefault("pollMillis", "200")));
         return cmd;
+    }
+
+    /**
+     * param 值编码: 纯字符串原样透传(兼容旧协议); List/Map/Number/Boolean 等复杂类型
+     * 用 JSON 序列化并加 {@code json:} 前缀(decode 端还原类型 —— 否则 List 会被
+     * {@code String.valueOf} 拍平为 {@code [id]} 丢失类型, 业务 jar convertValue 失败)。
+     */
+    private static String encodeParam(Object v) {
+        if (v == null) return "null";                 // 与旧 String.valueOf(null) 一致
+        if (v instanceof String s) return s;
+        return "json:" + Json.write(v);
+    }
+
+    /** param 值解码: {@code json:} 前缀 → JSON 解析还原类型; 否则纯字符串(旧协议兼容)。 */
+    private static Object decodeParam(String v) {
+        if (v == null) return null;
+        if (v.startsWith("json:")) return Json.readValue(v.substring(5));
+        return v;
     }
 
     /** 键值 → URL 查询串(HTTP 下发旧通道用;框架通道不经过此)。 */

@@ -15,7 +15,7 @@ import java.util.logging.Logger;
  * <p>{@code GET {base}/api/v2/changefeeds/{id}} 返回 {@code "start_ts": <TSO>}。
  * start_ts 在 changefeed 创建时固定、永不变,故**只查一次并缓存**。
  *
- * <p>本平台当前是单一 changefeed({@code chg-target-db-v4}),changefeedId 由配置指定;
+ * <p>本平台当前是单一 changefeed({@code chg-target-db}),changefeedId 由配置指定;
  * 若未来多 changefeed,需把 topic → changefeed 映射改成动态解析(按 sink dispatcher 的 topic 模板匹配)。
  */
 public class TiCdcChangefeedStartTs implements T0Selector.ChangefeedStartTs {

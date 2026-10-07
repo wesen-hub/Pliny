@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 元库 JDBC 实现(手工组装, 无 Spring; 语义对齐 KafkaIngestEngine + SeqAllocator + LogicalTableConfigService)。
+ * 元库 JDBC 实现(手工组装, 无 Spring; 语义对齐 KafkaIngestEngine + LogicalTableConfigService)。
  *
  * <p>连接策略: 每操作独立连接(领号=批级一次、DLT=异常路径、配置读带缓存)——入站主链路
  * 吞吐由底座分区并发承担, 单实例批量语义下开销可接受, 避免自建连接池的复杂度。
