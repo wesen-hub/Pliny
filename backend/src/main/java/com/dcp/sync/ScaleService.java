@@ -126,4 +126,35 @@ public class ScaleService {
         return Map.of("logicalTable", logicalTable, "oldPartitions", cfg.getPartitionCount(),
                 "newPartitions", targetPartitions, "bucketMapRebuilt", true);
     }
+
+    /**
+     * 热点拆分建议(LagMonitor 口径③: 单分区积压 → 加分区 + 拆热点桶):
+     * ①分区级 lag 排行取热点分区; ②热点分区上确定性抽样 topN 桶(桶号升序取前 N;
+     *   桶级热度精确排序需消费端桶级埋点上报, 当前无通道 → 确定性抽样, TODO);
+     * ③migrateBuckets 迁往目标分区(通常是刚扩容的空闲分区)。
+     */
+    public Map<String, Object> suggestMigration(String logicalTable, int targetPartition, int topN) {
+        Map<String, Object> lag = lagOf(logicalTable);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> partitions = (List<Map<String, Object>>) lag.get("partitions");
+        if (partitions == null || partitions.isEmpty()) {
+            throw new IllegalStateException("无分区 lag 数据(逻辑表未配置或 topic 不存在)");
+        }
+        Map<String, Object> hot = partitions.stream()
+                .max(java.util.Comparator.comparingLong(p -> ((Number) p.get("lag")).longValue()))
+                .orElseThrow();
+        int hotPartition = ((Number) hot.get("partition")).intValue();
+        long hotLag = ((Number) hot.get("lag")).longValue();
+        List<Integer> candidates = bucketMapService.bucketsOf(logicalTable, hotPartition).stream()
+                .limit(Math.max(1, topN))
+                .toList();
+        Map<String, Object> done = bucketMapService.migrateBuckets(logicalTable, targetPartition, candidates);
+        log.warn("热点拆分完成: {} 热点分区 {} (lag={}) 迁出 {} 桶 → 分区 {}",
+                logicalTable, hotPartition, hotLag, candidates.size(), targetPartition);
+        Map<String, Object> out = new LinkedHashMap<>(done);
+        out.put("hotPartition", hotPartition);
+        out.put("hotLag", hotLag);
+        out.put("migratedBuckets", candidates);
+        return out;
+    }
 }
