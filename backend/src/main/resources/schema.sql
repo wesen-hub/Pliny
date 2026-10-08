@@ -568,3 +568,14 @@ CREATE TABLE IF NOT EXISTS shedlock (
 -- 单机演示环境登记 worker-1(容器内 REST 入口); 多 worker 由运维在页面/元库追加登记,
 -- 平台按最闲分派作业族, 判死后自动迁移。rest_url 必须是 backend 可达地址。
 INSERT IGNORE INTO cdc_worker (worker_id, rest_url, enabled) VALUES ('worker-1', 'http://seatunnel:8081', 1);
+
+-- ============ 逻辑表配置变更审计(2026-10-09): 审计 + 热更新通知载体 ============
+CREATE TABLE IF NOT EXISTS logical_table_audit (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  table_name VARCHAR(128) NOT NULL COMMENT '逻辑表名',
+  action VARCHAR(32) NOT NULL COMMENT 'CREATE/UPDATE/TOPIC_CHANGED/PARTITIONS',
+  operator VARCHAR(64) NULL COMMENT '操作者(接口层暂不采集身份则置 NULL)',
+  changed_fields JSON NULL COMMENT '变更字段: {字段: {from, to}}',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_lt_audit (table_name, created_at)
+) ENGINE=InnoDB COMMENT='逻辑表配置变更审计';

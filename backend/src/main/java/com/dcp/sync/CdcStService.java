@@ -604,6 +604,34 @@ public class CdcStService {
     }
 
     /**
+     * 采集端热更新(LogicalTableConfigService 发布事件通知):topic 变更 → 重提采集任务换 sink topic。
+     * 重提 = 优雅停止(同 jobId 续采, checkpoint 落盘)+ 启动, 位点不回退; 异步执行不阻塞配置保存。
+     */
+    @org.springframework.context.event.EventListener
+    public void onLogicalTableConfigChanged(LogicalTableConfigChangedEvent e) {
+        if (!"TOPIC_CHANGED".equals(e.action())) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                List<CdcStTask> tasks = loadTasks(e.tableName());
+                if (tasks.isEmpty()) {
+                    return; // 无采集任务(纯订阅/文件源等), 无重提对象
+                }
+                log.info("逻辑表 {} topic 变更({}→{}), 重提采集任务更新 sink topic",
+                        e.tableName(), e.oldTopic(), e.newTopic());
+                stop(e.tableName());
+                start(e.tableName());
+            } catch (Exception ex) {
+                log.warn("逻辑表 {} topic 变更后采集任务重提失败(请人工确认采集任务状态): {}",
+                        e.tableName(), ex.getMessage());
+            }
+        }, "cdc-topic-change-" + e.tableName());
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
      * N6(D1/D2): 源表 DDL 变更(TRUNCATE/DROP/ALTER)告警登记。
      * SeaTunnel CDC 2.3.12 不输出 Debezium TRUNCATE/schema-change 事件(反编译取证:
      * 反序列化链路无 op=t 处理), 采集端无法自动检测 → 按拍板语义「不自动同步 + sync_alert
