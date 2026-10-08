@@ -31,14 +31,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * 无行级 seq 裁判(旧单源模式)/无直覆写入(旧多源模式)。
  *
  * P1: 支持批量(一批一个事务); 攒批写失败逐条隔离入死信由 BatchWriteService 负责。
- * TODO(P2+): 列类型从模型定义生成。
+ * 列类型(2026-10-09 落地):建表/补列优先取 {@link TableOp#colTypes}(上游按模型定义/运行时值推断传入),
+ * 缺省回退 {@link #inferColumnType(Object)} 运行时值推断, 再回退 VARCHAR(255); 已有列不 ALTER 类型(建表定类型)。
  */
 @Slf4j
 public class AtomicUpsertDao {
 
-    /** 目标侧单条操作(已路由到物理表); writer=写者 seq 列名(_s{taskId}_d{datasourceId}_{db}.{table}, 必配) */
+    /**
+     * 目标侧单条操作(已路由到物理表); writer=写者 seq 列名(_s{taskId}_d{datasourceId}_{db}.{table}, 必配);
+     * colTypes=列名→SQL 列类型的可选映射(优先于运行时值推断; 模型定义/打标侧可携带, 缺省 null)
+     */
     public record TableOp(String table, String rowKind, List<String> keyColumns,
-                          Map<String, Object> fields, long seq, String writer) {
+                          Map<String, Object> fields, long seq, String writer,
+                          Map<String, String> colTypes) {
     }
 
     private final JdbcTemplate targetJdbc;
@@ -64,8 +69,9 @@ public class AtomicUpsertDao {
         knownCols.remove(table);
     }
 
-    /** 首次写入自动建表: 唯一键列 + 业务字段列(统一 VARCHAR(255)) + seq */
-    public void ensureTable(String table, List<String> keyColumns, Map<String, Object> fields) {
+    /** 首次写入自动建表: 唯一键列 + 业务字段列(按 colTypes/运行时值推断的类型)+ seq */
+    public void ensureTable(String table, List<String> keyColumns, Map<String, Object> fields,
+                            Map<String, String> colTypes) {
         if (!ensured.getOrDefault(table, false)) {
             synchronized (table.intern()) {
                 if (!ensured.getOrDefault(table, false)) {
@@ -80,7 +86,8 @@ public class AtomicUpsertDao {
                         if (keyColumns.contains(f)) {
                             continue;
                         }
-                        ddl.append("  `").append(f).append("` VARCHAR(255) NULL,\n");
+                        ddl.append("  `").append(f).append("` ")
+                                .append(typeOf(f, fields.get(f), colTypes)).append(" NULL,\n");
                     }
                     ddl.append("  seq BIGINT NOT NULL DEFAULT 0,\n");
                     ddl.append("  UNIQUE KEY uk_biz (").append(String.join(", ", keys)).append(")\n");
@@ -93,10 +100,39 @@ public class AtomicUpsertDao {
             }
         }
         // 多表合并: 宽表列 = A∪B 全集; 后到的任务带新列 → ALTER ADD COLUMN(幂等)
-        ensureColumns(table, fields.keySet());
+        ensureColumns(table, fields.keySet(), colTypes);
     }
 
-    /** 缺失列自动补充(VARCHAR(255) NULL; 一条 ALTER 批量加列) */
+    /** 列类型:colTypes 显式映射优先 → 运行时值推断 → 默认 VARCHAR(255) */
+    private static String typeOf(String col, Object sample, Map<String, String> colTypes) {
+        if (colTypes != null && colTypes.get(col) != null) {
+            return colTypes.get(col);
+        }
+        return inferColumnType(sample);
+    }
+
+    /** 运行时值 → SQL 列类型(建表兜底推断; JSON 反序列化值形态) */
+    public static String inferColumnType(Object v) {
+        if (v == null) {
+            return "VARCHAR(255)";
+        }
+        if (v instanceof Byte || v instanceof Short || v instanceof Integer || v instanceof Long) {
+            return "BIGINT";
+        }
+        if (v instanceof Float || v instanceof Double
+                || v instanceof java.math.BigDecimal || v instanceof java.math.BigInteger) {
+            return "DECIMAL(30,10)";
+        }
+        if (v instanceof Boolean) {
+            return "TINYINT(1)";
+        }
+        if (v instanceof byte[]) {
+            return "VARBINARY(1024)";
+        }
+        return "VARCHAR(255)";
+    }
+
+    /** 缺失写者列自动补充(BIGINT NOT NULL DEFAULT 0; 多实例并发 ALTER 同列由重拉确认兼容) */
     private void ensureWriterCol(String table, String writer) {
         if (writer == null || writer.isBlank()) {
             return;
@@ -126,7 +162,7 @@ public class AtomicUpsertDao {
         }
     }
 
-    private void ensureColumns(String table, java.util.Set<String> need) {
+    private void ensureColumns(String table, java.util.Set<String> need, Map<String, String> colTypes) {
         java.util.Set<String> known = knownCols.get(table);
         if (known == null || !known.containsAll(need)) {
             synchronized (table.intern()) {
@@ -140,7 +176,7 @@ public class AtomicUpsertDao {
                 if (!missing.isEmpty()) {
                     String alter = "ALTER TABLE `" + table + "` ADD COLUMN "
                             + String.join(", ADD COLUMN ", missing.stream()
-                            .map(c -> "`" + c + "` VARCHAR(255) NULL").toList());
+                            .map(c -> "`" + c + "` " + typeOf(c, null, colTypes) + " NULL").toList());
                     targetJdbc.execute(alter);
                     log.info("目标分表补列 {}: +{}", table, missing);
                     fresh.addAll(missing);
@@ -169,7 +205,7 @@ public class AtomicUpsertDao {
             return;
         }
         for (TableOp op : ops) {
-            ensureTable(op.table(), op.keyColumns(), op.fields());
+            ensureTable(op.table(), op.keyColumns(), op.fields(), op.colTypes());
             ensureWriterCol(op.table(), op.writer());
         }
         tx.executeWithoutResult(status -> {
@@ -198,19 +234,26 @@ public class AtomicUpsertDao {
         if (ops == null || ops.isEmpty()) {
             return;
         }
-        // 确保表存在/补列(取全部 op 的列并集)
+        // 确保表存在/补列(取全部 op 的列并集; 类型优先 colTypes, sample 用真实值兜底推断)
         String table = ops.get(0).table();
         List<String> keyCols = ops.get(0).keyColumns();
         java.util.Set<String> allCols = new java.util.LinkedHashSet<>();
+        Map<String, String> colTypes = new LinkedHashMap<>();
+        Map<String, Object> sample = new LinkedHashMap<>();
         for (TableOp op : ops) {
             allCols.addAll(op.fields().keySet());
+            if (op.colTypes() != null) {
+                colTypes.putAll(op.colTypes());
+            }
+            for (Map.Entry<String, Object> e : op.fields().entrySet()) {
+                sample.putIfAbsent(e.getKey(), e.getValue());
+            }
         }
         allCols.addAll(keyCols);
-        Map<String, Object> sample = new LinkedHashMap<>();
         for (String c : allCols) {
-            sample.put(c, "");
+            sample.putIfAbsent(c, "");
         }
-        ensureTable(table, keyCols, sample);
+        ensureTable(table, keyCols, sample, colTypes);
         List<TableOp> upserts = ops.stream().filter(op -> !"DELETE".equalsIgnoreCase(op.rowKind())).toList();
         List<TableOp> deletes = ops.stream().filter(op -> "DELETE".equalsIgnoreCase(op.rowKind())).toList();
         // 攒批桶可能混入多个写者(多源/跨任务同表): 按写者列分组, 各自成一条多值 SQL, 各自比各自的 seq
@@ -246,7 +289,7 @@ public class AtomicUpsertDao {
             return;
         }
         for (TableOp op : ops) {
-            ensureTable(op.table(), op.keyColumns(), op.fields());
+            ensureTable(op.table(), op.keyColumns(), op.fields(), op.colTypes());
             ensureWriterCol(op.table(), op.writer());
         }
         // 快照无 DELETE 语义; 防御性兼容: DELETE 走删除闸门(带号条件, 不误删)

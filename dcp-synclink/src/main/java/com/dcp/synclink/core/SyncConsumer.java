@@ -302,7 +302,13 @@ public class SyncConsumer {
                 }
             }
         }
-        return new AtomicUpsertDao.TableOp(table, rowKind, rec.getKeyColumns(), fields, rec.getSeq(), writer);
+        // 列类型:按字段值运行时推断传入(建表定类型; 上游模型定义可覆盖为显式映射)
+        Map<String, String> colTypes = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : fields.entrySet()) {
+            colTypes.put(e.getKey(), AtomicUpsertDao.inferColumnType(e.getValue()));
+        }
+        return new AtomicUpsertDao.TableOp(table, rowKind, rec.getKeyColumns(), fields,
+                rec.getSeq(), writer, colTypes);
     }
 
     /** N1(A1): 多键键值解析——businessKey 为 JSON 数组字符串(元素与 keyColumns 一一对应);
