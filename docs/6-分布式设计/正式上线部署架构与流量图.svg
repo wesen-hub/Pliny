@@ -73,8 +73,8 @@
 
   <rect x="60" y="582" width="700" height="72" rx="8" fill="#ffffff" stroke="#10a37f" stroke-width="1.5"/>
   <text x="410" y="602" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">同步链路 dcp-synclink(消费平台栈 → 写 TiDB + 投递出口栈)</text>
-  <text x="410" y="628" font-size="17" font-weight="bold" fill="#10a37f" text-anchor="middle">× 17 实例 · 每 8C/16G · 消费 25 万 QPS</text>
-  <text x="410" y="646" font-size="10" fill="#64748b" text-anchor="middle">每实例 1.47 万条/s(74%)· 写 TiDB 250MB/s 攒批 + 出口栈 25 万条/s</text>
+  <text x="410" y="628" font-size="17" font-weight="bold" fill="#10a37f" text-anchor="middle">× 20 实例 · 每 8C/16G · 消费 25 万 QPS(上限 30 万)</text>
+  <text x="410" y="646" font-size="10" fill="#64748b" text-anchor="middle">每实例 1.25 万条/s(62.5%)· 每分区一线程×~15 + 共享写线程池 · 写 TiDB 250MB/s 攒批 + 出口栈 25 万条/s</text>
 
   <rect x="780" y="582" width="660" height="72" rx="8" fill="#dcfce7" stroke="#10a37f" stroke-width="1.5"/>
   <text x="1110" y="602" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">★ 全量窗口积压账(设计内,非故障; 增量不与全量并发)</text>
