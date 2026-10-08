@@ -53,7 +53,7 @@
   <text x="340" y="444" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">Kafka 平台栈(采集 → 同步缓冲)</text>
   <text x="340" y="472" font-size="17" font-weight="bold" fill="#2563eb" text-anchor="middle">× 3 broker · 每 32C/128G · NVMe 3.84T×4</text>
   <text x="340" y="492" font-size="10" fill="#475569" text-anchor="middle">写入 50 万条/s = 125MB/s 压缩后(每 broker 16.7 万条/s · 41.7MB/s)</text>
-  <text x="340" y="506" font-size="10" fill="#64748b" text-anchor="middle">200 分区(100 逻辑表分级)→ 2500 条/s/分区写 · CPU 2.1 万条/s/核 ⚠ 偏紧 · &gt;70% 告警</text>
+  <text x="340" y="506" font-size="10" fill="#64748b" text-anchor="middle">~400 分区(100 表 · 并发原则)→ 625 条/s/分区消费 · CPU 2.1 万条/s/核 ⚠ 偏紧 · &gt;70% 告警</text>
 
   <rect x="640" y="422" width="560" height="94" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
   <text x="920" y="444" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">Kafka 出口栈(同步链路 → 消费底座,主路径)</text>
@@ -63,9 +63,9 @@
 
   <rect x="1220" y="422" width="220" height="94" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
   <text x="1330" y="446" font-size="12" font-weight="bold" fill="#1e3a8a" text-anchor="middle">分区预算</text>
-  <text x="1330" y="470" font-size="10" fill="#1e3a8a" text-anchor="middle">峰值 50 万条/s</text>
-  <text x="1330" y="488" font-size="10" fill="#1e3a8a" text-anchor="middle">÷ 单分区 1 万/s</text>
-  <text x="1330" y="506" font-size="10" fill="#1e3a8a" text-anchor="middle">→ 100 表分级:10×8+30×2+60×1=200</text>
+  <text x="1330" y="470" font-size="10" fill="#1e3a8a" text-anchor="middle">表并发 = 来源库数 × 单库贡献</text>
+  <text x="1330" y="488" font-size="10" fill="#1e3a8a" text-anchor="middle">÷ 单分区 2000 条/s 取 2 的幂</text>
+  <text x="1330" y="506" font-size="10" fill="#1e3a8a" text-anchor="middle">→ 均匀基线 100×4=400 · 合流 8/16/32</text>
 
   <!-- ================= ④ 同步与消费层 ================= -->
   <rect x="40" y="544" width="1420" height="200" rx="10" fill="#f0fdf4" stroke="#10a37f" stroke-width="1.5"/>
