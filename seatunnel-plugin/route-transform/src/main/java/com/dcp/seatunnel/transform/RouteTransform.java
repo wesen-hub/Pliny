@@ -1,6 +1,10 @@
 package com.dcp.seatunnel.transform;
 
+import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * RouteTransform（设计文档 §4.3/§4.4）
@@ -53,6 +57,18 @@ public class RouteTransform implements org.apache.seatunnel.api.transform.SeaTun
         out.setField(fields.length + 1, route.tableNo());
         out.setField(fields.length + 2, targetTable);
         return out;
+    }
+
+    @Override
+    public CatalogTable getProducedCatalogTable() {
+        // 纯字段路由, 不改变表结构
+        return null;
+    }
+
+    @Override
+    public List<CatalogTable> getProducedCatalogTables() {
+        // seatunnel-api 2.3.12 抽象方法: 多表输出能力, 本插件不产出目录表
+        return Collections.emptyList();
     }
 
     @Override
