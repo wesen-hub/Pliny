@@ -237,7 +237,8 @@ public class OutletConfig {
     /**
      * 批阶段:执行体选择(设计 §4.3.1)+ 委派。
      * - local = 进程内(SchedulerBatchRunner,开发期)
-     * - container / spark = 尚未接线(占位,等任务模型桥 + 执行器快照源)
+     * - container = 批容器执行体(ContainerBatchRunner,docker run 批执行器镜像)
+     * - spark = SparkBatchRunner(tagengine-executor spark-submit)
      * - 选择由 outlet.batch.executor + 估算行数决定(BatchExecutorPolicy)
      */
     @Bean
@@ -253,17 +254,21 @@ public class OutletConfig {
                                    @Value("${outlet.snapshot.base-url:http://127.0.0.1:8081}") String snapshotBaseUrl,
                                    @Value("${outlet.spark.warehouse:}") String warehouse,
                                    @Value("${outlet.spark.catalog-type:}") String catalogType,
+                                   @Value("${outlet.batch.container.image:}") String containerImage,
+                                   @Value("${outlet.batch.container.cmd:java -jar /app/tagengine-executor.jar --task-json /mnt/task.json}") String containerCmd,
+                                   @Value("${outlet.batch.container.mount-dir:}") String containerMountDir,
+                                   @Value("${outlet.batch.container.memory:}") String containerMemory,
+                                   @Value("${outlet.batch.container.cpus:}") String containerCpus,
                                    @Value("${outlet.epoch:1}") int epoch) {
         BatchRunner local = new SchedulerBatchRunner(taskStore, streamRegistry, snapshotSource,
                 t0Selector, logicLoader, contracts, batchJobStore, sdkLogger);
         BatchRunner spark = new SparkBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
                 sparkSubmitBin, executorJar, catalog, namespace, snapshotBaseUrl, contracts,
                 warehouse, catalogType, epoch);
-        // 批容器执行体需拉起独立容器,依赖镜像/编排,先保留占位(置 BATCH_FAILED)
-        BatchRunner container = (taskId, callback) -> {
-            sdkLogger.error("批容器执行体未实现(需容器镜像 + 编排);任务 {} 置 BATCH_FAILED", taskId);
-            callback.done(0L, false);
-        };
+        // 批容器执行体:task-json 挂载进批执行器容器跑(与 Spark 同构; 镜像必配, 缺镜像置 BATCH_FAILED)
+        BatchRunner container = new ContainerBatchRunner(taskStore, streamRegistry, t0Selector, sdkLogger,
+                contracts, snapshotBaseUrl, epoch, catalog, namespace, warehouse, catalogType,
+                containerImage, containerCmd, containerMountDir, containerMemory, containerCpus);
         return new SelectingBatchRunner(local, container, spark, t0Selector, streamRegistry,
                 taskStore, snapshotSource, contracts, executorMode, sdkLogger);
     }
