@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 830" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="830" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">非主节点(实例角色)逻辑图</text>
+  <text x="40" y="70" font-size="13" fill="#64748b">供数 · 执行 · 待位 三件事;与主的差异只有 MasterLoop 一段决策代码——主与非主框架逻辑同构,可瞬间互换</text>
+
+  <!-- ═══ ① 供数卡 ═══ -->
+  <rect x="40" y="96" width="360" height="470" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="60" y="124" font-size="14" font-weight="700" fill="#2563eb">① 供数:向 etcd 写自己的状态</text>
+  <g>
+    <rect x="56" y="138" width="328" height="104" rx="8" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="72" y="162" font-size="12" font-weight="700" fill="#334155">ns 调度注册 + lease 保活</text>
+    <text x="72" y="180" font-size="11" fill="#475569">status / capacity / weight / paused</text>
+    <text x="72" y="198" font-size="11" fill="#475569">每 10s 续租,30s 过期</text>
+    <text x="72" y="216" font-size="11" fill="#475569">→ 判死双信号①(实例失联)</text>
+    <rect x="56" y="252" width="328" height="104" rx="8" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="72" y="276" font-size="12" font-weight="700" fill="#334155">全局 meta 机器指标</text>
+    <text x="72" y="294" font-size="11" fill="#475569">cpu / mem / load / jvmThreads</text>
+    <text x="72" y="312" font-size="11" fill="#475569">每 10s 随续租刷新</text>
+    <text x="72" y="330" font-size="11" fill="#475569">→ 主打分公式的 cpu 余量输入</text>
+    <rect x="56" y="366" width="328" height="104" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="72" y="390" font-size="12" font-weight="700" fill="#1d4ed8">执行器快照上报</text>
+    <text x="72" y="408" font-size="11" fill="#475569">拉执行器 metrics() 四个计数器</text>
+    <text x="72" y="426" font-size="11" fill="#475569">snap 键 10s 续写 / TTL 30s</text>
+    <text x="72" y="444" font-size="11" fill="#475569">→ 判死双信号② + 指标派生源</text>
+  </g>
+  <text x="60" y="500" font-size="11" fill="#64748b">三个通道全部 10s 节拍 = 统一心跳体系</text>
+  <text x="60" y="520" font-size="11" fill="#64748b">写 etcd(自己不读决策,只供主读)</text>
+
+  <!-- ═══ ② 执行卡 ═══ -->
+  <rect x="432" y="96" width="376" height="470" rx="10" fill="#ffffff" stroke="#10b981" stroke-width="1.5"/>
+  <text x="452" y="124" font-size="14" font-weight="700" fill="#047857">② 执行:watch 对账 + 线程托管</text>
+  <g>
+    <rect x="448" y="138" width="344" height="64" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="464" y="162" font-size="12" font-weight="700" fill="#065f46">watch 归属对账(拉模式)</text>
+    <text x="464" y="180" font-size="11" fill="#475569">watch /dcp/{ns}/tasks/*/parts — 归属一变即 diff</text>
+    <rect x="448" y="212" width="344" height="136" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="464" y="236" font-size="12" font-weight="700" fill="#065f46">diff 新增(owner=我)→ 起线程</text>
+    <text x="464" y="256" font-size="11" fill="#475569">① 校验执行器可装载(EMBEDDED 注册表 / SPI)</text>
+    <text x="464" y="274" font-size="11" fill="#475569">② 启动前归属断言(再查 owner=我,防双消费三层锁③)</text>
+    <text x="464" y="292" font-size="11" fill="#475569">③ start(ctx) 起线程(每分区一线程)</text>
+    <text x="464" y="310" font-size="11" fill="#64748b">ctx = {taskId, topic, partId, spec 子集}</text>
+    <rect x="448" y="358" width="344" height="104" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="464" y="382" font-size="12" font-weight="700" fill="#065f46">diff 消失(归属迁走)→ 停线程</text>
+    <text x="464" y="400" font-size="11" fill="#475569">stop() — 节奏按交接模式</text>
+    <text x="464" y="418" font-size="11" fill="#475569">激进:即停(幂等吸收) / 保守:追平后停</text>
+    <text x="464" y="436" font-size="11" fill="#475569">场景:迁移 / 缩容 / 注销 / HARD 变更重启</text>
+  </g>
+  <text x="452" y="500" font-size="11" fill="#64748b">线程托管:异常兜底(只影响本分区)· 快照转发</text>
+  <text x="452" y="520" font-size="11" fill="#64748b">· lease 续租;执行器不碰 etcd,只认三回调</text>
+
+  <!-- ═══ ③ 待位卡 ═══ -->
+  <rect x="840" y="96" width="360" height="470" rx="10" fill="#ffffff" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="860" y="124" font-size="14" font-weight="700" fill="#b45309">③ 待位:竞选资格维护</text>
+  <g>
+    <rect x="856" y="138" width="328" height="104" rx="8" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="872" y="162" font-size="12" font-weight="700" fill="#92400e">campaign 落败 → 等位</text>
+    <text x="872" y="180" font-size="11" fill="#78350f">竞选失败不退出竞争</text>
+    <text x="872" y="198" font-size="11" fill="#78350f">继续 watch /dcp/{ns}/leader 键</text>
+    <text x="872" y="216" font-size="11" fill="#78350f">等位者 = 重选机制的另一半</text>
+    <rect x="856" y="252" width="328" height="104" rx="8" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="872" y="276" font-size="12" font-weight="700" fill="#92400e">主死亡 → 感知 → 抢选</text>
+    <text x="872" y="294" font-size="11" fill="#78350f">leader 键被 etcd 删除(DELETE 事件)</text>
+    <text x="872" y="312" font-size="11" fill="#78350f">毫秒级感知 → 立即重新竞选</text>
+    <text x="872" y="330" font-size="11" fill="#78350f">原子竞争:恰好一主胜出</text>
+    <rect x="856" y="366" width="328" height="104" rx="8" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="872" y="390" font-size="12" font-weight="700" fill="#92400e">当选 → 加挂 MasterLoop</text>
+    <text x="872" y="408" font-size="11" fill="#78350f">切换「主+实例」双角色</text>
+    <text x="872" y="426" font-size="11" fill="#78350f">零切换成本:供数/执行本来就在跑</text>
+    <text x="872" y="444" font-size="11" fill="#78350f">仅新增一段决策代码</text>
+  </g>
+  <text x="860" y="500" font-size="11" fill="#64748b">主死 → lease 过期(≤30s)→ 删键 → 重选</text>
+  <text x="860" y="520" font-size="11" fill="#64748b">→ 新主全量读恢复,数据面零影响</text>
+
+  <!-- 供数 → etcd 箭头 -->
+  <path d="M400 190 H428" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+  <path d="M400 304 H428" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+  <path d="M400 418 H428" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+
+  <!-- ═══ 对照卡 ═══ -->
+  <rect x="40" y="592" width="1160" height="128" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="618" font-size="13.5" font-weight="700" fill="#0f172a">主 vs 非主:框架逻辑同构(差异仅 MasterLoop)</text>
+  <text x="60" y="644" font-size="12" fill="#334155">框架逻辑:注册保活 · meta 指标 · 快照上报 · watch 对账 · 竞选 watch · MasterLoop 决策</text>
+  <text x="60" y="666" font-size="12" fill="#334155">调度主:√ · √ · √ · √ · √(已当选)· √(决策循环)</text>
+  <text x="60" y="688" font-size="12" fill="#334155">非主节点:√ · √ · √ · √ · √(等位者)· ×(当选后加挂)</text>
+  <text x="60" y="708" font-size="11" fill="#94a3b8">主挂了只影响决策(≤30s 停顿);非主挂了只影响其名下分区(判死交接)——两种角色的故障域都精确隔离到最小单元</text>
+
+  <!-- ═══ 图例 ═══ -->
+  <rect x="40" y="738" width="1160" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="764" font-size="13.5" font-weight="700" fill="#0f172a">图例</text>
+  <g font-size="11.5" fill="#475569">
+    <line x1="150" y1="756" x2="190" y2="756" stroke="#2563eb" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <text x="198" y="760">蓝 = 供数(写 etcd,主决策的输入源)</text>
+    <text x="420" y="760">绿 = 执行(watch 对账起停线程)</text>
+    <text x="660" y="760">琥珀 = 待位(竞选资格维护,随时顶上)</text>
+    <text x="60" y="792" font-size="11" fill="#94a3b8">非主节点 = 状态生产机 + 分配执行者 + 主位候补 三合一;「供数、执行、待位」正是整个框架高可用的地基</text>
+  </g>
+</svg>

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 820" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="820" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">主节点(调度主)逻辑图</text>
+  <text x="40" y="70" font-size="13" fill="#64748b">竞选当选后加挂 MasterLoop——10s 决策循环 + 周期续租保位;所有决策先落 etcd 再生效,主无内存态</text>
+
+  <!-- ═══ lease 保活条 ═══ -->
+  <rect x="40" y="92" width="1160" height="48" rx="10" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="60" y="114" font-size="13.5" font-weight="700" fill="#b45309">主 lease 保活(键 /dcp/{ns}/leader)</text>
+  <text x="60" y="130" font-size="11.5" fill="#92400e">每 10s keep-alive 续租;30s 续不上 → lease 过期 → etcd 删键自动退位,等位实例 watch DELETE 后重新竞选</text>
+
+  <!-- ═══ 输入卡 ═══ -->
+  <rect x="40" y="164" width="300" height="296" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="192" font-size="14" font-weight="700" fill="#0f172a">决策输入 · 每轮全量读</text>
+  <text x="60" y="210" font-size="11" fill="#64748b">tick 10s 全量读(兜底)+ watch 增量(加速)</text>
+  <g font-size="11.5" fill="#334155">
+    <rect x="56" y="220" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="241" font-family="monospace">tasks/*/spec</text>
+    <text x="170" y="241" fill="#64748b">TaskSpec(边界/交接/规则)</text>
+    <rect x="56" y="258" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="279" font-family="monospace">instances/*</text>
+    <text x="158" y="279" fill="#64748b">注册+meta(cpu 余量)</text>
+    <rect x="56" y="296" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="317" font-family="monospace">tasks/*/parts</text>
+    <text x="162" y="317" fill="#64748b">归属(owner/state/epoch)</text>
+    <rect x="56" y="334" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="355" font-family="monospace">parts/*/snap</text>
+    <text x="160" y="355" fill="#64748b">快照(四个计数器)</text>
+    <rect x="56" y="372" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="393" font-family="monospace">ops/* · rules</text>
+    <text x="160" y="393" fill="#64748b">运维指令 · 扩缩规则</text>
+    <rect x="56" y="410" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="68" y="431" fill="#334155">Kafka Admin</text>
+    <text x="158" y="431" fill="#64748b">endOffset(算 lag)</text>
+  </g>
+
+  <!-- ═══ 决策循环卡 ═══ -->
+  <rect x="372" y="164" width="496" height="296" rx="10" fill="#ffffff" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="392" y="192" font-size="14" font-weight="700" fill="#b45309">MasterLoop 决策循环 · 10s/轮(循环往复)</text>
+  <g>
+    <rect x="392" y="204" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="404" y="224" font-size="10" fill="#d97706">①</text>
+    <text x="404" y="242" font-size="11.5" fill="#78350f">任务生命周期推进</text>
+    <rect x="512" y="204" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="524" y="224" font-size="10" fill="#d97706">②</text>
+    <text x="524" y="242" font-size="11.5" fill="#78350f">Pin 锁过期清理</text>
+    <rect x="632" y="204" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="644" y="224" font-size="10" fill="#d97706">③</text>
+    <text x="644" y="242" font-size="11.5" fill="#78350f">运维指令消费(ops)</text>
+    <rect x="752" y="204" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="764" y="224" font-size="10" fill="#d97706">④</text>
+    <text x="764" y="242" font-size="11.5" fill="#78350f">判死检测与交接</text>
+    <rect x="392" y="262" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="404" y="282" font-size="10" fill="#d97706">⑤</text>
+    <text x="404" y="300" font-size="11.5" fill="#78350f">PENDING 分配</text>
+    <rect x="512" y="262" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="524" y="282" font-size="10" fill="#d97706">⑥</text>
+    <text x="524" y="300" font-size="11.5" fill="#78350f">再平衡(失衡+防抖)</text>
+    <rect x="632" y="262" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="644" y="282" font-size="10" fill="#d97706">⑦</text>
+    <text x="644" y="300" font-size="11.5" fill="#78350f">扩缩容(水位+冷却)</text>
+    <rect x="752" y="262" width="112" height="52" rx="6" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="764" y="282" font-size="10" fill="#d97706">⑧</text>
+    <text x="764" y="300" font-size="11.5" fill="#78350f">告警巡检+指标派生</text>
+  </g>
+  <text x="392" y="338" font-size="11" fill="#92400e">任何决策先落 etcd 再生效(主无内存态,内存仅作缓存)</text>
+  <text x="392" y="356" font-size="11" fill="#92400e">循环内异常仅跳过本轮、不中断;候选过滤 = 在线 + 未暂停 + 有槽位</text>
+  <text x="392" y="374" font-size="11" fill="#92400e">分配/迁移/再平衡全部 CAS 写归属(条件:epoch 与读时一致)</text>
+
+  <!-- ═══ 输出卡 ═══ -->
+  <rect x="900" y="164" width="300" height="296" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="920" y="192" font-size="14" font-weight="700" fill="#0f172a">决策输出 · 写 etcd(CAS+epoch)</text>
+  <g font-size="11.5" fill="#334155">
+    <rect x="916" y="204" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="928" y="225">parts 归属变更(owner/state)</text>
+    <rect x="916" y="242" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="928" y="263">status 推进(SUBMITTED→GONE)</text>
+    <rect x="916" y="280" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="928" y="301">告警事件(规则命中)</text>
+    <rect x="916" y="318" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="928" y="339">扩容建议 → 业务外壳(Kafka 扩分区)</text>
+    <rect x="916" y="356" width="268" height="34" rx="6" fill="#f1f5f9"/>
+    <text x="928" y="377">缩容编排(钩子切路由→追平→停线程)</text>
+  </g>
+  <text x="920" y="420" font-size="11" fill="#64748b">实例 watch 归属变化后自己对账,主不通知实例(拉模式)</text>
+
+  <!-- ═══ watch 加速条 ═══ -->
+  <rect x="372" y="476" width="496" height="60" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="392" y="500" font-size="12" font-weight="700" fill="#1d4ed8">事件驱动加速:watch(来自 etcd)spec / instances / ops → 1s 节流合并 → 秒级触发对应决策</text>
+  <text x="392" y="520" font-size="11" fill="#64748b">tick 10s 全量扫描 = 正确性底线:漏掉任何事件,状态 10s 内必收敛</text>
+
+  <!-- ═══ 箭头 ═══ -->
+  <path d="M340 314 H372" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M868 314 H900" stroke="#f59e0b" stroke-width="2" fill="none" marker-end="url(#arrowAmber)"/>
+  <path d="M1050 460 V556 H190 V460" stroke="#64748b" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="480" y="550" font-size="11" fill="#64748b">状态落盘 → 下轮 tick 全量读:事件丢失也必收敛(回环)</text>
+  <path d="M620 476 V460" stroke="#1d4ed8" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="632" y="474" font-size="10.5" fill="#1d4ed8">加速决策</text>
+
+  <!-- ═══ 双角色卡 ═══ -->
+  <rect x="40" y="592" width="1160" height="92" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="618" font-size="13.5" font-weight="700" fill="#0f172a">双角色与换主安全</text>
+  <text x="60" y="642" font-size="11.5" fill="#475569">双角色:当选实例同时仍是普通实例——照常注册 / 接分区 / 跑执行器(资源零浪费,当选只是「加挂一段决策代码」)</text>
+  <text x="60" y="662" font-size="11.5" fill="#475569">换主安全三件套:① 主无内存态(决策先落 etcd,主挂只丢「未决决策」)② 归属写 CAS+epoch(旧主陈旧写天然无效)③ 业务层只认 etcd(换主透明)</text>
+
+  <!-- ═══ 图例 ═══ -->
+  <rect x="40" y="700" width="1160" height="96" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="726" font-size="13.5" font-weight="700" fill="#0f172a">图例</text>
+  <g font-size="11.5" fill="#475569">
+    <line x1="60" y1="742" x2="100" y2="742" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="108" y="746">实线 = 单次读/写(灰 = 状态流)</text>
+    <line x1="300" y1="742" x2="340" y2="742" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowAmber)"/>
+    <text x="348" y="746">琥珀 = 主决策路径(CAS 写归属/加速)</text>
+    <line x1="600" y1="742" x2="640" y2="742" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+    <text x="648" y="746">虚线 = 周期/异步(回环收敛)</text>
+    <text x="60" y="776" font-size="11" fill="#94a3b8">主挂了只丢「未决决策」:已落 etcd 的决策全部保留,新主全量读恢复后从当前状态继续,数据面零影响</text>
+  </g>
+</svg>
