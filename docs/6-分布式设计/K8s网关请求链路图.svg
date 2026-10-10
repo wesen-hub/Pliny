@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 800" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#ef4444"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#10b981"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="800" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">K8s 网关请求链路与高可用(VIP 唯一入口)</text>
+  <text x="40" y="70" font-size="13" fill="#64748b">对外唯一 IP = frontend 的 MetalLB VIP(10.66.1.240);gateway 与域服务全部 ClusterIP 藏于集群内;节点故障 VIP 秒级漂移,客户端无感</text>
+
+  <!-- ═══ ① 用户 ═══ -->
+  <rect x="40" y="270" width="150" height="150" rx="10" fill="#ffffff" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="60" y="298" font-size="14" font-weight="700" fill="#b45309">平台用户</text>
+  <text x="60" y="318" font-size="11.5" fill="#334155">内网浏览器</text>
+  <text x="60" y="340" font-size="11.5" fill="#475569">只认一个入口:</text>
+  <text x="60" y="360" font-size="12" font-family="monospace" fill="#b45309">10.66.1.240:443</text>
+  <text x="60" y="384" font-size="11" fill="#64748b">不感知副本数</text>
+  <text x="60" y="400" font-size="11" fill="#64748b">不感知节点故障</text>
+
+  <!-- ═══ ② VIP(MetalLB) ═══ -->
+  <rect x="250" y="255" width="190" height="180" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="270" y="283" font-size="14" font-weight="700" fill="#2563eb">MetalLB VIP</text>
+  <g font-size="11.5" fill="#334155">
+    <text x="270" y="307" font-family="monospace" fill="#1d4ed8">10.66.1.240</text>
+    <text x="270" y="326">唯一对外 IP</text>
+    <text x="270" y="348">ARP 二层应答</text>
+    <text x="270" y="370">故障秒级漂移</text>
+  </g>
+  <text x="270" y="396" font-size="11" fill="#64748b">= frontend Service</text>
+  <text x="270" y="412" font-size="11" fill="#64748b">的 LoadBalancer IP</text>
+
+  <!-- ═══ ③ 节点层(三节点) ═══ -->
+  <rect x="500" y="200" width="160" height="70" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="516" y="226" font-size="12.5" font-weight="700" fill="#1d4ed8">控制面节点 1</text>
+  <text x="516" y="246" font-size="11" fill="#475569">kube-proxy + speaker</text>
+  <text x="516" y="260" font-size="11" fill="#1d4ed8">← 当前应答节点</text>
+
+  <rect x="500" y="290" width="160" height="70" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="516" y="316" font-size="12.5" font-weight="700" fill="#334155">控制面节点 2</text>
+  <text x="516" y="336" font-size="11" fill="#475569">kube-proxy + speaker</text>
+  <text x="516" y="350" font-size="11" fill="#64748b">漂移候选</text>
+
+  <rect x="500" y="380" width="160" height="70" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="516" y="406" font-size="12.5" font-weight="700" fill="#334155">控制面节点 3</text>
+  <text x="516" y="426" font-size="11" fill="#475569">kube-proxy + speaker</text>
+  <text x="516" y="440" font-size="11" fill="#64748b">漂移候选</text>
+
+  <!-- ═══ ④ frontend(nginx) ═══ -->
+  <rect x="720" y="250" width="220" height="140" rx="10" fill="#ffffff" stroke="#10b981" stroke-width="1.5"/>
+  <text x="740" y="278" font-size="14" font-weight="700" fill="#047857">frontend(nginx)×3</text>
+  <g font-size="11.5" fill="#334155">
+    <text x="740" y="302">TLS 终结 + 静态托管</text>
+    <text x="740" y="322">静态资源直返</text>
+    <text x="740" y="342">/api → gateway 反代</text>
+  </g>
+  <text x="740" y="370" font-size="11" fill="#64748b">Pod 反亲和铺 3 节点</text>
+  <text x="740" y="384" font-size="11" fill="#64748b">PDB minAvailable=2</text>
+
+  <!-- ═══ ⑤ gateway ═══ -->
+  <rect x="720" y="450" width="220" height="120" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="740" y="478" font-size="14" font-weight="700" fill="#2563eb">gateway ×3</text>
+  <text x="740" y="500" font-size="11.5" fill="#334155">ClusterIP 不对外暴露</text>
+  <text x="740" y="520" font-size="11" font-family="monospace" fill="#1d4ed8">gateway.dcp-control.svc</text>
+  <text x="740" y="542" font-size="11" fill="#64748b">鉴权 · 路由聚合 · 限流</text>
+
+  <!-- ═══ ⑥ 域服务 ═══ -->
+  <rect x="1000" y="450" width="200" height="120" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="1020" y="478" font-size="14" font-weight="700" fill="#334155">域服务(ClusterIP)</text>
+  <g font-size="11.5" fill="#475569">
+    <text x="1020" y="502">backend · tag · asset</text>
+    <text x="1020" y="522">perm · datasub</text>
+    <text x="1020" y="542">filesync · outlet-control</text>
+  </g>
+
+  <!-- ═══ 箭头 ═══ -->
+  <!-- ① 用户 → VIP -->
+  <line x1="190" y1="345" x2="244" y2="345" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="196" y="336" font-size="11" fill="#2563eb">① 唯一入口</text>
+
+  <!-- ② VIP → 节点1 -->
+  <line x1="440" y1="345" x2="494" y2="235" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="392" y="276" font-size="11" fill="#2563eb">② ARP → 健康节点</text>
+
+  <!-- ③ 节点1 → frontend -->
+  <line x1="660" y1="235" x2="714" y2="300" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="632" y="205" font-size="11" fill="#2563eb">③ kube-proxy 负载均衡 → 3 副本</text>
+
+  <!-- ④ frontend → gateway -->
+  <line x1="830" y1="390" x2="830" y2="444" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="842" y="424" font-size="11" fill="#2563eb">④ /api 反代</text>
+
+  <!-- ⑤ gateway → 域服务 -->
+  <line x1="940" y1="510" x2="994" y2="510" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="944" y="502" font-size="11" fill="#2563eb">⑤ 聚合路由</text>
+
+  <!-- ⑥ 静态直返 -->
+  <path d="M830 250 V160 H115 V264" stroke="#10b981" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrowGreen)"/>
+  <text x="120" y="150" font-size="11" fill="#047857">⑥ 静态资源 nginx 直返(不回源)</text>
+
+  <!-- ⑦ 故障漂移 -->
+  <path d="M660 255 V330" stroke="#ef4444" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrowRed)"/>
+  <text x="674" y="300" font-size="11" fill="#dc2626">⑦ 节点故障</text>
+  <text x="674" y="316" font-size="11" fill="#dc2626">VIP 秒级漂移</text>
+
+  <!-- ═══ 图例 ═══ -->
+  <rect x="40" y="660" width="1160" height="100" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="60" y="688" font-size="13" font-weight="700" fill="#0f172a">图例与要点</text>
+  <line x1="60" y1="716" x2="100" y2="716" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="110" y="720" font-size="11.5" fill="#475569">主请求链路</text>
+  <line x1="250" y1="716" x2="290" y2="716" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="300" y="720" font-size="11.5" fill="#475569">静态资源直返</text>
+  <line x1="470" y1="716" x2="510" y2="716" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="520" y="720" font-size="11.5" fill="#475569">故障漂移(秒级)</text>
+  <text x="60" y="748" font-size="11.5" fill="#64748b">对外 IP 只有 1 个(VIP);gateway 与域服务零对外暴露;多副本全部藏在 VIP 之后,故障切换由 MetalLB 在入口层内聚完成,客户端无感</text>
+</svg>
