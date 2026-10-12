@@ -1016,13 +1016,6 @@ public class CdcStService {
                     }
                     log.warn("任务 job 丢失, 自动 restore: task={} jobId={} status={}", taskId, jobId,
                             info == null ? "NOT-FOUND" : info.getJobStatus());
-                    // G1 主键修改告警未处理(OPEN)→ 不自动 restore: 任务因主键修改已暂停,
-                    // 人工处理 sync_alert 后重建任务/映射(检查点保留, 处理后手动启动续采)
-                    if (hasOpenPkAlerts(task)) {
-                        log.warn("任务存在未处理主键修改告警, 不自动 restore: task={} (请处理 sync_alert 后人工重启)",
-                                taskId);
-                        continue;
-                    }
                     startTask(taskId);
                     lastRestoreAttempt.remove(taskId);
                 } catch (Exception e) {
@@ -1038,15 +1031,6 @@ public class CdcStService {
     /** 单任务是否 autoStop(full-once/scheduled-batch/full-scheduled) */
     private boolean taskAutoStop(CdcStTask task) {
         return modeOfTask(task).autoStop();
-    }
-
-    /** 任务逻辑表存在未处理主键修改告警 */
-    private boolean hasOpenPkAlerts(CdcStTask task) {
-        Integer n = metaJdbc.queryForObject(
-                "SELECT COUNT(*) FROM sync_alert WHERE logical_table = ? "
-                        + "AND alert_type = 'primary_key_change' AND status = 'OPEN'",
-                Integer.class, task.getLogicalTable());
-        return n != null && n > 0;
     }
 
     /**

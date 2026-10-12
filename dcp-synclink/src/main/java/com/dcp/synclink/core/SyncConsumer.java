@@ -30,7 +30,8 @@ import java.util.Map;
  *  由 BatchWriteService 维护"已写 offset 游标" + 消费者线程 commitSync → 崩溃重放由幂等吸收。
  *
  *  新方案: 写者列裁判是唯一裁判(无单源行级 seq 裁判); 消息只认采集端 envelope 格式;
- *  主键修改(beforeKey≠businessKey)在采集端已拦截停任务, 消费端兑底落死信不写库。
+ *  主键修改(beforeKey≠businessKey)翻译为「UPDATE 业务键列」(物理身份不变, 带写者列闸门),
+ *  撞 uk_biz 唯一索引 → 死信人工, 不停任务(2026-10-12 拍板, 废弃旧「停任务+兑底落死信」)。
  *
  *  无 Spring 装配: 配置读取走 LogicalTableReader(自足), 默认分表参数由 SynclinkComponents 注入。
  * </pre>
@@ -123,18 +124,8 @@ public class SyncConsumer {
                                 record.offset(), Math::max);
                         continue;
                     }
-                    // 主键修改兑底拦截: 采集端已告警停任务, 这里落死信不写库(不再拆 DELETE+INSERT)
-                    if (rec.getBeforeKey() != null && !rec.getBeforeKey().equals(rec.getBusinessKey())) {
-                        try {
-                            dltService.save(record, "主键值被修改: " + rec.getBeforeKey()
-                                    + " → " + rec.getBusinessKey() + "(消费端兑底拦截, 采集端已暂停任务)");
-                        } catch (Exception dltEx) {
-                            log.error("死信落库失败: {}", dltEx.getMessage());
-                        }
-                        dltOffsets.merge(new TopicPartition(record.topic(), record.partition()),
-                                record.offset(), Math::max);
-                        continue;
-                    }
+                    // 主键修改(2026-10-12 拍板: UPDATE 键列方案): 不拦截, 随正常流程构建「UPDATE 业务键列」op
+                    // (beforeKey 解析为旧键值存入 TableOp, 写库时走 updateKeyInternal; 撞 uk_biz → 死信人工)
                     List<AtomicUpsertDao.TableOp> targetOps =
                             Boolean.TRUE.equals(rec.getSnapshot()) ? snapOps : ops;
                     List<BatchWriteService.OpRef> targetRefs =
@@ -241,12 +232,7 @@ public class SyncConsumer {
                     + "新方案写者列裁判无法定位, 已拦截");
             return;
         }
-        // 主键修改兑底拦截: 落死信不写库
-        if (rec.getBeforeKey() != null && !rec.getBeforeKey().equals(rec.getBusinessKey())) {
-            dltService.save(record, "主键值被修改: " + rec.getBeforeKey()
-                    + " → " + rec.getBusinessKey() + "(消费端兑底拦截, 采集端已暂停任务)");
-            return;
-        }
+        // 主键修改(2026-10-12 拍板: UPDATE 键列方案): 不拦截, 走键列 UPDATE(op.oldKeyValues 非空 → updateKeyInternal)
         LogicalTableConfig cfg = tableReader.load(rec.getLogicalTable());
         int tCount = cfg.getTableCount() > 0 ? cfg.getTableCount() : defaultTableCount;
         String prefix = cfg.getTablePrefix() != null ? cfg.getTablePrefix() : defaultTablePrefix;
@@ -307,8 +293,15 @@ public class SyncConsumer {
         for (Map.Entry<String, Object> e : fields.entrySet()) {
             colTypes.put(e.getKey(), AtomicUpsertDao.inferColumnType(e.getValue()));
         }
+        // 主键修改: 解析 beforeKey 为旧键值列表(与 keyColumns 一一对应; 多键 JSON 数组/旧 '|' 格式);
+        // 非主键修改为 null → 走普通 upsert
+        List<String> oldKeyValues = null;
+        if (rec.getBeforeKey() != null && !rec.getBeforeKey().isBlank()
+                && !rec.getBeforeKey().equals(rec.getBusinessKey())) {
+            oldKeyValues = parseKeyValues(rec.getBeforeKey());
+        }
         return new AtomicUpsertDao.TableOp(table, rowKind, rec.getKeyColumns(), fields,
-                rec.getSeq(), writer, colTypes);
+                rec.getSeq(), writer, colTypes, oldKeyValues);
     }
 
     /** N1(A1): 多键键值解析——businessKey 为 JSON 数组字符串(元素与 keyColumns 一一对应);

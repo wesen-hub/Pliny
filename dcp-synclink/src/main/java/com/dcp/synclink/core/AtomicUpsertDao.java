@@ -43,7 +43,7 @@ public class AtomicUpsertDao {
      */
     public record TableOp(String table, String rowKind, List<String> keyColumns,
                           Map<String, Object> fields, long seq, String writer,
-                          Map<String, String> colTypes) {
+                          Map<String, String> colTypes, List<String> oldKeyValues) {
     }
 
     private final JdbcTemplate targetJdbc;
@@ -212,6 +212,8 @@ public class AtomicUpsertDao {
             for (TableOp op : ops) {
                 if ("DELETE".equalsIgnoreCase(op.rowKind())) {
                     deleteInternal(op);
+                } else if (op.oldKeyValues() != null) {
+                    updateKeyInternal(op);   // 主键修改(2026-10-12 拍板): UPDATE 业务键列
                 } else {
                     upsertInternal(op);
                 }
@@ -254,7 +256,9 @@ public class AtomicUpsertDao {
             sample.putIfAbsent(c, "");
         }
         ensureTable(table, keyCols, sample, colTypes);
-        List<TableOp> upserts = ops.stream().filter(op -> !"DELETE".equalsIgnoreCase(op.rowKind())).toList();
+        List<TableOp> upserts = ops.stream()
+                .filter(op -> !"DELETE".equalsIgnoreCase(op.rowKind()) && op.oldKeyValues() == null).toList();
+        List<TableOp> keyChanges = ops.stream().filter(op -> op.oldKeyValues() != null).toList();
         List<TableOp> deletes = ops.stream().filter(op -> "DELETE".equalsIgnoreCase(op.rowKind())).toList();
         // 攒批桶可能混入多个写者(多源/跨任务同表): 按写者列分组, 各自成一条多值 SQL, 各自比各自的 seq
         Map<String, List<TableOp>> writerGroups = new LinkedHashMap<>();
@@ -270,6 +274,12 @@ public class AtomicUpsertDao {
                 String writer = g.getKey();
                 ensureWriterCol(table, writer);
                 multiUpsertInternal(gl, keyCols, writer);
+            }
+            // 主键修改(2026-10-12 拍板: UPDATE 键列方案): 逐条执行, 撞 uk_biz(1062)→ 异常上抛整批回滚
+            // → 上层 isolate 逐条重试 → 仍冲突落死信人工, 不停任务
+            for (TableOp kc : keyChanges) {
+                ensureWriterCol(table, kc.writer());
+                updateKeyInternal(kc);
             }
             for (TableOp d : deletes) {
                 ensureWriterCol(table, d.writer());
@@ -490,6 +500,39 @@ public class AtomicUpsertDao {
         sets.add("`" + writer + "` = GREATEST(`" + writer + "`, VALUES(`" + writer + "`))");
         sets.add("`seq` = GREATEST(`seq`, VALUES(`seq`))");
         sql.append(String.join(", ", sets));
+        targetJdbc.update(sql.toString(), args.toArray());
+    }
+
+    /**
+     * 主键修改(2026-10-12 拍板: UPDATE 键列方案): 行物理身份(_pk_id)不变, 仅改业务键列值;
+     * UPDATE t SET 键列=新值, 写者列=seq, seq=seq WHERE 键列=旧值 AND 写者列 < seq;
+     * 单条原子, 无拆 DELETE+INSERT 的竞态窗口; 写者列闸门防旧事件重放把键改回去;
+     * 撞 uk_biz 唯一索引(新键行已存在, 合并场景)→ 1062 → 异常上抛(整批回滚),
+     * 上层 isolate 逐条重试 → 仍冲突落死信人工(死信期间该行后续新键事件可致短暂分裂, 人工处置收敛)。
+     */
+    private void updateKeyInternal(TableOp op) {
+        List<String> oldVals = op.oldKeyValues();
+        if (oldVals.isEmpty()) {
+            throw new IllegalStateException("主键修改旧键解析失败(beforeKey 与 keyColumns 不匹配): 表=" + op.table());
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("UPDATE `").append(op.table()).append("` SET ");
+        for (String k : op.keyColumns()) {
+            sql.append("`").append(k).append("` = ?, ");
+            args.add(str(op.fields().get(k)));
+        }
+        sql.append("`").append(requireWriter(op)).append("` = ?, `seq` = ? WHERE ");
+        args.add(op.seq());
+        args.add(op.seq());
+        for (int i = 0; i < op.keyColumns().size(); i++) {
+            if (i > 0) {
+                sql.append(" AND ");
+            }
+            sql.append("`").append(op.keyColumns().get(i)).append("` = ?");
+            args.add(i < oldVals.size() ? oldVals.get(i) : "");
+        }
+        sql.append(" AND `").append(requireWriter(op)).append("` < ?");
+        args.add(op.seq());
         targetJdbc.update(sql.toString(), args.toArray());
     }
 

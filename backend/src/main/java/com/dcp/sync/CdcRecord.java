@@ -33,7 +33,7 @@ public class CdcRecord {
     private String sourceTable;
     /** 业务主键(已归一化, 如 "ERP|100231" 或 "100231") */
     private String businessKey;
-    /** 主键修改场景: 变更前的业务主键(before PK ≠ businessKey → 采集端已停任务告警, 消费端兑底落死信); 非主键修改为 null */
+    /** 主键修改场景: 变更前的业务主键(before PK ≠ businessKey → 采集端告警+正常投递, 消费端翻译为 UPDATE 键列, 撞索引死信); 非主键修改为 null */
     private String beforeKey;
     /** 目标唯一键列(幂等定位用) */
     private java.util.List<String> keyColumns;

@@ -33,13 +33,13 @@ import java.util.Map;
  *   <li>快照行(位点主段空形态, 实测定案)统一编码为快照级号 S=f(snapshot_start_position)(方案 A 后端下发, 必配);</li>
  * </ul>
  *
- * <p>主键修改检测(新方案): 补丁透传 before 主键值(行尾第三列 __src_before_key),
- * beforeKey ≠ businessKey → 写 sync_alert 告警 + 抛异常停止任务(checkpoint 保留,
- * watchdog 查 OPEN 告警不自动 restore, 人工处理后重建/续采)。
+ * <p>主键修改检测(2026-10-12 拍板: UPDATE 键列方案): 补丁透传 before 主键值(行尾第三列 __src_before_key),
+ * beforeKey ≠ businessKey → 写 sync_alert 告警 + 正常投递(beforeKey 随消息下行);
+ * 消费端翻译为「UPDATE 业务键列」, 撞 uk_biz 唯一索引 → 死信人工, 不停任务。
  *
  * <p>要点:
  * <ul>
- *   <li>CDC 无 before image(2.3.12), 主键修改无法自动拆解 → 按拍板策略暂停告警人工介入;</li>
+ *   <li>CDC 无 before image(2.3.12), 主键修改无法自动拆解 → 按拍板策略「UPDATE 键列 + 撞索引死信」, 不停任务;</li>
  *   <li>缺陷 7(2026-10-05 实测): UPDATE_BEFORE 旧值行与 UPDATE 新值行位点相同 → seq 相同,
  *       消费端同号裁判会拒新值行(变更丢失)且写旧值行破坏全程正确性 → UPDATE_BEFORE 行直接丢弃
  *       (before 主键检测由补丁透传 __src_before 列承担, 该行无信息量);</li>
@@ -95,7 +95,7 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
         }
     }
 
-    /** 主键修改告警: 写 sync_alert(失败仅告警日志, 不阻断异常抛出) */
+    /** 主键修改告警: 写 sync_alert(失败仅告警日志, 不阻断投递——消费端翻译为 UPDATE 键列, 撞索引死信人工) */
     private void alertPrimaryKeyChange(String beforeKey, String businessKey) {
         alertGeneric("primary_key_change", beforeKey + " → " + businessKey);
     }
@@ -182,12 +182,11 @@ public class CdcSeqTransform implements org.apache.seatunnel.api.transform.SeaTu
                 return null;
             }
 
-            // ④.5 主键修改检测(新方案): before 主键透传, 与当前业务键不同 = 主键值被修改
-            //      → 写 sync_alert 告警 + 抛异常停止任务(checkpoint 保留, watchdog 不自动 restore)
+            // ④.5 主键修改检测(2026-10-12 拍板: UPDATE 键列方案): before 主键透传, 与当前业务键不同 = 主键值被修改
+            //      → 写 sync_alert 告警 + 正常投递(beforeKey 随消息下行), 消费端翻译为「UPDATE 业务键列」,
+            //      撞 uk_biz 唯一索引 → 死信人工, 不停任务
             if (srcBeforeKey != null && !srcBeforeKey.isBlank() && !srcBeforeKey.equals(businessKey)) {
                 alertPrimaryKeyChange(srcBeforeKey, businessKey);
-                throw new IllegalStateException("PRIMARY_KEY_CHANGE 主键值被修改: " + srcBeforeKey
-                        + " → " + businessKey + "(任务已暂停, 请处理 sync_alert 告警后重建任务/映射)");
             }
 
             // ⑤ CdcRecord 封装
