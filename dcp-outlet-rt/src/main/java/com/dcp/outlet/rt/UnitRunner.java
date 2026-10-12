@@ -183,6 +183,17 @@ public class UnitRunner {
             Map<Integer, Long> positions = new LinkedHashMap<>();
             for (int p : cmd.partitions()) {
                 long start = cmd.startOffsets().getOrDefault(p, 0L);
+                // 重启续传(消费者重启位点续传设计, 2026-10-13):
+                // 起点 = max(Kafka 已提交位点, 任务单起点);查不到 committed 视为不存在(回退任务单起点)。
+                Long committed = source.committed(p);
+                if (committed != null && committed > start) {
+                    log.info("unit resume from committed partition={} offset={} (taskStart={})",
+                            p, committed, start);
+                    start = committed;
+                } else {
+                    log.info("unit start from task offset partition={} offset={} committed={}",
+                            p, start, committed);
+                }
                 source.seek(p, start);
                 positions.put(p, start);
                 u.position.put(p, start);

@@ -18,6 +18,13 @@ public interface RecordSource extends AutoCloseable {
     /** 提交位点:Kafka 语义是"下一条要读的位置"。 */
     void commitSync(int partition, long offset);
 
+    /**
+     * 查询该分区在 Kafka 中已提交的位点(重启续传用)。
+     * 无提交记录或查询失败返回 null(由上层回退任务单起点, at-least-once 重复无害);
+     * 非 Kafka 源默认不支持, 返回 null。
+     */
+    default Long committed(int partition) { return null; }
+
     /** 唤醒阻塞中的 poll(用于优雅停机)。 */
     void wakeup();
 

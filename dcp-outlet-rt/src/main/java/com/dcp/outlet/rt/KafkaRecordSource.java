@@ -22,6 +22,11 @@ import java.util.Properties;
  *
  * <p>刻意**不用 subscribe**(避免组内 rebalance 覆盖平台下发的起点,见 ADR-1);
  * 分区归属由控制面决定,这里只忠实执行。
+ *
+ * <p><b>重启续传</b>(消费者重启位点续传设计, 2026-10-13):
+ * 启动时由上层查询 {@link #committed(int)} 与任务单起点取 max 后 seek;
+ * auto.offset.reset=earliest 是第三级兜底 —— committed 与任务单起点都被 retention
+ * 清理时从分区最早位置重扫(出口幂等吸收), 绝不静默跳最新丢数据。
  */
 public class KafkaRecordSource implements RecordSource {
 
@@ -39,6 +44,7 @@ public class KafkaRecordSource implements RecordSource {
         p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "500");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");  // 第三级兜底:宁重扫不跳最新
         p.put(ConsumerConfig.CLIENT_ID_CONFIG, "dcp-outlet-unit-" + groupId);
         this.consumer = new KafkaConsumer<>(p);
         this.topic = topic;
@@ -72,6 +78,19 @@ public class KafkaRecordSource implements RecordSource {
         off.put(new TopicPartition(topic, partition),
                 new org.apache.kafka.clients.consumer.OffsetAndMetadata(offset));
         consumer.commitSync(off);
+    }
+
+    @Override
+    public Long committed(int partition) {
+        if (closed) return null;
+        try {
+            org.apache.kafka.clients.consumer.OffsetAndMetadata off =
+                    consumer.committed(new TopicPartition(topic, partition));
+            return off == null ? null : off.offset();
+        } catch (Exception e) {
+            // 查询失败视为无记录,由上层回退任务单起点(at-least-once, 重复无害),不阻塞启动
+            return null;
+        }
     }
 
     @Override
