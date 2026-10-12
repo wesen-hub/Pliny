@@ -1,0 +1,31 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: perm-admin
+  autoconfigure:
+    # memory 模式（默认）无数据源：排除 JDBC 自动配置；
+    # jdbc profile 由 JdbcDataSourceConfig 手动装配（application-jdbc.yml 提供连接参数）
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # 收敛快速失败：Kafka 不可用时投递快速降级，不阻塞发布链路（轮询兜底）
+        max.block.ms: 1000
+
+# 存储开关：memory（默认，零外部依赖）/ jdbc（MySQL 持久化，需激活 jdbc profile）
+# 事件开关：Kafka 主通道（默认启用，不可用时自动降级为版本轮询兜底）
+perm:
+  storage: memory
+  kafka:
+    enabled: true
+
+logging:
+  level:
+    com.perm.admin: INFO

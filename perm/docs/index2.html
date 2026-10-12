@@ -1,0 +1,2217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>标签级权限控制 · 统一数据权限模型</title>
+<style>
+  :root {
+    --primary: #2563eb;
+    --primary-light: #eff6ff;
+    --primary-dark: #1d4ed8;
+    --success: #16a34a;
+    --success-light: #f0fdf4;
+    --warning: #f59e0b;
+    --warning-light: #fffbeb;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --purple: #7c3aed;
+    --purple-light: #f5f3ff;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.1);
+    --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--gray-50);
+    color: var(--gray-800);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ===== 顶部导航 ===== */
+  .topbar {
+    background: #fff;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--primary), var(--purple));
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 16px;
+  }
+  .topbar-title { font-size: 16px; font-weight: 600; }
+  .topbar-breadcrumb { color: var(--gray-400); font-size: 13px; margin-left: 8px; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 500;
+  }
+  .badge-draft { background: var(--gray-100); color: var(--gray-600); }
+  .badge-active { background: var(--success-light); color: var(--success); }
+  .badge-tag { background: var(--purple-light); color: var(--purple); }
+  .badge-l0 { background: var(--gray-100); color: var(--gray-500); }
+  .badge-l1 { background: #ecfdf5; color: #059669; }
+  .badge-l2 { background: #fef3c7; color: #d97706; }
+  .badge-l3 { background: #fee2e2; color: #dc2626; }
+
+  /* ===== 主布局 ===== */
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr 420px;
+    min-height: calc(100vh - 56px);
+  }
+
+  /* ===== 左侧步骤导航 ===== */
+  .step-nav {
+    background: #fff;
+    border-right: 1px solid var(--gray-200);
+    padding: 24px 0;
+    position: sticky;
+    top: 56px;
+    height: calc(100vh - 56px);
+    overflow-y: auto;
+  }
+  .step-nav-title {
+    font-size: 12px; font-weight: 600; color: var(--gray-400);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 0 24px 12px;
+  }
+  .step-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .step-item:hover { background: var(--gray-50); }
+  .step-item.active { background: var(--primary-light); }
+  .step-item.active .step-index { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .step-item.completed .step-index { background: var(--success); color: #fff; border-color: var(--success); }
+  .step-index {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--gray-300);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+    color: var(--gray-500);
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .step-content { flex: 1; min-width: 0; }
+  .step-name { font-size: 14px; font-weight: 500; color: var(--gray-800); }
+  .step-item.active .step-name { color: var(--primary); }
+  .step-desc { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+  .step-connector {
+    position: absolute; left: 35px; top: 36px;
+    width: 2px; height: 12px;
+    background: var(--gray-200);
+  }
+  .step-item.completed .step-connector { background: var(--success); }
+
+  /* ===== 中间表单区 ===== */
+  .form-area {
+    padding: 32px 40px;
+    overflow-y: auto;
+    max-height: calc(100vh - 56px);
+  }
+  .form-header { margin-bottom: 24px; }
+  .form-title { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .form-subtitle { color: var(--gray-500); font-size: 14px; }
+
+  .form-section {
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .form-section-title {
+    font-size: 15px; font-weight: 600;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .form-section-title::before {
+    content: ''; width: 3px; height: 16px;
+    background: var(--primary); border-radius: 2px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .form-row.single { grid-template-columns: 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label {
+    font-size: 13px; font-weight: 500; color: var(--gray-700);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .form-label .required { color: var(--danger); }
+  .form-hint { font-size: 12px; color: var(--gray-400); }
+
+  .form-input, .form-select, .form-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    color: var(--gray-800);
+    background: #fff;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+  }
+  .form-textarea { resize: vertical; min-height: 80px; font-family: var(--font-mono); font-size: 13px; }
+
+  /* ===== 资源类型切换 ===== */
+  .resource-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--gray-200);
+    margin-bottom: 20px;
+  }
+  .resource-tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-500);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .resource-tab:hover { color: var(--gray-700); }
+  .resource-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+  .resource-tab .tab-icon { font-size: 14px; }
+
+  /* ===== 标签树选择器 ===== */
+  .tag-tree-selector {
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .tag-tree-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--gray-200);
+    background: var(--gray-50);
+  }
+  .tag-tree {
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .tag-tree-node {
+    padding: 6px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    transition: background 0.1s;
+    user-select: none;
+  }
+  .tag-tree-node:hover { background: var(--gray-50); }
+  .tag-tree-node.selected { background: var(--primary-light); color: var(--primary-dark); }
+  .tag-tree-node .tag-icon { font-size: 13px; width: 16px; text-align: center; }
+  .tag-tree-node .tag-name { flex: 1; }
+  .tag-tree-node .tag-path-hint {
+    font-size: 11px;
+    color: var(--gray-400);
+    font-family: var(--font-mono);
+  }
+  .tag-tree-node.selected .tag-path-hint { color: var(--primary); }
+  .tag-tree-node .tag-level-badge {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .tag-tree-node.selected .tag-level-badge {
+    background: var(--primary);
+    color: #fff;
+  }
+  .tag-tree-children { }
+  .tag-tree-children.collapsed { display: none; }
+  .tag-folder-toggle {
+    font-size: 10px;
+    color: var(--gray-400);
+    width: 12px;
+    transition: transform 0.15s;
+  }
+  .tag-folder-toggle.collapsed { transform: rotate(-90deg); }
+  .tag-tree-selected {
+    padding: 10px 12px;
+    border-top: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    min-height: 44px;
+  }
+  .tag-tree-selected-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  /* ===== 权限等级配置 ===== */
+  .permission-level-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .permission-level-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+    background: #fff;
+  }
+  .permission-level-item:hover { border-color: var(--primary); }
+  .permission-level-item.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+  .permission-level-item input[type="radio"] { margin-top: 3px; }
+  .permission-level-content { flex: 1; }
+  .permission-level-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .permission-level-item.selected .permission-level-title { color: var(--primary-dark); }
+  .permission-level-desc {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-top: 2px;
+  }
+  .permission-level-matrix {
+    display: flex;
+    gap: 14px;
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  .permission-level-matrix span {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .permission-level-matrix .ok { color: var(--success); }
+  .permission-level-matrix .no { color: var(--gray-400); }
+
+  /* ===== 展开策略 ===== */
+  .expand-mode-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .expand-mode-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+    background: #fff;
+  }
+  .expand-mode-item:hover { border-color: var(--primary); }
+  .expand-mode-item.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+  .expand-mode-item input[type="radio"] { margin-top: 3px; }
+  .expand-mode-content { flex: 1; }
+  .expand-mode-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+  }
+  .expand-mode-desc {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-top: 2px;
+  }
+
+  /* ===== 标签 chip ===== */
+  .tag-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: #fff;
+  }
+  .tag-chip:hover { border-color: var(--primary); color: var(--primary); }
+  .tag-chip.selected {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+  .tag-chip .chip-remove {
+    cursor: pointer;
+    opacity: 0.7;
+    font-size: 12px;
+  }
+  .tag-chip .chip-remove:hover { opacity: 1; }
+
+  /* ===== 表格 ===== */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+    font-weight: 600;
+    color: var(--gray-600);
+    font-size: 12px;
+  }
+  .data-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+
+  /* ===== 行条件编辑器 ===== */
+  .row-cond-item {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 2fr auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .row-cond-item select, .row-cond-item input {
+    padding: 6px 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: var(--font-mono);
+  }
+  .row-cond-remove {
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--gray-400);
+    border: 1px solid transparent;
+  }
+  .row-cond-remove:hover { background: var(--danger-light); color: var(--danger); }
+
+  .add-cond-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 6px 12px;
+    border: 1px dashed var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--gray-500);
+    cursor: pointer;
+    background: transparent;
+    transition: all 0.15s;
+  }
+  .add-cond-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* ===== 按钮 ===== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-secondary { background: #fff; color: var(--gray-700); border-color: var(--gray-300); }
+  .btn-secondary:hover { background: var(--gray-50); }
+  .btn-ghost { background: transparent; color: var(--gray-600); }
+  .btn-ghost:hover { background: var(--gray-100); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  .form-actions {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-top: 24px;
+    border-top: 1px solid var(--gray-200);
+    margin-top: 24px;
+  }
+  .form-actions-right { display: flex; gap: 12px; }
+
+  /* ===== 右侧预览区 ===== */
+  .preview-area {
+    background: #fff;
+    border-left: 1px solid var(--gray-200);
+    position: sticky;
+    top: 56px;
+    height: calc(100vh - 56px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .preview-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .preview-title { font-size: 14px; font-weight: 600; }
+  .preview-tabs {
+    display: flex; gap: 4px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--gray-200);
+    background: var(--gray-50);
+  }
+  .preview-tab {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--gray-600);
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .preview-tab:hover { background: var(--gray-200); }
+  .preview-tab.active { background: #fff; color: var(--primary); box-shadow: var(--shadow); }
+
+  .preview-content { flex: 1; overflow-y: auto; padding: 16px 20px; }
+  .preview-panel { display: none; }
+  .preview-panel.active { display: block; }
+
+  /* ===== 代码块 ===== */
+  .code-block {
+    background: var(--gray-900);
+    color: #e5e7eb;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code-key { color: #93c5fd; }
+  .code-string { color: #86efac; }
+  .code-number { color: #fca5a5; }
+  .code-boolean { color: #fcd34d; }
+  .code-null { color: #9ca3af; }
+  .code-comment { color: #6b7280; font-style: italic; }
+  .code-tag { color: #c4b5fd; }
+
+  /* ===== 编译产物 ===== */
+  .artifact-section { margin-bottom: 16px; }
+  .artifact-label {
+    font-size: 11px; font-weight: 600; color: var(--gray-500);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .artifact-value {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--gray-800);
+    word-break: break-all;
+  }
+  .artifact-value.highlight {
+    background: var(--primary-light);
+    border-color: #bfdbfe;
+    color: var(--primary-dark);
+  }
+  .artifact-value.tag-highlight {
+    background: var(--purple-light);
+    border-color: #ddd6fe;
+    color: var(--purple);
+  }
+
+  /* ===== 检查清单 ===== */
+  .checklist { list-style: none; }
+  .checklist-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 0;
+    font-size: 13px;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .checklist-item:last-child { border-bottom: none; }
+  .checklist-icon {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .checklist-icon.ok { background: var(--success-light); color: var(--success); }
+  .checklist-icon.warn { background: var(--warning-light); color: var(--warning); }
+  .checklist-icon.err { background: var(--danger-light); color: var(--danger); }
+  .checklist-text { flex: 1; }
+  .checklist-detail { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+
+  /* ===== 提示框 ===== */
+  .alert {
+    display: flex; gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .alert-info { background: var(--primary-light); color: var(--primary-dark); border: 1px solid #bfdbfe; }
+  .alert-warning { background: var(--warning-light); color: #92400e; border: 1px solid #fde68a; }
+  .alert-success { background: var(--success-light); color: #166534; border: 1px solid #bbf7d0; }
+  .alert-purple { background: var(--purple-light); color: #5b21b6; border: 1px solid #ddd6fe; }
+  .alert-icon { flex-shrink: 0; font-size: 16px; }
+
+  /* ===== 开关 ===== */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 36px; height: 20px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--gray-300);
+    border-radius: 20px;
+    transition: 0.2s;
+  }
+  .switch-slider::before {
+    content: '';
+    position: absolute;
+    height: 16px; width: 16px;
+    left: 2px; bottom: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .switch input:checked + .switch-slider { background: var(--primary); }
+  .switch input:checked + .switch-slider::before { transform: translateX(16px); }
+
+  /* ===== 空状态 ===== */
+  .empty-state {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--gray-400);
+    font-size: 13px;
+  }
+
+  /* ===== 标签展开预览 ===== */
+  .tag-expand-preview {
+    background: var(--gray-900);
+    color: #e5e7eb;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .tag-expand-preview .kw { color: #c4b5fd; }
+  .tag-expand-preview .fn { color: #93c5fd; }
+  .tag-expand-preview .str { color: #86efac; }
+  .tag-expand-preview .num { color: #fca5a5; }
+  .tag-expand-preview .cmt { color: #6b7280; }
+
+  /* ===== 滚动条 ===== */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
+  /* ===== 响应式 ===== */
+  @media (max-width: 1400px) {
+    .layout { grid-template-columns: 200px 1fr 360px; }
+  }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .step-nav, .preview-area { display: none; }
+  }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部导航 ===== -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="logo">权</div>
+    <span class="topbar-title">统一数据权限控制模型</span>
+    <span class="topbar-breadcrumb">/ 策略管理 / 新建策略 / 标签权限</span>
+  </div>
+  <div class="topbar-right">
+    <span class="badge badge-draft" id="topStatus">草稿</span>
+    <button class="btn btn-ghost btn-sm" onclick="alert('策略列表（演示）')">返回列表</button>
+  </div>
+</header>
+
+<!-- ===== 主布局 ===== -->
+<div class="layout">
+
+  <!-- 左侧步骤导航 -->
+  <aside class="step-nav">
+    <div class="step-nav-title">策略定义向导</div>
+    <div id="stepNav"></div>
+  </aside>
+
+  <!-- 中间表单区 -->
+  <main class="form-area" id="formArea"></main>
+
+  <!-- 右侧实时预览 -->
+  <aside class="preview-area">
+    <div class="preview-header">
+      <span class="preview-title">实时预览</span>
+      <span class="badge badge-draft" id="previewVersion">v1</span>
+    </div>
+    <div class="preview-tabs">
+      <div class="preview-tab active" data-tab="artifact">编译产物</div>
+      <div class="preview-tab" data-tab="tagexpand">标签展开</div>
+      <div class="preview-tab" data-tab="json">策略 JSON</div>
+      <div class="preview-tab" data-tab="checks">校验清单</div>
+    </div>
+    <div class="preview-content">
+      <!-- 编译产物 -->
+      <div class="preview-panel active" id="panel-artifact">
+        <div class="artifact-section">
+          <div class="artifact-label">决策结果</div>
+          <div class="artifact-value" id="artifactDecision">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">标签权限等级</div>
+          <div class="artifact-value tag-highlight" id="artifactTagLevel">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">行级谓词（TiDB 方言）</div>
+          <div class="artifact-value highlight" id="artifactRowFilter">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">绑定参数（bindOrder）</div>
+          <div class="artifact-value" id="artifactBindOrder">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">标签范围（tagScope）</div>
+          <div class="artifact-value tag-highlight" id="artifactTagScope">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">可见列</div>
+          <div class="artifact-value" id="artifactColumns">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">列级掩码</div>
+          <div class="artifact-value" id="artifactMasks">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">义务</div>
+          <div class="artifact-value" id="artifactObligations">—</div>
+        </div>
+      </div>
+
+      <!-- 标签展开预览 -->
+      <div class="preview-panel" id="panel-tagexpand">
+        <div class="artifact-section">
+          <div class="artifact-label">展开模式</div>
+          <div class="artifact-value tag-highlight" id="tagExpandMode">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">展开产物</div>
+          <div class="tag-expand-preview" id="tagExpandPreview">—</div>
+        </div>
+        <div class="artifact-section">
+          <div class="artifact-label">实体数量估算</div>
+          <div class="artifact-value" id="tagEntityCount">—</div>
+        </div>
+      </div>
+
+      <!-- 策略 JSON -->
+      <div class="preview-panel" id="panel-json">
+        <pre class="code-block" id="jsonPreview">// 填写表单后自动生成</pre>
+      </div>
+
+      <!-- 校验清单 -->
+      <div class="preview-panel" id="panel-checks">
+        <ul class="checklist" id="checklist"></ul>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ============================================================
+// 状态管理
+// ============================================================
+const state = {
+  currentStep: 0,
+  steps: [
+    { id: 'basic', name: '基本信息', desc: '策略名称、优先级、目标引擎' },
+    { id: 'subject', name: '主体配置', desc: '角色/用户 + 属性条件' },
+    { id: 'resource', name: '资源配置', desc: '表/列/标签 + 列白名单' },
+    { id: 'constraints', name: '动作与约束', desc: '动作 + 行级表达式 + 掩码' },
+    { id: 'obligations', name: '义务与确认', desc: '审计 + 限流 + 摘要' }
+  ],
+  form: {
+    // 基本信息
+    policyName: '风控分析师_黑名单_标签权限',
+    description: '风控分析师可圈选黑名单标签，但不可下钻实体明细',
+    priority: 100,
+    effect: 'grant',
+    effectiveFrom: '2026-09-17',
+    effectiveTo: '',
+    targetEngines: ['tidb'],
+    // 主体
+    subjectType: 'role',
+    subjectIds: ['risk_analyst'],
+    subjectAttrs: [
+      { key: 'securityLevel', op: '>=', value: '2' }
+    ],
+    // 资源类型（表/标签）
+    resourceCategory: 'tag',   // 'table' | 'tag'
+    // 表资源
+    tableResourceIds: ['sales_db.sales_order'],
+    visibleColumns: ['order_id', 'amount', 'region', 'status', 'customer_phone'],
+    excludeColumns: ['customer_id_card'],
+    // 标签资源
+    selectedTags: [
+      { path: '业务域/风控/黑名单', level: 2, inherit: true, expandMode: 'auto' }
+    ],
+    tagInherit: true,
+    tagExpandMode: 'auto',
+    // 动作与约束
+    actions: ['tag.read', 'tag.count', 'tag.claim'],
+    rowConds: [],
+    rowLogic: 'AND',
+    maskRules: [],
+    envTimeWindow: '09:00-18:00',
+    envIpRange: '10.0.0.0/8',
+    envChannel: 'api,web',
+    // 义务
+    auditLevel: 'detail',
+    auditSync: true,
+    rateLimit: 10000,
+    notifyEnabled: true
+  }
+};
+
+// ============================================================
+// 模拟数据
+// ============================================================
+const MOCK = {
+  roles: [
+    { id: 'risk_analyst', name: '风控分析师', desc: '风控标签与数据' },
+    { id: 'regional_manager', name: '区域经理', desc: '区域销售管理' },
+    { id: 'analyst', name: '分析师', desc: '数据分析' },
+    { id: 'admin', name: '管理员', desc: '系统管理' }
+  ],
+  users: [
+    { id: 'zhang', name: '张三（华东区域经理）' },
+    { id: 'li', name: '李四（华南区域经理）' },
+    { id: 'wang', name: '王五（风控分析师）' }
+  ],
+  tables: [
+    { id: 'sales_db.sales_order', name: '销售订单表', level: 'L2', domain: '销售域' },
+    { id: 'sales_db.sales_customer', name: '客户信息表', level: 'L3', domain: '销售域' },
+    { id: 'finance_db.finance_report', name: '财务报表', level: 'L3', domain: '财务域' }
+  ],
+  columns: [
+    { name: 'order_id', type: 'bigint', sensitivity: 0 },
+    { name: 'amount', type: 'decimal', sensitivity: 1 },
+    { name: 'region', type: 'varchar', sensitivity: 1 },
+    { name: 'status', type: 'varchar', sensitivity: 0 },
+    { name: 'customer_phone', type: 'varchar', sensitivity: 3 },
+    { name: 'customer_id_card', type: 'varchar', sensitivity: 4 },
+    { name: 'order_date', type: 'date', sensitivity: 0 }
+  ],
+  tagTree: [
+    {
+      path: '业务域', name: '业务域', type: 'folder', children: [
+        {
+          path: '业务域/风控', name: '风控', type: 'folder', children: [
+            { path: '业务域/风控/黑名单', name: '黑名单', type: 'tag', level: 3, entityCount: 1523 },
+            { path: '业务域/风控/灰名单', name: '灰名单', type: 'tag', level: 2, entityCount: 856 },
+            { path: '业务域/风控/白名单', name: '白名单', type: 'tag', level: 1, entityCount: 12000 }
+          ]
+        },
+        {
+          path: '业务域/营销', name: '营销', type: 'folder', children: [
+            { path: '业务域/营销/高价值客户', name: '高价值客户', type: 'tag', level: 2, entityCount: 3200 },
+            { path: '业务域/营销/活跃用户', name: '活跃用户', type: 'tag', level: 1, entityCount: 45000 }
+          ]
+        }
+      ]
+    },
+    {
+      path: '数据层', name: '数据层', type: 'folder', children: [
+        { path: '数据层/DWD', name: 'DWD', type: 'tag', level: 1, entityCount: 0 },
+        { path: '数据层/DWS', name: 'DWS', type: 'tag', level: 1, entityCount: 0 }
+      ]
+    },
+    {
+      path: '密级', name: '密级', type: 'folder', children: [
+        { path: '密级/L2', name: 'L2', type: 'tag', level: 1, entityCount: 0 },
+        { path: '密级/L3', name: 'L3', type: 'tag', level: 1, entityCount: 0 }
+      ]
+    }
+  ],
+  tagActions: [
+    { id: 'tag.read', name: '查看标签', desc: '查看标签是否存在', requireLevel: 1 },
+    { id: 'tag.count', name: '查看计数', desc: '查看标签下实体数量', requireLevel: 1 },
+    { id: 'tag.claim', name: '圈选标签', desc: '用标签圈选实体', requireLevel: 2 },
+    { id: 'tag.drill', name: '下钻明细', desc: '查看标签下实体明细', requireLevel: 3 }
+  ],
+  tableActions: [
+    { id: 'read.snapshot', name: '全量快照' },
+    { id: 'read.changes', name: '增量变更' },
+    { id: 'read.aggregate', name: '聚合查询' },
+    { id: 'read.sample', name: '样例数据' },
+    { id: 'export.csv', name: '导出 CSV' },
+    { id: 'export.json', name: '导出 JSON' },
+    { id: 'subscribe.create', name: '创建订阅' }
+  ]
+};
+
+// ============================================================
+// 工具函数
+// ============================================================
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderStepNav() {
+  const nav = document.getElementById('stepNav');
+  nav.innerHTML = state.steps.map((step, i) => {
+    const isActive = i === state.currentStep;
+    const isCompleted = i < state.currentStep;
+    const cls = isActive ? 'active' : (isCompleted ? 'completed' : '');
+    const connector = i < state.steps.length - 1 ? '<div class="step-connector"></div>' : '';
+    const icon = isCompleted ? '✓' : (i + 1);
+    return `
+      <div class="step-item ${cls}" onclick="goStep(${i})">
+        <div class="step-index">${icon}</div>
+        <div class="step-content">
+          <div class="step-name">${step.name}</div>
+          <div class="step-desc">${step.desc}</div>
+        </div>
+        ${connector}
+      </div>
+    `;
+  }).join('');
+}
+
+function goStep(i) {
+  state.currentStep = i;
+  renderStepNav();
+  renderForm();
+  updatePreview();
+}
+
+// ============================================================
+// 表单渲染
+// ============================================================
+function renderForm() {
+  const step = state.steps[state.currentStep];
+  const area = document.getElementById('formArea');
+  let html = `
+    <div class="form-header">
+      <h1 class="form-title">${step.name}</h1>
+      <p class="form-subtitle">${step.desc}</p>
+    </div>
+  `;
+
+  switch (step.id) {
+    case 'basic': html += renderBasicForm(); break;
+    case 'subject': html += renderSubjectForm(); break;
+    case 'resource': html += renderResourceForm(); break;
+    case 'constraints': html += renderConstraintsForm(); break;
+    case 'obligations': html += renderObligationsForm(); break;
+  }
+
+  html += renderFormActions();
+  area.innerHTML = html;
+
+  // 渲染后初始化标签树（如果在资源步骤）
+  if (step.id === 'resource' && state.form.resourceCategory === 'tag') {
+    renderTagTree();
+    renderTagPermissionLevels();
+    renderTagExpandModes();
+  }
+}
+
+// ---------- Step 1: 基本信息 ----------
+function renderBasicForm() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">基本信息</div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">策略名称 <span class="required">*</span></label>
+          <input class="form-input" id="policyName" value="${escapeHtml(state.form.policyName)}"
+                 oninput="updateField('policyName', this.value)">
+        </div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">策略描述</label>
+          <textarea class="form-textarea" id="description" rows="2"
+                    oninput="updateField('description', this.value)">${escapeHtml(state.form.description)}</textarea>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">优先级 <span class="required">*</span></label>
+          <input class="form-input" type="number" id="priority" value="${state.form.priority}"
+                 oninput="updateField('priority', parseInt(this.value) || 0)">
+          <span class="form-hint">数字越大优先级越高，默认 100</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">效果 <span class="required">*</span></label>
+          <select class="form-select" id="effect" onchange="updateField('effect', this.value)">
+            <option value="grant" ${state.form.effect === 'grant' ? 'selected' : ''}>Grant（允许）</option>
+            <option value="deny" ${state.form.effect === 'deny' ? 'selected' : ''}>Deny（拒绝）</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">生效时间</label>
+          <input class="form-input" type="date" id="effectiveFrom" value="${state.form.effectiveFrom}"
+                 oninput="updateField('effectiveFrom', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">失效时间</label>
+          <input class="form-input" type="date" id="effectiveTo" value="${state.form.effectiveTo}"
+                 oninput="updateField('effectiveTo', this.value)">
+          <span class="form-hint">留空表示永不过期</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">目标引擎</div>
+      <div class="form-hint" style="margin-bottom:12px;">选择策略需要编译的目标引擎，系统将在发布时按需生成方言模板</div>
+      <div class="tag-group">
+        ${['tidb', 'trino', 'doris', 'es'].map(eng => {
+          const selected = state.form.targetEngines.includes(eng);
+          return `<div class="tag-chip ${selected ? 'selected' : ''}"
+                       onclick="toggleEngine('${eng}')">${eng.toUpperCase()}</div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function toggleEngine(eng) {
+  const idx = state.form.targetEngines.indexOf(eng);
+  if (idx >= 0) state.form.targetEngines.splice(idx, 1);
+  else state.form.targetEngines.push(eng);
+  renderForm();
+  updatePreview();
+}
+
+// ---------- Step 2: 主体配置 ----------
+function renderSubjectForm() {
+  const isRole = state.form.subjectType === 'role';
+  const list = isRole ? MOCK.roles : MOCK.users;
+  return `
+    <div class="form-section">
+      <div class="form-section-title">主体类型</div>
+      <div class="tag-group" style="margin-bottom:16px;">
+        <div class="tag-chip ${isRole ? 'selected' : ''}"
+             onclick="updateField('subjectType','role');renderForm()">角色</div>
+        <div class="tag-chip ${!isRole ? 'selected' : ''}"
+             onclick="updateField('subjectType','user');renderForm()">用户</div>
+      </div>
+
+      <label class="form-label">选择${isRole ? '角色' : '用户'} <span class="required">*</span></label>
+      <div class="tag-tree-selector">
+        ${list.map(item => {
+          const selected = state.form.subjectIds.includes(item.id);
+          return `<label class="tag-tree-node ${selected ? 'selected' : ''}" style="padding-left:12px">
+            <input type="checkbox" ${selected ? 'checked' : ''}
+                   onchange="toggleSubjectId('${item.id}', this.checked)">
+            <span class="tag-name">${item.name}</span>
+            ${item.desc ? `<span class="tag-path-hint">${item.desc}</span>` : ''}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">主体属性条件</div>
+      <div class="form-hint" style="margin-bottom:12px;">可选。用于进一步收窄主体范围，如 region = \${user.region}</div>
+      <div id="subjectAttrs">
+        ${state.form.subjectAttrs.map((attr, i) => `
+          <div class="row-cond-item">
+            <input value="${escapeHtml(attr.key)}" placeholder="属性名"
+                   oninput="updateSubjectAttr(${i}, 'key', this.value)">
+            <select onchange="updateSubjectAttr(${i}, 'op', this.value)">
+              ${['=', '!=', '>', '>=', '<', '<='].map(op =>
+                `<option ${attr.op === op ? 'selected' : ''}>${op}</option>`).join('')}
+            </select>
+            <input value="${escapeHtml(attr.value)}" placeholder="值或变量"
+                   oninput="updateSubjectAttr(${i}, 'value', this.value)">
+            <div class="row-cond-remove" onclick="removeSubjectAttr(${i})">✕</div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="add-cond-btn" onclick="addSubjectAttr()">+ 添加属性条件</button>
+    </div>
+  `;
+}
+
+function toggleSubjectId(id, checked) {
+  const arr = state.form.subjectIds;
+  const idx = arr.indexOf(id);
+  if (checked && idx < 0) arr.push(id);
+  else if (!checked && idx >= 0) arr.splice(idx, 1);
+  renderForm();
+  updatePreview();
+}
+function updateSubjectAttr(i, key, value) {
+  state.form.subjectAttrs[i][key] = value;
+  updatePreview();
+}
+function addSubjectAttr() {
+  state.form.subjectAttrs.push({ key: '', op: '=', value: '' });
+  renderForm();
+}
+function removeSubjectAttr(i) {
+  state.form.subjectAttrs.splice(i, 1);
+  renderForm();
+  updatePreview();
+}
+
+// ---------- Step 3: 资源配置（表 + 标签） ----------
+function renderResourceForm() {
+  const cat = state.form.resourceCategory;
+  let html = `
+    <div class="form-section">
+      <div class="form-section-title">资源类型</div>
+      <div class="resource-tabs">
+        <div class="resource-tab ${cat === 'table' ? 'active' : ''}"
+             onclick="switchResourceCategory('table')">
+          <span class="tab-icon">📊</span> 表 / 列
+        </div>
+        <div class="resource-tab ${cat === 'tag' ? 'active' : ''}"
+             onclick="switchResourceCategory('tag')">
+          <span class="tab-icon">🏷️</span> 标签
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (cat === 'table') {
+    html += renderTableResource();
+  } else {
+    html += renderTagResource();
+  }
+
+  return html;
+}
+
+function switchResourceCategory(cat) {
+  state.form.resourceCategory = cat;
+  // 切换时同步动作列表
+  if (cat === 'tag') {
+    state.form.actions = ['tag.read', 'tag.count', 'tag.claim'];
+    state.form.rowConds = [];
+    state.form.maskRules = [];
+  } else {
+    state.form.actions = ['read.snapshot', 'read.changes', 'export.csv'];
+    state.form.rowConds = [
+      { field: 'status', op: '=', value: "'paid'" },
+      { field: 'region', op: '=', value: '${subject.region}' }
+    ];
+    state.form.maskRules = [{ column: 'customer_phone', rule: 'MASK_PHONE' }];
+  }
+  renderForm();
+  updatePreview();
+}
+
+// ---------- 表资源 ----------
+function renderTableResource() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">表选择</div>
+      <label class="form-label">选择表 <span class="required">*</span></label>
+      <div class="tag-tree-selector">
+        ${MOCK.tables.map(r => {
+          const selected = state.form.tableResourceIds.includes(r.id);
+          return `<label class="tag-tree-node ${selected ? 'selected' : ''}" style="padding-left:12px">
+            <input type="checkbox" ${selected ? 'checked' : ''}
+                   onchange="toggleTableResource('${r.id}', this.checked)">
+            <span class="tag-name" style="font-family:var(--font-mono);font-size:12px">${r.id}</span>
+            <span class="tag-path-hint">${r.name}</span>
+            <span class="badge badge-draft">${r.level}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">列白名单</div>
+      <div class="form-hint" style="margin-bottom:12px;">勾选允许访问的列，未勾选的列将被裁剪</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:40px"></th>
+            <th>列名</th>
+            <th>类型</th>
+            <th>敏感等级</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${MOCK.columns.map(col => {
+            const selected = state.form.visibleColumns.includes(col.name);
+            const levelText = col.sensitivity === 0 ? 'L0' :
+                              col.sensitivity === 1 ? 'L1' :
+                              col.sensitivity === 2 ? 'L2' :
+                              col.sensitivity === 3 ? 'L3' : 'L4';
+            const badgeCls = 'badge-l' + Math.min(col.sensitivity, 3);
+            return `<tr>
+              <td><input type="checkbox" ${selected ? 'checked' : ''}
+                         onchange="toggleColumn('${col.name}', this.checked)"></td>
+              <td style="font-family:var(--font-mono)">${col.name}</td>
+              <td style="color:var(--gray-500)">${col.type}</td>
+              <td><span class="badge ${badgeCls}">${levelText}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function toggleTableResource(id, checked) {
+  const arr = state.form.tableResourceIds;
+  const idx = arr.indexOf(id);
+  if (checked && idx < 0) arr.push(id);
+  else if (!checked && idx >= 0) arr.splice(idx, 1);
+  renderForm();
+  updatePreview();
+}
+function toggleColumn(name, checked) {
+  const arr = state.form.visibleColumns;
+  const idx = arr.indexOf(name);
+  if (checked && idx < 0) arr.push(name);
+  else if (!checked && idx >= 0) arr.splice(idx, 1);
+  updatePreview();
+}
+
+// ---------- 标签资源 ----------
+function renderTagResource() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">标签选择</div>
+      <div class="form-hint" style="margin-bottom:12px;">选择需要授权的标签，支持多选。父标签权限会自动向下继承到子标签</div>
+      <div class="tag-tree-selector">
+        <div class="tag-tree-search">
+          <input class="form-input" placeholder="搜索标签..." oninput="filterTagTree(this.value)">
+        </div>
+        <div class="tag-tree" id="tagTree"></div>
+        <div class="tag-tree-selected">
+          <div class="tag-tree-selected-header">已选标签</div>
+          <div class="tag-group" id="selectedTags"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">标签权限等级</div>
+      <div class="form-hint" style="margin-bottom:12px;">
+        为每个标签配置权限等级（L0-L3），控制可见性、计数、圈选、下钻四个维度
+      </div>
+      <div class="permission-level-group" id="tagPermissionLevels"></div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">继承配置</div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;">
+        <label class="switch">
+          <input type="checkbox" ${state.form.tagInherit ? 'checked' : ''}
+                 onchange="updateTagInherit(this.checked)">
+          <span class="switch-slider"></span>
+        </label>
+        <span style="font-size:13px;color:var(--gray-600)">
+          应用到子标签（子标签可收窄，不可扩大）
+        </span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">标签展开策略</div>
+      <div class="form-hint" style="margin-bottom:12px;">
+        控制标签在编译时如何展开为行级谓词
+      </div>
+      <div class="expand-mode-group" id="tagExpandModes"></div>
+    </div>
+  `;
+}
+
+// ============================================================
+// 标签树渲染
+// ============================================================
+function renderTagTree() {
+  const container = document.getElementById('tagTree');
+  if (!container) return;
+  container.innerHTML = renderTagNodes(MOCK.tagTree, 0);
+  renderSelectedTags();
+}
+
+function renderTagNodes(nodes, depth) {
+  return nodes.map(node => {
+    const isSelected = state.form.selectedTags.some(t => t.path === node.path);
+    const indent = depth * 20;
+    const icon = node.type === 'folder' ? '📁' : '🏷️';
+    let levelBadge = '';
+    if (node.type === 'tag' && node.level !== undefined) {
+      const lv = node.level;
+      const cls = 'badge-l' + Math.min(lv, 3);
+      levelBadge = `<span class="tag-level-badge ${cls}">L${lv}</span>`;
+    }
+    const children = node.children
+      ? `<div class="tag-tree-children" data-folder="${node.path}">${renderTagNodes(node.children, depth + 1)}</div>`
+      : '';
+
+    if (node.type === 'folder') {
+      return `
+        <div class="tag-tree-node" style="padding-left:${indent + 12}px" onclick="toggleTagFolder('${node.path}', this)">
+          <span class="tag-folder-toggle">▼</span>
+          <span class="tag-icon">📁</span>
+          <span class="tag-name">${node.name}</span>
+          <span class="tag-path-hint">${node.path}</span>
+        </div>
+        ${children}
+      `;
+    }
+
+    return `
+      <div class="tag-tree-node ${isSelected ? 'selected' : ''}"
+           style="padding-left:${indent + 12}px"
+           onclick="toggleTagSelection('${node.path}', ${node.level || 0}, ${node.entityCount || 0})">
+        <span class="tag-folder-toggle" style="visibility:hidden">▼</span>
+        <span class="tag-icon">${icon}</span>
+        <span class="tag-name">${node.name}</span>
+        <span class="tag-path-hint">${node.path}</span>
+        ${levelBadge}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSelectedTags() {
+  const container = document.getElementById('selectedTags');
+  if (!container) return;
+  if (state.form.selectedTags.length === 0) {
+    container.innerHTML = '<span style="font-size:12px;color:var(--gray-400)">未选择标签</span>';
+    return;
+  }
+  container.innerHTML = state.form.selectedTags.map(t => `
+    <div class="tag-chip selected">
+      ${t.path}
+      <span style="opacity:0.7;font-size:11px">L${t.level}</span>
+      <span class="chip-remove" onclick="removeTagSelection('${t.path}')">✕</span>
+    </div>
+  `).join('');
+}
+
+function toggleTagFolder(path, el) {
+  const children = document.querySelector(`[data-folder="${path}"]`);
+  if (!children) return;
+  const toggle = el.querySelector('.tag-folder-toggle');
+  if (children.classList.contains('collapsed')) {
+    children.classList.remove('collapsed');
+    toggle.classList.remove('collapsed');
+    toggle.textContent = '▼';
+  } else {
+    children.classList.add('collapsed');
+    toggle.classList.add('collapsed');
+    toggle.textContent = '▶';
+  }
+}
+
+function toggleTagSelection(path, level, entityCount) {
+  const idx = state.form.selectedTags.findIndex(t => t.path === path);
+  if (idx >= 0) {
+    state.form.selectedTags.splice(idx, 1);
+  } else {
+    state.form.selectedTags.push({
+      path,
+      level: 2,  // 默认 L2
+      inherit: true,
+      expandMode: 'auto',
+      entityCount
+    });
+  }
+  renderTagTree();
+  renderTagPermissionLevels();
+  updatePreview();
+}
+
+function removeTagSelection(path) {
+  const idx = state.form.selectedTags.findIndex(t => t.path === path);
+  if (idx >= 0) {
+    state.form.selectedTags.splice(idx, 1);
+    renderTagTree();
+    renderTagPermissionLevels();
+    updatePreview();
+  }
+}
+
+function filterTagTree(keyword) {
+  const nodes = document.querySelectorAll('.tag-tree-node');
+  nodes.forEach(node => {
+    const text = node.textContent.toLowerCase();
+    node.style.display = !keyword || text.includes(keyword.toLowerCase()) ? '' : 'none';
+  });
+}
+
+// ============================================================
+// 标签权限等级渲染
+// ============================================================
+function renderTagPermissionLevels() {
+  const container = document.getElementById('tagPermissionLevels');
+  if (!container) return;
+
+  if (state.form.selectedTags.length === 0) {
+    container.innerHTML = '<div class="empty-state">请先选择标签</div>';
+    return;
+  }
+
+  const levels = [
+    { value: 0, title: 'L0 - 不可见', desc: '标签隐藏，不可见、不可圈选、不可下钻',
+      matrix: { visible: false, count: false, claim: false, drill: false } },
+    { value: 1, title: 'L1 - 可见', desc: '标签可见，可查看计数，不可圈选、不可下钻',
+      matrix: { visible: true, count: true, claim: false, drill: false } },
+    { value: 2, title: 'L2 - 可圈选', desc: '标签可圈选，仅返回计数，不可下钻明细',
+      matrix: { visible: true, count: true, claim: true, drill: false } },
+    { value: 3, title: 'L3 - 可圈选 + 可下钻', desc: '标签可圈选，可查看实体明细',
+      matrix: { visible: true, count: true, claim: true, drill: true } }
+  ];
+
+  container.innerHTML = state.form.selectedTags.map((tag, tagIdx) => `
+    <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--gray-100)">
+      <div style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:8px;font-family:var(--font-mono)">
+        ${escapeHtml(tag.path)}
+      </div>
+      ${levels.map(lv => `
+        <label class="permission-level-item ${tag.level === lv.value ? 'selected' : ''}">
+          <input type="radio" name="tagLevel_${tagIdx}" value="${lv.value}"
+                 ${tag.level === lv.value ? 'checked' : ''}
+                 onchange="updateTagLevel(${tagIdx}, ${lv.value})">
+          <div class="permission-level-content">
+            <div class="permission-level-title">${lv.title}</div>
+            <div class="permission-level-desc">${lv.desc}</div>
+            <div class="permission-level-matrix">
+              <span class="${lv.matrix.visible ? 'ok' : 'no'}">${lv.matrix.visible ? '✓' : '✕'} 可见</span>
+              <span class="${lv.matrix.count ? 'ok' : 'no'}">${lv.matrix.count ? '✓' : '✕'} 计数</span>
+              <span class="${lv.matrix.claim ? 'ok' : 'no'}">${lv.matrix.claim ? '✓' : '✕'} 圈选</span>
+              <span class="${lv.matrix.drill ? 'ok' : 'no'}">${lv.matrix.drill ? '✓' : '✕'} 下钻</span>
+            </div>
+          </div>
+        </label>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function updateTagLevel(tagIdx, level) {
+  state.form.selectedTags[tagIdx].level = level;
+  renderTagPermissionLevels();
+  renderTagTree();
+  updatePreview();
+}
+
+function updateTagInherit(checked) {
+  state.form.tagInherit = checked;
+  updatePreview();
+}
+
+// ============================================================
+// 标签展开策略渲染
+// ============================================================
+function renderTagExpandModes() {
+  const container = document.getElementById('tagExpandModes');
+  if (!container) return;
+
+  const modes = [
+    { value: 'auto', title: '自动', desc: '实体 < 1000 用列表，≥ 1000 用子查询' },
+    { value: 'entity_list', title: '强制实体列表', desc: 'IN (?, ?, ...)，产物小、执行快' },
+    { value: 'subquery', title: '强制子查询', desc: 'IN (SELECT ...)，产物小、动态展开' }
+  ];
+
+  container.innerHTML = modes.map(m => `
+    <label class="expand-mode-item ${state.form.tagExpandMode === m.value ? 'selected' : ''}">
+      <input type="radio" name="tagExpandMode" value="${m.value}"
+             ${state.form.tagExpandMode === m.value ? 'checked' : ''}
+             onchange="updateTagExpandMode('${m.value}')">
+      <div class="expand-mode-content">
+        <div class="expand-mode-title">${m.title}</div>
+        <div class="expand-mode-desc">${m.desc}</div>
+      </div>
+    </label>
+  `).join('');
+}
+
+function updateTagExpandMode(mode) {
+  state.form.tagExpandMode = mode;
+  renderTagExpandModes();
+  updatePreview();
+}
+
+// ---------- Step 4: 动作与约束 ----------
+function renderConstraintsForm() {
+  const isTag = state.form.resourceCategory === 'tag';
+  const actions = isTag ? MOCK.tagActions : MOCK.tableActions;
+
+  return `
+    <div class="form-section">
+      <div class="form-section-title">动作选择</div>
+      <div class="form-hint" style="margin-bottom:12px;">
+        ${isTag ? '标签操作动作，每个动作有最低等级要求' : '数据访问动作'}
+      </div>
+      <div class="tag-group">
+        ${actions.map(a => {
+          const selected = state.form.actions.includes(a.id);
+          const reqBadge = a.requireLevel !== undefined
+            ? `<span class="badge badge-l${Math.min(a.requireLevel, 3)}" style="font-size:10px">≥L${a.requireLevel}</span>`
+            : '';
+          return `<div class="tag-chip ${selected ? 'selected' : ''}"
+                       onclick="toggleAction('${a.id}')">
+            ${a.name} ${reqBadge}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    ${isTag ? renderTagConstraints() : renderTableConstraints()}
+
+    <div class="form-section">
+      <div class="form-section-title">环境条件</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">时间窗口</label>
+          <input class="form-input" value="${escapeHtml(state.form.envTimeWindow)}"
+                 placeholder="09:00-18:00"
+                 oninput="updateField('envTimeWindow', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">IP 范围</label>
+          <input class="form-input" value="${escapeHtml(state.form.envIpRange)}"
+                 placeholder="10.0.0.0/8"
+                 oninput="updateField('envIpRange', this.value)">
+        </div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">渠道</label>
+          <input class="form-input" value="${escapeHtml(state.form.envChannel)}"
+                 placeholder="api,web"
+                 oninput="updateField('envChannel', this.value)">
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTagConstraints() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">标签范围约束</div>
+      <div class="alert alert-purple">
+        <span class="alert-icon">🏷️</span>
+        <div>
+          标签权限等级在策略匹配阶段判定，不进入行级谓词。
+          标签展开（${state.form.tagExpandMode === 'auto' ? '自动' : state.form.tagExpandMode === 'entity_list' ? '实体列表' : '子查询'}）
+          在请求时由 L3 值解析完成。
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>标签</th>
+            <th>权限等级</th>
+            <th>圈选</th>
+            <th>下钻</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.form.selectedTags.map(t => `
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:12px">${escapeHtml(t.path)}</td>
+              <td><span class="badge badge-l${Math.min(t.level, 3)}">L${t.level}</span></td>
+              <td>${t.level >= 2 ? '✅' : '❌'}</td>
+              <td>${t.level >= 3 ? '✅' : '❌'}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">未选择标签</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTableConstraints() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">行级表达式</div>
+      <div class="form-hint" style="margin-bottom:12px;">
+        定义行级过滤条件。支持字面量、变量引用（\${subject.xxx} / \${env.xxx}）、函数白名单。
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <label class="form-label" style="margin:0;">逻辑关系：</label>
+        <select class="form-select" style="width:100px"
+                onchange="updateField('rowLogic', this.value)">
+          <option value="AND" ${state.form.rowLogic === 'AND' ? 'selected' : ''}>AND</option>
+          <option value="OR" ${state.form.rowLogic === 'OR' ? 'selected' : ''}>OR</option>
+        </select>
+      </div>
+
+      <div id="rowConds">
+        ${state.form.rowConds.map((cond, i) => `
+          <div class="row-cond-item">
+            <select onchange="updateRowCond(${i}, 'field', this.value)">
+              ${MOCK.columns.map(c =>
+                `<option ${cond.field === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+            <select onchange="updateRowCond(${i}, 'op', this.value)">
+              ${['=', '!=', '>', '>=', '<', '<=', 'IN', 'LIKE', 'IS NULL'].map(op =>
+                `<option ${cond.op === op ? 'selected' : ''}>${op}</option>`).join('')}
+            </select>
+            <input value="${escapeHtml(cond.value)}" placeholder="值或变量"
+                   oninput="updateRowCond(${i}, 'value', this.value)">
+            <div class="row-cond-remove" onclick="removeRowCond(${i})">✕</div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="add-cond-btn" onclick="addRowCond()">+ 添加条件</button>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">列级掩码</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>列名</th>
+            <th>掩码规则</th>
+            <th style="width:60px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.form.maskRules.map((m, i) => `
+            <tr>
+              <td>
+                <select class="form-input" onchange="updateMask(${i}, 'column', this.value)">
+                  ${MOCK.columns.map(c =>
+                    `<option ${m.column === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+              </td>
+              <td>
+                <select class="form-input" onchange="updateMask(${i}, 'rule', this.value)">
+                  ${['MASK_PHONE', 'MASK_ID_CARD', 'MASK_EMAIL', 'HASH', 'NULL', 'REPLACE'].map(r =>
+                    `<option ${m.rule === r ? 'selected' : ''}>${r}</option>`).join('')}
+                </select>
+              </td>
+              <td><button class="btn btn-ghost btn-sm" onclick="removeMask(${i})">删除</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <button class="add-cond-btn" style="margin-top:8px" onclick="addMask()">+ 添加掩码规则</button>
+    </div>
+  `;
+}
+
+function toggleAction(id) {
+  const arr = state.form.actions;
+  const idx = arr.indexOf(id);
+  if (idx >= 0) arr.splice(idx, 1);
+  else arr.push(id);
+  renderForm();
+  updatePreview();
+}
+function updateRowCond(i, key, value) {
+  state.form.rowConds[i][key] = value;
+  updatePreview();
+}
+function addRowCond() {
+  state.form.rowConds.push({ field: 'order_id', op: '=', value: '' });
+  renderForm();
+}
+function removeRowCond(i) {
+  state.form.rowConds.splice(i, 1);
+  renderForm();
+  updatePreview();
+}
+function updateMask(i, key, value) {
+  state.form.maskRules[i][key] = value;
+  updatePreview();
+}
+function addMask() {
+  state.form.maskRules.push({ column: 'customer_phone', rule: 'MASK_PHONE' });
+  renderForm();
+}
+function removeMask(i) {
+  state.form.maskRules.splice(i, 1);
+  renderForm();
+  updatePreview();
+}
+
+// ---------- Step 5: 义务与确认 ----------
+function renderObligationsForm() {
+  return `
+    <div class="form-section">
+      <div class="form-section-title">审计</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">审计级别</label>
+          <select class="form-select" onchange="updateField('auditLevel', this.value)">
+            <option value="none" ${state.form.auditLevel === 'none' ? 'selected' : ''}>不审计</option>
+            <option value="basic" ${state.form.auditLevel === 'basic' ? 'selected' : ''}>基础</option>
+            <option value="detail" ${state.form.auditLevel === 'detail' ? 'selected' : ''}>详细</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">审计时机</label>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 0;">
+            <label class="switch">
+              <input type="checkbox" ${state.form.auditSync ? 'checked' : ''}
+                     onchange="updateField('auditSync', this.checked)">
+              <span class="switch-slider"></span>
+            </label>
+            <span style="font-size:13px;color:var(--gray-600)">
+              ${state.form.auditSync ? '同步（交付前）' : '异步（不阻塞）'}
+            </span>
+          </div>
+          <span class="form-hint">高风险动作建议同步审计</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">限流</div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">最大返回行数</label>
+          <input class="form-input" type="number" value="${state.form.rateLimit}"
+                 oninput="updateField('rateLimit', parseInt(this.value) || 0)">
+          <span class="form-hint">超过阈值将触发告警或拒绝</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">通知</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label class="switch">
+          <input type="checkbox" ${state.form.notifyEnabled ? 'checked' : ''}
+                 onchange="updateField('notifyEnabled', this.checked)">
+          <span class="switch-slider"></span>
+        </label>
+        <span style="font-size:13px;color:var(--gray-600)">敏感标签圈选时发送告警</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">策略摘要</div>
+      <div class="alert alert-purple">
+        <span class="alert-icon">🏷️</span>
+        <div>${generateSummary()}</div>
+      </div>
+    </div>
+  `;
+}
+
+function generateSummary() {
+  const f = state.form;
+  const engines = f.targetEngines.join(', ') || '未选择';
+  let resourceText = '';
+  if (f.resourceCategory === 'table') {
+    resourceText = `表：${f.tableResourceIds.join(', ') || '未选择'}`;
+  } else {
+    resourceText = `标签：${f.selectedTags.map(t => `${t.path}(L${t.level})`).join(', ') || '未选择'}`;
+  }
+  return `
+    <strong>${escapeHtml(f.policyName)}</strong><br>
+    主体：${f.subjectType === 'role' ? '角色' : '用户'} ${f.subjectIds.join(', ') || '未选择'}<br>
+    ${resourceText}<br>
+    动作：${f.actions.join(', ') || '未选择'}<br>
+    目标引擎：${engines}
+  `;
+}
+
+// ---------- 表单操作按钮 ----------
+function renderFormActions() {
+  const isFirst = state.currentStep === 0;
+  const isLast = state.currentStep === state.steps.length - 1;
+  return `
+    <div class="form-actions">
+      <div>
+        <button class="btn btn-ghost" onclick="saveDraft()">保存草稿</button>
+      </div>
+      <div class="form-actions-right">
+        ${!isFirst ? `<button class="btn btn-secondary" onclick="goStep(${state.currentStep - 1})">上一步</button>` : ''}
+        ${!isLast
+          ? `<button class="btn btn-primary" onclick="goStep(${state.currentStep + 1})">下一步</button>`
+          : `<button class="btn btn-secondary" onclick="simulateTest()">测试仿真</button>
+             <button class="btn btn-primary" onclick="submitPolicy()">提交审批</button>`}
+      </div>
+    </div>
+  `;
+}
+
+function updateField(key, value) {
+  state.form[key] = value;
+  if (key === 'auditSync') renderForm();
+  updatePreview();
+}
+
+function saveDraft() {
+  alert('草稿已保存（演示）');
+}
+function simulateTest() {
+  const f = state.form;
+  let msg = `测试仿真：\n\n决策：PERMIT\n`;
+  if (f.resourceCategory === 'tag') {
+    msg += `标签等级：L${f.selectedTags[0]?.level || 2}\n`;
+    msg += `标签范围：${f.selectedTags.map(t => t.path).join(', ')}\n`;
+    msg += `圈选：${(f.selectedTags[0]?.level || 2) >= 2 ? '允许' : '拒绝'}\n`;
+    msg += `下钻：${(f.selectedTags[0]?.level || 2) >= 3 ? '允许' : '拒绝'}\n`;
+  } else {
+    msg += `行级：${f.rowConds.map(c => `${c.field} ${c.op} ${c.value}`).join(` ${f.rowLogic} `)}\n`;
+    msg += `可见列：${f.visibleColumns.join(', ')}\n`;
+  }
+  alert(msg);
+}
+function submitPolicy() {
+  if (!state.form.policyName || state.form.subjectIds.length === 0) {
+    alert('请完善必填项：策略名称、主体');
+    return;
+  }
+  if (state.form.resourceCategory === 'tag' && state.form.selectedTags.length === 0) {
+    alert('请至少选择一个标签');
+    return;
+  }
+  if (state.form.resourceCategory === 'table' && state.form.tableResourceIds.length === 0) {
+    alert('请至少选择一个表');
+    return;
+  }
+  document.getElementById('topStatus').textContent = '待审批';
+  document.getElementById('topStatus').className = 'badge badge-active';
+  alert('已提交审批（演示）');
+}
+
+// ============================================================
+// 实时预览
+// ============================================================
+function updatePreview() {
+  const f = state.form;
+  const isTag = f.resourceCategory === 'tag';
+
+  // 决策结果
+  document.getElementById('artifactDecision').textContent =
+    f.effect === 'grant' ? 'PERMIT' : 'DENY';
+
+  if (isTag) {
+    // 标签权限等级
+    const tagLevelText = f.selectedTags.length > 0
+      ? f.selectedTags.map(t => `${t.path} → L${t.level}`).join('\n')
+      : '—';
+    document.getElementById('artifactTagLevel').textContent = tagLevelText;
+
+    // 标签范围
+    const tagScope = f.selectedTags.length > 0
+      ? f.selectedTags.map(t => JSON.stringify({
+          tagPath: t.path,
+          level: t.level,
+          canDrillDown: t.level >= 3,
+          expandMode: f.tagExpandMode
+        }, null, 2)).join('\n')
+      : '—';
+    document.getElementById('artifactTagScope').textContent = tagScope;
+
+    // 行级谓词（标签展开预览）
+    if (f.selectedTags.length > 0) {
+      const firstTag = f.selectedTags[0];
+      const entityCount = firstTag.entityCount || 0;
+      let rowFilter;
+      if (f.tagExpandMode === 'subquery' ||
+          (f.tagExpandMode === 'auto' && entityCount > 1000)) {
+        rowFilter = `(\`entity\` IN (SELECT entity FROM tag_fact_view WHERE tag_path LIKE '${firstTag.path}%'))`;
+      } else {
+        rowFilter = `(\`entity\` IN (?, ?, ?, ?))`;
+      }
+      document.getElementById('artifactRowFilter').textContent = rowFilter;
+      document.getElementById('artifactBindOrder').textContent =
+        f.tagExpandMode === 'subquery' || (f.tagExpandMode === 'auto' && entityCount > 1000)
+          ? '无（子查询动态展开）'
+          : '[0] E001\n[1] E002\n[2] E003\n[3] E004';
+    } else {
+      document.getElementById('artifactRowFilter').textContent = '—';
+      document.getElementById('artifactBindOrder').textContent = '—';
+    }
+
+    // 可见列 / 掩码
+    document.getElementById('artifactColumns').textContent = 'entity, tag_path, tag_value';
+    document.getElementById('artifactMasks').textContent = '无';
+
+  } else {
+    // 表资源
+    document.getElementById('artifactTagLevel').textContent = '—';
+    document.getElementById('artifactTagScope').textContent = '—';
+
+    const rowFilter = f.rowConds.length > 0
+      ? `(${f.rowConds.map(c => {
+          const val = c.value.startsWith('${') ? '?' : c.value;
+          return `\`${c.field}\` ${c.op} ${val}`;
+        }).join(` ${f.rowLogic} `)})`
+      : '—';
+    document.getElementById('artifactRowFilter').textContent = rowFilter;
+
+    const bindOrder = f.rowConds
+      .filter(c => c.value.startsWith('${'))
+      .map((c, i) => ({ index: i, ref: c.value }));
+    document.getElementById('artifactBindOrder').textContent =
+      bindOrder.length > 0
+        ? bindOrder.map(b => `[${b.index}] ${b.ref}`).join('\n')
+        : '无';
+
+    document.getElementById('artifactColumns').textContent =
+      f.visibleColumns.join(', ') || '—';
+    document.getElementById('artifactMasks').textContent =
+      f.maskRules.map(m => `${m.column} → ${m.rule}`).join('\n') || '无';
+  }
+
+  // 义务
+  const obligations = [];
+  if (f.auditLevel !== 'none') obligations.push(`AUDIT(${f.auditLevel}, ${f.auditSync ? 'sync' : 'async'})`);
+  if (f.rateLimit > 0) obligations.push(`RATE_LIMIT(${f.rateLimit})`);
+  if (f.notifyEnabled) obligations.push('NOTIFY');
+  document.getElementById('artifactObligations').textContent = obligations.join('\n') || '无';
+
+  // 标签展开预览
+  updateTagExpandPreview();
+
+  // 策略 JSON
+  const policyJson = buildPolicyJson();
+  document.getElementById('jsonPreview').innerHTML = syntaxHighlight(JSON.stringify(policyJson, null, 2));
+
+  // 校验清单
+  renderChecklist();
+}
+
+function updateTagExpandPreview() {
+  const f = state.form;
+  const modeEl = document.getElementById('tagExpandMode');
+  const previewEl = document.getElementById('tagExpandPreview');
+  const countEl = document.getElementById('tagEntityCount');
+
+  if (f.resourceCategory !== 'tag' || f.selectedTags.length === 0) {
+    modeEl.textContent = '—';
+    previewEl.textContent = '请选择标签并配置展开策略';
+    countEl.textContent = '—';
+    return;
+  }
+
+  const tag = f.selectedTags[0];
+  const entityCount = tag.entityCount || 0;
+  const modeText = f.tagExpandMode === 'auto'
+    ? '自动（实体数 ' + entityCount + '，' + (entityCount > 1000 ? '使用子查询' : '使用实体列表') + '）'
+    : (f.tagExpandMode === 'entity_list' ? '强制实体列表' : '强制子查询');
+  modeEl.textContent = modeText;
+  countEl.textContent = entityCount + ' 个实体';
+
+  const useSubquery = f.tagExpandMode === 'subquery' ||
+    (f.tagExpandMode === 'auto' && entityCount > 1000);
+
+  // 转义标签路径，防止 XSS
+  const tagPathEscaped = escapeHtml(tag.path);
+
+  if (useSubquery) {
+    previewEl.innerHTML =
+      '<span class="cmt">-- 子查询展开模式</span>\n' +
+      '<span class="kw">SELECT</span> * <span class="kw">FROM</span> tag_fact_view\n' +
+      '<span class="kw">WHERE</span> tag_path <span class="kw">LIKE</span> <span class="str">\'' + tagPathEscaped + '%\'</span>\n' +
+      '  <span class="kw">AND</span> entity <span class="kw">IN</span> (\n' +
+      '    <span class="kw">SELECT</span> entity <span class="kw">FROM</span> tag_fact_view\n' +
+      '    <span class="kw">WHERE</span> tag_path <span class="kw">LIKE</span> <span class="str">\'' + tagPathEscaped + '%\'</span>\n' +
+      '  )\n\n' +
+      '<span class="cmt">-- 产物：rowFilter = "(entity IN (SELECT ...))"</span>\n' +
+      '<span class="cmt">-- bindOrder = []</span>';
+  } else {
+    const sampleCount = Math.min(entityCount, 4);
+    const placeholders = [];
+    for (let i = 0; i < sampleCount; i++) placeholders.push('?');
+    const placeholdersStr = placeholders.join(', ');
+
+    let bindSample = '';
+    for (let i = 0; i < sampleCount; i++) {
+      bindSample += '  [' + i + '] \'E' + String(i + 1).padStart(3, '0') + '\'\n';
+    }
+
+    previewEl.innerHTML =
+      '<span class="cmt">-- 实体列表展开模式</span>\n' +
+      '<span class="kw">SELECT</span> * <span class="kw">FROM</span> tag_fact_view\n' +
+      '<span class="kw">WHERE</span> tag_path <span class="kw">LIKE</span> <span class="str">\'' + tagPathEscaped + '%\'</span>\n' +
+      '  <span class="kw">AND</span> entity <span class="kw">IN</span> (' + placeholdersStr + ')\n\n' +
+      '<span class="cmt">-- 产物：rowFilter = "(entity IN (' + placeholdersStr + '))"</span>\n' +
+      '<span class="cmt">-- bindOrder = [</span>\n' +
+      '<span class="num">' + bindSample + '</span>\n' +
+      '<span class="cmt">--   ...（共 ' + entityCount + ' 个）</span>\n' +
+      '<span class="cmt">-- ]</span>';
+  }
+}
+function buildPolicyJson() {
+  const f = state.form;
+  const isTag = f.resourceCategory === 'tag';
+
+  const resource = isTag
+    ? {
+        type: 'tag',
+        tags: f.selectedTags.map(t => ({
+          path: t.path,
+          level: t.level,
+          inherit: f.tagInherit,
+          expandMode: f.tagExpandMode
+        }))
+      }
+    : {
+        type: 'table',
+        ids: f.tableResourceIds,
+        columns: f.visibleColumns,
+        excludeColumns: f.excludeColumns
+      };
+
+  return {
+    policyId: 'policy_new',
+    policyName: f.policyName,
+    description: f.description,
+    version: 1,
+    status: 'draft',
+    priority: f.priority,
+    effect: f.effect,
+    effectiveFrom: f.effectiveFrom,
+    effectiveTo: f.effectiveTo || null,
+    subject: {
+      type: f.subjectType,
+      ids: f.subjectIds,
+      attributes: f.subjectAttrs.reduce((acc, a) => {
+        if (a.key) acc[a.key] = a.value;
+        return acc;
+      }, {})
+    },
+    resource,
+    actions: f.actions,
+    constraints: isTag
+      ? {
+          tagExpandMode: f.tagExpandMode
+        }
+      : {
+          rowExpr: f.rowConds.length > 0
+            ? f.rowConds.map(c => `${c.field} ${c.op} ${c.value}`).join(` ${f.rowLogic} `)
+            : null,
+          maskRules: f.maskRules.reduce((acc, m) => {
+            acc[m.column] = m.rule;
+            return acc;
+          }, {}),
+          env: {
+            timeWindow: f.envTimeWindow || null,
+            ipRange: f.envIpRange ? f.envIpRange.split(',').map(s => s.trim()) : null,
+            channel: f.envChannel ? f.envChannel.split(',').map(s => s.trim()) : null
+          }
+        },
+    obligations: [
+      f.auditLevel !== 'none' ? { type: 'audit', level: f.auditLevel, sync: f.auditSync } : null,
+      f.rateLimit > 0 ? { type: 'rateLimit', maxRows: f.rateLimit } : null,
+      f.notifyEnabled ? { type: 'notify' } : null
+    ].filter(Boolean),
+    targetEngines: f.targetEngines
+  };
+}
+
+function syntaxHighlight(json) {
+  return json
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+      let cls = 'code-number';
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) {
+          cls = 'code-key';
+          match = match.replace(/:$/, '');
+          return `<span class="${cls}">${match}</span>:`;
+        } else {
+          cls = 'code-string';
+        }
+      } else if (/true|false/.test(match)) {
+        cls = 'code-boolean';
+      } else if (/null/.test(match)) {
+        cls = 'code-null';
+      }
+      return `<span class="${cls}">${match}</span>`;
+    });
+}
+
+function renderChecklist() {
+  const f = state.form;
+  const isTag = f.resourceCategory === 'tag';
+  const checks = [];
+
+  checks.push({
+    status: f.policyName ? 'ok' : 'err',
+    text: '策略名称',
+    detail: f.policyName ? f.policyName : '必填'
+  });
+
+  checks.push({
+    status: f.subjectIds.length > 0 ? 'ok' : 'err',
+    text: '主体配置',
+    detail: f.subjectIds.length > 0 ? `已选 ${f.subjectIds.length} 个` : '至少选择一个主体'
+  });
+
+  if (isTag) {
+    checks.push({
+      status: f.selectedTags.length > 0 ? 'ok' : 'err',
+      text: '标签选择',
+      detail: f.selectedTags.length > 0 ? `已选 ${f.selectedTags.length} 个标签` : '至少选择一个标签'
+    });
+
+    // 标签等级检查
+    const levelIssues = f.selectedTags.filter(t => t.level < 2 && f.actions.includes('tag.claim'));
+    checks.push({
+      status: levelIssues.length === 0 ? 'ok' : 'warn',
+      text: '标签等级匹配',
+      detail: levelIssues.length === 0
+        ? '所有标签等级与动作匹配'
+        : `以下标签等级不足：${levelIssues.map(t => t.path).join(', ')}`
+    });
+
+    // 展开策略检查
+    const largeTags = f.selectedTags.filter(t => (t.entityCount || 0) > 1000);
+    checks.push({
+      status: largeTags.length === 0 ? 'ok' : 'warn',
+      text: '展开策略',
+      detail: largeTags.length === 0
+        ? '实体数均在阈值内'
+        : `${largeTags.length} 个标签实体数 > 1000，建议使用子查询模式`
+    });
+  } else {
+    checks.push({
+      status: f.tableResourceIds.length > 0 ? 'ok' : 'err',
+      text: '表选择',
+      detail: f.tableResourceIds.length > 0 ? `已选 ${f.tableResourceIds.length} 个` : '至少选择一个表'
+    });
+
+    const rowExprValid = f.rowConds.length > 0 && f.rowConds.every(c => c.field && c.op && c.value);
+    checks.push({
+      status: rowExprValid ? 'ok' : 'warn',
+      text: '行级表达式',
+      detail: rowExprValid ? '语法校验通过' : (f.rowConds.length === 0 ? '未配置（可选）' : '存在不完整条件')
+    });
+  }
+
+  checks.push({
+    status: f.actions.length > 0 ? 'ok' : 'err',
+    text: '动作选择',
+    detail: f.actions.length > 0 ? `已选 ${f.actions.length} 个` : '至少选择一个动作'
+  });
+
+  checks.push({
+    status: f.targetEngines.length > 0 ? 'ok' : 'err',
+    text: '目标引擎',
+    detail: f.targetEngines.length > 0 ? f.targetEngines.join(', ') : '至少选择一个引擎'
+  });
+
+  checks.push({
+    status: f.auditLevel !== 'none' ? 'ok' : 'warn',
+    text: '审计配置',
+    detail: f.auditLevel !== 'none'
+      ? `${f.auditLevel}（${f.auditSync ? '同步' : '异步'}）`
+      : '未配置审计'
+  });
+
+  const icons = { ok: '✓', warn: '!', err: '✕' };
+  document.getElementById('checklist').innerHTML = checks.map(c => `
+    <li class="checklist-item">
+      <div class="checklist-icon ${c.status}">${icons[c.status]}</div>
+      <div class="checklist-text">
+        <div>${escapeHtml(c.text)}</div>
+        <div class="checklist-detail">${escapeHtml(c.detail)}</div>
+      </div>
+    </li>
+  `).join('');
+}
+
+// ============================================================
+// Tab 切换
+// ============================================================
+document.querySelectorAll('.preview-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.preview-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ============================================================
+// 初始化
+// ============================================================
+renderStepNav();
+renderForm();
+updatePreview();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.perm</groupId>
+        <artifactId>perm-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>perm-pep-sdk</artifactId>
+    <name>PEP 业务接入 SDK</name>
+    <description>
+        业务应用接入判定链的轻量 SDK（无 Spring 依赖）：
+        授权请求（L1 本地缓存 → PDP）→ Ed25519 公钥验签 + 防重放 → 绑定/谓词注入/列裁剪/掩码
+        依赖：perm-common（引擎组件复用）、Caffeine（L1）、Jackson（序列化）、JDK HttpClient（网络）
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.perm</groupId>
+            <artifactId>perm-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

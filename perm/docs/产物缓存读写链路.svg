@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1350" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrG" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrR" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrB" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1350" fill="#f8fafc"/>
+  <text x="60" y="50" font-size="28" font-weight="bold" fill="#0f172a">产物缓存读写链路：写入 × 读取 × 快速通道 × 降级</text>
+  <text x="60" y="78" font-size="14" fill="#64748b">CachedArtifact（签名产物模板）：decision + pushdown（谓词模板 + placeholders 元数据，C1 无值）+ obligations + tagScope + meta</text>
+
+  <!-- ════════════ 上半：写入链路 ════════════ -->
+  <rect x="40" y="100" width="1520" height="330" rx="12" fill="#fef9ec" stroke="#f59e0b" stroke-dasharray="6 4"/>
+  <text x="60" y="128" font-size="16" font-weight="bold" fill="#92400e">写入链路（PDP 判定后 · 触发时机：L2 miss）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="145" width="230" height="120" rx="10" fill="#fff" stroke="#6b7280"/>
+    <rect x="60" y="145" width="230" height="28" rx="10" fill="#4b5563"/>
+    <rect x="60" y="161" width="230" height="12" fill="#4b5563"/>
+    <text x="175" y="165" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">㉑ Plan ★（判定线终点）</text>
+    <text x="76" y="196" font-size="12" fill="#374151">多策略交集合并结果</text>
+    <text x="76" y="214" font-size="12" fill="#374151">mergedRowExpr（AST）+ 义务集</text>
+    <text x="76" y="232" font-size="12" fill="#374151">+ placeholders 元数据</text>
+    <text x="76" y="250" font-size="12" fill="#6b7280">同步写 Plan 缓存③（五元键）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="330" y="145" width="230" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="330" y="145" width="230" height="28" rx="10" fill="#d97706"/>
+    <rect x="330" y="161" width="230" height="12" fill="#d97706"/>
+    <text x="445" y="165" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">㉒ 方言翻译（编译线）</text>
+    <text x="346" y="196" font-size="12" fill="#374151">查编译缓存②（policyId:version:dialect）</text>
+    <text x="346" y="214" font-size="12" fill="#374151">miss → DialectRenderer 现场编译</text>
+    <text x="346" y="232" font-size="12" fill="#374151">产出：谓词模板字符串</text>
+    <text x="346" y="250" font-size="12" fill="#6b7280">编译结果写回编译②（10~50ms）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="600" y="145" width="230" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="600" y="145" width="230" height="28" rx="10" fill="#d97706"/>
+    <rect x="600" y="161" width="230" height="12" fill="#d97706"/>
+    <text x="715" y="165" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">㉓ 组装 CachedArtifact</text>
+    <text x="616" y="196" font-size="12" fill="#374151">Plan + 方言片段 → 产物模板</text>
+    <text x="616" y="214" font-size="12" fill="#374151">placeholders 只有 ref/type</text>
+    <text x="616" y="232" font-size="12" fill="#374151">绝无值（C1：值在 PEP 绑定环节）</text>
+    <text x="616" y="250" font-size="12" fill="#6b7280">产物 = 不可变模板，可安全共享</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="870" y="145" width="230" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="870" y="145" width="230" height="28" rx="10" fill="#d97706"/>
+    <rect x="870" y="161" width="230" height="12" fill="#d97706"/>
+    <text x="985" y="165" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">㉔ HMAC 签名回传</text>
+    <text x="886" y="196" font-size="12" fill="#374151">signature = HMAC_SHA256(key, body)</text>
+    <text x="886" y="214" font-size="12" fill="#374151">常量时间比对 / 密钥不进代码库</text>
+    <text x="886" y="232" font-size="12" fill="#374151">回传 PEP + 写 L2 + 回填 L1</text>
+    <text x="886" y="250" font-size="12" fill="#6b7280">+ SADD 反向索引（命中策略集）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1140" y="145" width="400" height="120" rx="10" fill="#fff" stroke="#16a34a"/>
+    <rect x="1140" y="145" width="400" height="28" rx="10" fill="#16a34a"/>
+    <rect x="1140" y="161" width="400" height="12" fill="#16a34a"/>
+    <text x="1340" y="165" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">写 L2 Redis（三个写入特例）</text>
+    <text x="1156" y="196" font-size="12" fill="#374151">键：perm:artifact:v17:mysql:8f3a…  TTL 30s±5s</text>
+    <text x="1156" y="216" font-size="12" fill="#dc2626">DENY 产物同样签名写缓存（红支路⑰）——防穿透</text>
+    <text x="1156" y="236" font-size="12" fill="#7c3aed">标签模式 A：产物带 snapshotVersion + 短 TTL</text>
+    <text x="1156" y="256" font-size="12" fill="#374151">动态 env（时间窗）：折叠进 decision，TTL 须小于窗粒度</text>
+  </g>
+
+  <line x1="290" y1="205" x2="330" y2="205" stroke="#d97706" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="560" y1="205" x2="600" y2="205" stroke="#d97706" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="830" y1="205" x2="870" y2="205" stroke="#d97706" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="1100" y1="205" x2="1140" y2="205" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <text x="60" y="300" font-size="14" font-weight="bold" fill="#92400e">写 L2 的防护：</text>
+  <text x="170" y="300" font-size="13" fill="#374151">① 通道认证靠 Redis ACL（写服务账号只允许 SET perm:*），与 HMAC 无关；② 内容防伪靠签名——投毒产物写入时拦不住，</text>
+  <text x="170" y="322" font-size="13" fill="#374151">被 PEP 读出时必过不了验签 → 丢弃回源（防线设在读侧）。并发写幂等：确定性判定 + 同版本同键 → 后写覆盖无害，不加分布式锁。</text>
+
+  <!-- ════════════ 下半：读取链路 ════════════ -->
+  <rect x="40" y="440" width="1520" height="880" rx="12" fill="#e0ecff" stroke="#3b82f6" stroke-dasharray="6 4"/>
+  <text x="60" y="468" font-size="16" font-weight="bold" fill="#1e40af">读取链路（PEP 每请求必经 · 从上到下）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="485" width="220" height="96" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="60" y="485" width="220" height="28" rx="10" fill="#2563eb"/>
+    <rect x="60" y="501" width="220" height="12" fill="#2563eb"/>
+    <text x="170" y="505" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">⑦⑧⑨ 请求进 PEP</text>
+    <text x="76" y="530" font-size="12" fill="#374151">业务查询 → PEP 拦截 → SPI</text>
+    <text x="76" y="548" font-size="12" fill="#374151">提取 AuthorizationRequest</text>
+    <text x="76" y="566" font-size="12" fill="#374151">（角色/属性/资源/动作）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="320" y="485" width="220" height="96" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="320" y="485" width="220" height="28" rx="10" fill="#2563eb"/>
+    <rect x="320" y="501" width="220" height="12" fill="#2563eb"/>
+    <text x="430" y="505" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">⑩ 计算六元缓存键</text>
+    <text x="336" y="530" font-size="12" fill="#374151">planVersion+dialect+resourceId+</text>
+    <text x="336" y="548" font-size="12" fill="#374151">action+rolesFp+stableAttrFp</text>
+    <text x="336" y="566" font-size="12" fill="#374151">+fullKey（明文，二次校验用）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="580" y="485" width="220" height="96" rx="10" fill="#fff" stroke="#16a34a"/>
+    <rect x="580" y="485" width="220" height="28" rx="10" fill="#16a34a"/>
+    <rect x="580" y="501" width="220" height="12" fill="#16a34a"/>
+    <text x="690" y="505" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">⑪ L1 Caffeine GET</text>
+    <text x="596" y="530" font-size="12" fill="#374151">命中 → fullKey 逐字段比对</text>
+    <text x="596" y="548" font-size="12" fill="#374151">一致 → 绿色快速通道</text>
+    <text x="596" y="566" font-size="12" fill="#374151">不一致（碰撞）→ 视为 miss</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="840" y="485" width="220" height="96" rx="10" fill="#fff" stroke="#16a34a"/>
+    <rect x="840" y="485" width="220" height="28" rx="10" fill="#16a34a"/>
+    <rect x="840" y="501" width="220" height="12" fill="#16a34a"/>
+    <text x="950" y="505" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">⑫ L2 Redis GET</text>
+    <text x="856" y="530" font-size="12" fill="#374151">命中 → fullKey 校验 → 回填 L1</text>
+    <text x="856" y="548" font-size="12" fill="#374151">→ 跳 ㉕ 验签</text>
+    <text x="856" y="566" font-size="12" fill="#374151">miss → 继续下行</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1100" y="485" width="440" height="96" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="1100" y="485" width="440" height="28" rx="10" fill="#7c3aed"/>
+    <rect x="1100" y="501" width="440" height="12" fill="#7c3aed"/>
+    <text x="1320" y="505" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">⑬ 调 PDP（单飞 + 签名）→ ⑭ 降级分支</text>
+    <text x="1116" y="530" font-size="12" fill="#374151">AsyncLoadingCache 单飞：同一 key 并发只 1 路真去 PDP</text>
+    <text x="1116" y="548" font-size="12" fill="#374151">leader 失败 → 全员同一失败 → 降级（PERMIT→DENY）</text>
+    <text x="1116" y="566" font-size="12" fill="#dc2626">等待超时 500ms 自行降级，fail-closed</text>
+  </g>
+
+  <line x1="280" y1="533" x2="320" y2="533" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrB)"/>
+  <line x1="540" y1="533" x2="580" y2="533" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrB)"/>
+  <line x1="800" y1="533" x2="840" y2="533" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrB)"/>
+  <line x1="1060" y1="533" x2="1100" y2="533" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrB)"/>
+
+  <!-- 绿色快速通道 -->
+  <path d="M 690 581 C 690 640, 240 640, 240 690" stroke="#16a34a" stroke-width="3" stroke-dasharray="8 6" fill="none" marker-end="url(#arrG)"/>
+  <text x="560" y="632" font-size="13" font-weight="bold" fill="#15803d">绿色快速通道：L1/L2 命中 → 直接跳 ㉕ 验签（跳过整个 PDP，冷链路 38 步压到 16 步）</text>
+
+  <!-- PDP 内 5 步 -->
+  <rect x="1100" y="600" width="440" height="300" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="1120" y="626" font-size="13" font-weight="bold" fill="#5b21b6">PDP 内（冷链路）</text>
+
+  <g filter="url(#sh)">
+    <rect x="1120" y="640" width="400" height="46" rx="8" fill="#fff" stroke="#7c3aed"/>
+    <text x="1320" y="660" font-size="12.5" font-weight="bold" fill="#5b21b6" text-anchor="middle">⑮ Plan 缓存③（Redis 共享）——命中 → 跳 ㉒ 只补方言翻译</text>
+    <text x="1320" y="678" font-size="11.5" fill="#6b7280" text-anchor="middle">miss → 走判定链 ⑯ 匹配 → ⑱ DENY-overrides → ⑲ 短路 → ⑳ 约束合并 → ㉑ Plan★</text>
+  </g>
+  <line x1="1320" y1="686" x2="1320" y2="700" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr)"/>
+
+  <g filter="url(#sh)">
+    <rect x="1120" y="700" width="400" height="42" rx="8" fill="#fff" stroke="#7c3aed"/>
+    <text x="1320" y="718" font-size="12.5" font-weight="bold" fill="#5b21b6" text-anchor="middle">㉒ 方言翻译（编译② miss 则现场编译）</text>
+    <text x="1320" y="735" font-size="11.5" fill="#6b7280" text-anchor="middle">㉓ 组装产物模板 → ㉔ HMAC 签名 → 写 L2 → 回传</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1120" y="756" width="400" height="64" rx="8" fill="#fff" stroke="#dc2626"/>
+    <text x="1320" y="776" font-size="12.5" font-weight="bold" fill="#dc2626" text-anchor="middle">⑭ 降级分支（PDP 不可达）</text>
+    <text x="1320" y="796" font-size="11.5" fill="#374151" text-anchor="middle">缓存 PERMIT 立即降级 DENY（C4：收紧方向，</text>
+    <text x="1320" y="812" font-size="11.5" fill="#374151" text-anchor="middle">绝不 TTL 续用；校验兜底：请求打 perm-service 复核）</text>
+  </g>
+
+  <line x1="1320" y1="581" x2="1320" y2="640" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- PEP 侧 4 步 -->
+  <rect x="60" y="600" width="400" height="300" rx="10" fill="#eef2ff" stroke="#3b82f6"/>
+  <text x="80" y="626" font-size="13" font-weight="bold" fill="#1d4ed8">PEP 侧（收到回传后）</text>
+
+  <g filter="url(#sh)">
+    <rect x="80" y="640" width="360" height="46" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="260" y="660" font-size="12.5" font-weight="bold" fill="#1d4ed8" text-anchor="middle">㉕ 验签：重算 HMAC 常量时间比对 + schema 版本校验</text>
+    <text x="260" y="678" font-size="11.5" fill="#6b7280" text-anchor="middle">不通过 → 丢弃产物视同 miss → 回源；仍失败 → 降级 DENY</text>
+  </g>
+  <line x1="260" y1="686" x2="260" y2="700" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrB)"/>
+
+  <g filter="url(#sh)">
+    <rect x="80" y="700" width="360" height="42" rx="8" fill="#fff" stroke="#dc2626"/>
+    <text x="260" y="718" font-size="12.5" font-weight="bold" fill="#dc2626" text-anchor="middle">㉖ DENY 检查 → 红支路：拒绝对齐 + DENY 义务</text>
+    <text x="260" y="735" font-size="11.5" fill="#6b7280" text-anchor="middle">PERMIT → 继续 ㉗~㊱ 执行线</text>
+  </g>
+  <line x1="260" y1="742" x2="260" y2="756" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrB)"/>
+
+  <g filter="url(#sh)">
+    <rect x="80" y="756" width="360" height="42" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="260" y="774" font-size="12.5" font-weight="bold" fill="#1d4ed8" text-anchor="middle">㉗~㉛ 绑定与改写下推（bindOrder 只在此生成）</text>
+    <text x="260" y="791" font-size="11.5" fill="#6b7280" text-anchor="middle">占位符绑定值 → SQL 改写 → 结果集/投影/掩码</text>
+  </g>
+  <line x1="260" y1="798" x2="260" y2="812" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrB)"/>
+
+  <g filter="url(#sh)">
+    <rect x="80" y="812" width="360" height="42" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="260" y="830" font-size="12.5" font-weight="bold" fill="#1d4ed8" text-anchor="middle">㉜ 标签权限执行 → ㉞ 义务执行（AUDIT 同步）</text>
+    <text x="260" y="847" font-size="11.5" fill="#6b7280" text-anchor="middle">㊱ 审计落库 → 返回业务结果</text>
+  </g>
+
+  <!-- 回传箭头 -->
+  <path d="M 1320 600 C 1320 570, 1000 570, 1000 470" stroke="#7c3aed" stroke-width="0" fill="none"/>
+  <path d="M 1160 820 C 700 860, 300 900, 260 812" stroke="#7c3aed" stroke-width="0" fill="none"/>
+  <path d="M 1300 900 C 600 950, 240 950, 260 854" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="7 5" fill="none" marker-end="url(#arr)"/>
+  <text x="760" y="960" font-size="12.5" fill="#5b21b6">㉔ 签名产物回传 PEP（RPC 通道）</text>
+
+  <!-- 底部要点 -->
+  <rect x="60" y="1120" width="1480" height="170" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="80" y="1152" font-size="14" font-weight="bold" fill="#0f172a">两道安全阀 + 两个时序要点</text>
+  <text x="80" y="1182" font-size="12.5" fill="#374151">① fullKey 二次校验（L1/L2 各一次）：hash 只作索引，命中后拿明文 fullKey 与请求完整维度比对——碰撞代价是"多算一次"，绝不可能是"错用他人产物"</text>
+  <text x="80" y="1208" font-size="12.5" fill="#374151">② HMAC 验签（㉕）：三道同一逻辑——PDP 验请求签名、PEP 验 RPC 回传、PEP 验 L2 读出——防篡改/伪造/缓存投毒，失败方向永远 fail-closed</text>
+  <text x="80" y="1234" font-size="12.5" fill="#374151">③ 单飞 leader 产物不可变模板可直接共享 500 个等待者，无需深拷贝；leader 失败 → 全员降级，不出现部分请求拿旧 PERMIT</text>
+  <text x="80" y="1260" font-size="12.5" fill="#374151">④ effectiveExpiry = min(L1 TTL, 产物 meta.expiresAt, 版本失效时间)（C17）——三层取最小，任何一层收紧都立即生效</text>
+</svg>

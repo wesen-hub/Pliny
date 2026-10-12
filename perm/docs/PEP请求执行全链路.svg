@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1420" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrRed" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrOrange" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#d97706"/>
+    </marker>
+    <marker id="arrGray" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#94a3b8"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1420" fill="#f8fafc"/>
+  <text x="60" y="52" font-size="28" font-weight="bold" fill="#0f172a">PEP 请求执行全链路：从 SQL 拦截到结果返回（含全部分支与 fail-closed 边界）</text>
+  <text x="60" y="82" font-size="15" fill="#64748b">主链路绿色 · 缓存链路蓝色 · 拒绝与降级红色 · 豁免灰绿 —— 任何分支失败都收口到 DENY，绝不放行裸奔</text>
+
+  <!-- 起点 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="106" width="360" height="52" rx="10" fill="#334155"/>
+    <text x="800" y="138" font-size="15" font-weight="bold" fill="#fff" text-anchor="middle">业务执行 SQL（接入点拦截）</text>
+  </g>
+  <line x1="800" y1="158" x2="800" y2="186" stroke="#334155" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 豁免检查 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="188" width="360" height="52" rx="10" fill="#fff" stroke="#2563eb"/>
+    <text x="800" y="214" font-size="14" font-weight="bold" fill="#1d4ed8" text-anchor="middle">豁免检查 @PermSkip / skip-rules</text>
+    <text x="800" y="232" font-size="11.5" fill="#6b7280" text-anchor="middle">+ ThreadLocal 幂等标记防双重拦截</text>
+  </g>
+  <line x1="800" y1="240" x2="800" y2="268" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- 豁免分支（向右） -->
+  <line x1="980" y1="214" x2="1220" y2="214" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrGray)"/>
+  <text x="1100" y="204" font-size="11.5" fill="#475569" text-anchor="middle">命中豁免</text>
+  <g filter="url(#sh)">
+    <rect x="1220" y="188" width="330" height="52" rx="10" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="1385" y="214" font-size="13" font-weight="bold" fill="#475569" text-anchor="middle">跳过判定 → 记审计（跳过事件）→ 直通</text>
+  </g>
+
+  <!-- 元数据解析 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="270" width="360" height="52" rx="10" fill="#fff" stroke="#2563eb"/>
+    <text x="800" y="296" font-size="14" font-weight="bold" fill="#1d4ed8" text-anchor="middle">元数据五级解析</text>
+    <text x="800" y="314" font-size="11.5" fill="#6b7280" text-anchor="middle">注解 → 注册表 → 推断 → 全局默认 → fail-closed</text>
+  </g>
+  <line x1="800" y1="322" x2="800" y2="350" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- 上下文 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="352" width="360" height="52" rx="10" fill="#fff" stroke="#2563eb"/>
+    <text x="800" y="378" font-size="14" font-weight="bold" fill="#1d4ed8" text-anchor="middle">上下文提取 Provider + 三渠道合并 + 校验</text>
+  </g>
+  <line x1="800" y1="404" x2="800" y2="432" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- SQL 范围检查 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="434" width="360" height="52" rx="10" fill="#fff" stroke="#2563eb"/>
+    <text x="800" y="460" font-size="14" font-weight="bold" fill="#1d4ed8" text-anchor="middle">SQL 解析与范围检查（QueryParser）</text>
+    <text x="800" y="478" font-size="11.5" fill="#6b7280" text-anchor="middle">R-S1 放行 / R-S2 拒绝（解析缓存命中直接复用）</text>
+  </g>
+  <line x1="800" y1="486" x2="800" y2="514" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- 缓存键 + L1 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="516" width="360" height="52" rx="10" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="800" y="542" font-size="14" font-weight="bold" fill="#075985" text-anchor="middle">算缓存键（六/七元指纹）→ L1 Caffeine</text>
+  </g>
+  <line x1="800" y1="568" x2="800" y2="596" stroke="#0284c7" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- L1 命中判断（菱形） -->
+  <polygon points="800,598 930,660 800,722 670,660" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+  <text x="800" y="656" font-size="13" font-weight="bold" fill="#075985" text-anchor="middle">L1 命中？</text>
+  <text x="800" y="674" font-size="10.5" fill="#075985" text-anchor="middle">（含 fullKey 二次校验）</text>
+
+  <!-- L1 命中 → 验签 -->
+  <line x1="800" y1="722" x2="800" y2="1020" stroke="#0284c7" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <text x="812" y="880" font-size="12" font-weight="bold" fill="#075985" text-anchor="middle">是：命中 → 直下验签</text>
+
+  <!-- L1 未命中 → L2 -->
+  <line x1="670" y1="660" x2="420" y2="660" stroke="#0284c7" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="545" y="650" font-size="12" fill="#075985" text-anchor="middle">否：未命中</text>
+  <g filter="url(#sh)">
+    <rect x="140" y="630" width="280" height="60" rx="10" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="280" y="656" font-size="13.5" font-weight="bold" fill="#075985" text-anchor="middle">单飞 SingleFlight → L2 Redis</text>
+    <text x="280" y="676" font-size="11.5" fill="#075985" text-anchor="middle">同 key 并发只发一次（防击穿）</text>
+  </g>
+  <line x1="280" y1="690" x2="280" y2="730" stroke="#0284c7" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- L2 命中判断 -->
+  <polygon points="280,732 380,780 280,828 180,780" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+  <text x="280" y="776" font-size="12.5" font-weight="bold" fill="#075985" text-anchor="middle">L2 命中？</text>
+  <text x="280" y="794" font-size="10.5" fill="#075985" text-anchor="middle">（同样二次校验）</text>
+
+  <!-- L2 未命中 → PDP -->
+  <line x1="180" y1="780" x2="80" y2="780" stroke="#0284c7" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="120" y="770" font-size="11.5" fill="#075985" text-anchor="middle">否</text>
+  <g filter="url(#sh)">
+    <rect x="40" y="748" width="300" height="64" rx="10" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="190" y="774" font-size="13" font-weight="bold" fill="#075985" text-anchor="middle">PDP RPC 远程判定</text>
+    <text x="190" y="794" font-size="11" fill="#075985" text-anchor="middle">熔断态 → 直接 DENY</text>
+  </g>
+  <line x1="190" y1="812" x2="190" y2="856" stroke="#0284c7" stroke-width="2" marker-end="url(#arrBlue)"/>
+
+  <!-- PDP 响应判断 -->
+  <polygon points="190,858 300,900 190,942 80,900" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+  <text x="190" y="896" font-size="12" font-weight="bold" fill="#075985" text-anchor="middle">PDP 可达？</text>
+
+  <!-- PDP 不可达 → 降级 -->
+  <line x1="80" y1="900" x2="40" y2="900" stroke="#dc2626" stroke-width="2" marker-end="url(#arrRed)"/>
+  <text x="60" y="890" font-size="11" fill="#b91c1c" text-anchor="middle">否</text>
+  <g filter="url(#sh)">
+    <rect x="40" y="918" width="150" height="88" rx="10" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="115" y="940" font-size="12.5" font-weight="bold" fill="#991b1b" text-anchor="middle">降级决策</text>
+    <text x="115" y="960" font-size="11" fill="#374151" text-anchor="middle">缓存 PERMIT</text>
+    <text x="115" y="976" font-size="11" fill="#b91c1c" text-anchor="middle">立即降 DENY</text>
+    <text x="115" y="992" font-size="11" fill="#374151" text-anchor="middle">DENY 保持 / 未命中 DENY</text>
+  </g>
+  <line x1="115" y1="1006" x2="115" y2="1120" stroke="#dc2626" stroke-width="2" marker-end="url(#arrRed)"/>
+
+  <!-- PDP 可达 → 判定并回填 -->
+  <line x1="190" y1="942" x2="190" y2="1020" stroke="#0284c7" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <text x="202" y="980" font-size="12" fill="#075985" text-anchor="middle">是</text>
+
+  <!-- 回填 L2/L1（虚线回到主链路） -->
+  <line x1="190" y1="990" x2="800" y2="990" stroke="#0284c7" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrBlue)"/>
+  <text x="495" y="980" font-size="11.5" fill="#075985" text-anchor="middle">产物回填 L2 → L1（后续请求命中）</text>
+
+  <!-- 主链路：验签 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="1022" width="360" height="52" rx="10" fill="#fff" stroke="#059669"/>
+    <text x="800" y="1048" font-size="14" font-weight="bold" fill="#047857" text-anchor="middle">HMAC 验签 + schema 校验</text>
+  </g>
+  <line x1="800" y1="1074" x2="800" y2="1102" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+
+  <!-- DENY 检查 -->
+  <polygon points="800,1104 900,1152 800,1200 700,1152" fill="#f0fdf4" stroke="#059669" stroke-width="2"/>
+  <text x="800" y="1148" font-size="13" font-weight="bold" fill="#047857" text-anchor="middle">decision ?</text>
+
+  <!-- DENY 红支路 -->
+  <line x1="700" y1="1152" x2="520" y2="1152" stroke="#dc2626" stroke-width="2" marker-end="url(#arrRed)"/>
+  <text x="610" y="1142" font-size="12" font-weight="bold" fill="#b91c1c" text-anchor="middle">DENY</text>
+  <g filter="url(#sh)">
+    <rect x="160" y="1126" width="350" height="52" rx="10" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="335" y="1152" font-size="13.5" font-weight="bold" fill="#991b1b" text-anchor="middle">红支路：拒绝对齐 + DENY 义务 → 审计 → 返回</text>
+  </g>
+
+  <!-- PERMIT 主链路 -->
+  <line x1="800" y1="1200" x2="800" y2="1228" stroke="#059669" stroke-width="2.5" marker-end="url(#arrGreen)"/>
+  <text x="812" y="1218" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">PERMIT</text>
+
+  <!-- 绑定改写执行 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="1230" width="360" height="56" rx="10" fill="#f0fdf4" stroke="#059669"/>
+    <text x="800" y="1252" font-size="13.5" font-weight="bold" fill="#047857" text-anchor="middle">绑定 → 注入 → 投影 → 引擎执行</text>
+    <text x="800" y="1272" font-size="11.5" fill="#047857" text-anchor="middle">Binder（值唯一出现点）→ Injector → Pruner → Executor</text>
+  </g>
+  <line x1="800" y1="1286" x2="800" y2="1314" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+
+  <!-- 后置 -->
+  <g filter="url(#sh)">
+    <rect x="620" y="1316" width="360" height="56" rx="10" fill="#f0fdf4" stroke="#059669"/>
+    <text x="800" y="1338" font-size="13.5" font-weight="bold" fill="#047857" text-anchor="middle">后置：residual 过滤 + 掩码兜底 + 标签</text>
+    <text x="800" y="1358" font-size="11.5" fill="#b91c1c" text-anchor="middle">residual+LIMIT → 拒绝 · &gt;10000 行 → 拒绝</text>
+  </g>
+  <line x1="800" y1="1372" x2="800" y2="1400" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+
+  <!-- 义务审计返回 -->
+  <g filter="url(#sh)">
+    <rect x="560" y="1402" width="480" height="56" rx="10" fill="#059669"/>
+    <text x="800" y="1428" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">义务（AUDIT sync / RATE_LIMIT）→ 审计通道 → 返回业务</text>
+  </g>
+
+  <!-- 左侧 fail-closed 边界条 -->
+  <rect x="40" y="106" width="180" height="896" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-dasharray="6 4"/>
+  <text x="60" y="132" font-size="14" font-weight="bold" fill="#991b1b">fail-closed 边界</text>
+  <text x="60" y="156" font-size="11.5" fill="#374151">任何环节失败 → 拒绝</text>
+  <text x="60" y="178" font-size="11" fill="#6b7280">· 上下文缺失/提取异常 → DENY</text>
+  <text x="60" y="196" font-size="11" fill="#6b7280">· 元数据解析不出 → 拒绝</text>
+  <text x="60" y="214" font-size="11" fill="#6b7280">· SQL 超范围（JOIN/聚合）→ 拒绝</text>
+  <text x="60" y="232" font-size="11" fill="#6b7280">· 验签失败 → 视同 miss 回源</text>
+  <text x="60" y="250" font-size="11" fill="#6b7280">· 绑定失败（变量解析不到）→ DENY</text>
+  <text x="60" y="268" font-size="11" fill="#6b7280">· 产物 schema 非法 → DENY</text>
+  <text x="60" y="286" font-size="11" fill="#6b7280">· 方言无法解析 → DENY</text>
+  <text x="60" y="304" font-size="11" fill="#6b7280">· 熔断态 → 一律 DENY</text>
+  <text x="60" y="322" font-size="11" fill="#6b7280">· PDP 不可达 → PERMIT 降 DENY</text>
+  <text x="60" y="340" font-size="11" fill="#6b7280">· 审计队列满（严格档）→ 拒绝交付</text>
+  <text x="60" y="358" font-size="11" fill="#6b7280">· residual+LIMIT → 拒绝</text>
+  <text x="60" y="376" font-size="11" fill="#6b7280">· 后置 &gt;10000 行 → 拒绝</text>
+  <text x="60" y="394" font-size="11" fill="#6b7280">· 掩码列被 WHERE 引用 → 拒绝</text>
+  <text x="60" y="420" font-size="12.5" font-weight="bold" fill="#991b1b">总原则（R-F1/R-F3）</text>
+  <text x="60" y="440" font-size="11" fill="#374151">全链路 fail-closed</text>
+  <text x="60" y="456" font-size="11" fill="#374151">降级只收窄：</text>
+  <text x="60" y="472" font-size="11" fill="#374151">一切降级从宽松走向严格</text>
+  <text x="60" y="488" font-size="11" fill="#374151">禁止反向放行</text>
+
+  <!-- 右侧：常驻后台支撑 -->
+  <rect x="1310" y="270" width="250" height="330" rx="12" fill="#fdf2f8" stroke="#db2777" stroke-dasharray="6 4"/>
+  <text x="1330" y="296" font-size="13.5" font-weight="bold" fill="#9d174d">常驻后台（全程支撑）</text>
+  <text x="1330" y="320" font-size="11.5" fill="#374151">· Kafka 版本事件消费</text>
+  <text x="1330" y="336" font-size="11" fill="#6b7280">收到即本地失效（&lt;1s）</text>
+  <text x="1330" y="358" font-size="11.5" fill="#374151">· 5s 版本比对线程</text>
+  <text x="1330" y="374" font-size="11" fill="#6b7280">GET version:latest 兜底</text>
+  <text x="1330" y="396" font-size="11.5" fill="#374151">· L1 TTL 自然回收</text>
+  <text x="1330" y="418" font-size="11.5" fill="#374151">· 审计批量上报线程</text>
+  <text x="1330" y="434" font-size="11" fill="#6b7280">队列 10000 → Kafka ≤100/批</text>
+  <text x="1330" y="456" font-size="11.5" fill="#374151">· 指标统计 recordStats</text>
+  <text x="1330" y="478" font-size="11.5" fill="#374151">· 注册表/schema 热更新</text>
+  <text x="1330" y="500" font-size="11.5" fill="#374151">· SPI 运行时路由</text>
+  <text x="1330" y="524" font-size="11" fill="#6b7280">dialect+accessType→Executor</text>
+  <text x="1330" y="552" font-size="11.5" fill="#9d174d">与请求链的关系：</text>
+  <text x="1330" y="570" font-size="11" fill="#374151">不随请求运行，但请求链</text>
+  <text x="1330" y="586" font-size="11" fill="#374151">每一步都依赖它们的产出</text>
+  <text x="1330" y="602" font-size="11" fill="#374151">（缓存有效/版本最新/路由可用）</text>
+</svg>

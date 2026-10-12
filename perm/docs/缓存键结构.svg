@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1150" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1150" fill="#f8fafc"/>
+  <text x="60" y="50" font-size="28" font-weight="bold" fill="#0f172a">缓存键结构：三段式解剖 × 指纹构造 × 八类键前缀</text>
+  <text x="60" y="78" font-size="14" fill="#64748b">键 = 命名空间（谁家的）+ 键类型（存什么）+ 内容维度（哪份数据）——冒号分隔层级，支撑前缀扫描、类型隔离、运维可读</text>
+
+  <!-- ═══ 键解剖 ═══ -->
+  <rect x="40" y="100" width="1520" height="290" rx="12" fill="#e0ecff" stroke="#3b82f6" stroke-dasharray="6 4"/>
+  <text x="60" y="130" font-size="16" font-weight="bold" fill="#1e40af">① 产物键三段式解剖（perm:artifact:v17:mysql:8f3a2c9e1b5d47a6）</text>
+
+  <!-- 键字符串分段 -->
+  <rect x="60" y="152" width="1460" height="58" rx="8" fill="#0f172a"/>
+  <text x="88" y="186" font-size="20" font-family="Menlo, monospace" fill="#93c5fd" font-weight="bold">perm:artifact:v17:mysql:8f3a2c9e1b5d47a6</text>
+
+  <!-- 分段标注 -->
+  <g>
+    <rect x="88" y="220" width="210" height="52" rx="8" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="193" y="240" font-size="13" font-weight="bold" fill="#0369a1" text-anchor="middle">perm</text>
+    <text x="193" y="260" font-size="11.5" fill="#374151" text-anchor="middle">系统命名空间：权限系统的键</text>
+  </g>
+  <g>
+    <rect x="308" y="220" width="260" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+    <text x="438" y="240" font-size="13" font-weight="bold" fill="#166534" text-anchor="middle">artifact</text>
+    <text x="438" y="260" font-size="11.5" fill="#374151" text-anchor="middle">键类型：判定产物（CachedArtifact）</text>
+  </g>
+  <g>
+    <rect x="578" y="220" width="210" height="52" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <text x="683" y="240" font-size="13" font-weight="bold" fill="#92400e" text-anchor="middle">v17（明文）</text>
+    <text x="683" y="260" font-size="11.5" fill="#374151" text-anchor="middle">planVersion：键空间分区+指针匹配</text>
+  </g>
+  <g>
+    <rect x="798" y="220" width="210" height="52" rx="8" fill="#f3e8ff" stroke="#7c3aed"/>
+    <text x="903" y="240" font-size="13" font-weight="bold" fill="#5b21b6" text-anchor="middle">mysql（明文）</text>
+    <text x="903" y="260" font-size="11.5" fill="#374151" text-anchor="middle">dialect：收窄失效的抓手</text>
+  </g>
+  <g>
+    <rect x="1018" y="220" width="460" height="52" rx="8" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="1248" y="240" font-size="13" font-weight="bold" fill="#991b1b" text-anchor="middle">8f3a2c9e1b5d47a6</text>
+    <text x="1248" y="260" font-size="11.5" fill="#374151" text-anchor="middle">md5(resourceId|action|rolesFp|attrFp)——指纹作索引</text>
+  </g>
+
+  <text x="80" y="306" font-size="12.5" fill="#1e40af">为什么 v17 和 mysql 明文可扫描：SCAN perm:artifact:v17:es:* 直接支撑收窄失效；指纹部分 md5 化：rolesFp/attrFp 含角色和属性语义，不进明文防止反推内部模型</text>
+  <text x="80" y="330" font-size="12.5" fill="#1e40af">hash 只作索引 → 命中后必须拿 fullKey 逐字段比对（碰撞视为未命中回源，代价是"多算一次"绝不是"错用他人产物"）</text>
+
+  <!-- ═══ 指纹构造 ═══ -->
+  <rect x="40" y="410" width="760" height="330" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-dasharray="6 4"/>
+  <text x="60" y="440" font-size="16" font-weight="bold" fill="#92400e">② 指纹构造（角色 + 稳定属性）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="460" width="350" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="460" width="350" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="60" y="476" width="350" height="12" fill="#f59e0b"/>
+    <text x="235" y="479" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">rolesFingerprint（角色集指纹）</text>
+    <text x="76" y="510" font-size="12" fill="#374151">roles = [regional_manager, employee]</text>
+    <text x="76" y="532" font-size="12" fill="#374151">→ 排序后拼接（顺序无关性）</text>
+    <text x="76" y="554" font-size="12" fill="#374151">→ md5("employee,regional_manager")</text>
+    <text x="76" y="572" font-size="11.5" fill="#92400e">加入/退出角色 → 指纹变化 → 键变化 → 自动重新判定</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="430" y="460" width="350" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="430" y="460" width="350" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="430" y="476" width="350" height="12" fill="#f59e0b"/>
+    <text x="605" y="479" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">stableAttrFingerprint（稳定属性指纹）</text>
+    <text x="446" y="510" font-size="12" fill="#374151">{region:华东, level:P7, dept:华东大区}</text>
+    <text x="446" y="532" font-size="12" fill="#374151">→ 按属性名排序 k=v（顺序无关）</text>
+    <text x="446" y="554" font-size="12" fill="#374151">→ md5("dept=华东大区,level=P7,region=华东")</text>
+    <text x="446" y="572" font-size="11.5" fill="#92400e">稳定属性三标准：低基数 / 慢变 / 非 PII</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="600" width="720" height="120" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="600" width="720" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="60" y="616" width="720" height="12" fill="#f59e0b"/>
+    <text x="420" y="619" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">为什么用指纹而不是把角色/属性直接拼进键</text>
+    <text x="76" y="652" font-size="12.5" fill="#374151">① 键长可控：角色集可含数十个角色，直接拼接会让键膨胀到数百字节，Redis 内存翻倍</text>
+    <text x="76" y="678" font-size="12.5" fill="#374151">② 防信息泄漏：Redis 是共享存储，明文角色/属性会暴露内部角色模型和属性体系（fingerprint 语义）</text>
+    <text x="76" y="704" font-size="12.5" fill="#374151">③ 碰撞无害：md5 碰撞概率可忽略；且 fullKey 二次校验兜底——碰撞只造成一次多余回源，不影响正确性</text>
+  </g>
+
+  <!-- ═══ 八类键 ═══ -->
+  <rect x="820" y="410" width="740" height="330" rx="12" fill="#dcfce7" stroke="#16a34a" stroke-dasharray="6 4"/>
+  <text x="840" y="440" font-size="16" font-weight="bold" fill="#166534">③ Redis 键前缀全集（8 类）</text>
+
+  <g filter="url(#sh)">
+    <rect x="840" y="458" width="700" height="264" rx="10" fill="#fff" stroke="#16a34a"/>
+    <text x="856" y="484" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:artifact:v17:mysql:8f3a…</text>
+    <text x="1160" y="484" font-size="12" fill="#374151">产物缓存 L2（TTL 30s±5s）</text>
+    <line x1="856" y1="496" x2="1524" y2="496" stroke="#e5e7eb"/>
+    <text x="856" y="514" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:plan:v17:…（五元键）</text>
+    <text x="1160" y="514" font-size="12" fill="#374151">Plan 缓存③（PDP 集群共享）</text>
+    <line x1="856" y1="526" x2="1524" y2="526" stroke="#e5e7eb"/>
+    <text x="856" y="544" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:ast:pol_a:v3 / perm:tpl:pol_a:v3:mysql</text>
+    <text x="1160" y="544" font-size="12" fill="#374151">编译缓存①②（策略级版本）</text>
+    <line x1="856" y1="556" x2="1524" y2="556" stroke="#e5e7eb"/>
+    <text x="856" y="574" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:idx:policy:pol_a → SET(键名)</text>
+    <text x="1160" y="574" font-size="12" fill="#374151">反向索引（单策略下线定点 DEL）</text>
+    <line x1="856" y1="586" x2="1524" y2="586" stroke="#e5e7eb"/>
+    <text x="856" y="604" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:version:latest = "v18"</text>
+    <text x="1160" y="604" font-size="12" fill="#374151">版本锚点（比对对齐点，不参与拼键）</text>
+    <line x1="856" y1="616" x2="1524" y2="616" stroke="#e5e7eb"/>
+    <text x="856" y="634" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:lock:miss:{md5}（可选）</text>
+    <text x="1160" y="634" font-size="12" fill="#374151">跨实例单飞锁（v1 不引入，见下）</text>
+    <line x1="856" y1="646" x2="1524" y2="646" stroke="#e5e7eb"/>
+    <text x="856" y="664" font-size="12.5" font-family="Menlo, monospace" font-weight="bold" fill="#166534">perm:artifact:v17:{dialect}:{md5}:u:{userIdFp}</text>
+    <text x="1160" y="664" font-size="12" fill="#374151">分层键 u: 后缀（C21：user/group 域时追加）</text>
+    <line x1="856" y1="676" x2="1524" y2="676" stroke="#e5e7eb"/>
+    <text x="856" y="700" font-size="12" fill="#065f46">键里刻意没有的东西：请求时间戳（时间窗折叠进 decision）、完整角色列表（指纹化）、绑定值（C1）</text>
+  </g>
+
+  <!-- ═══ 底部：CacheEntry + fullKey 校验 ═══ -->
+  <rect x="40" y="760" width="1520" height="360" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="60" y="794" font-size="16" font-weight="bold" fill="#0f172a">④ CacheEntry 值与 fullKey 二次校验</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="816" width="700" height="280" rx="10" fill="#0f172a"/>
+    <text x="80" y="846" font-size="13.5" font-weight="bold" fill="#93c5fd">CacheEntry { fullKey, artifact }</text>
+    <text x="80" y="878" font-size="12.5" fill="#e2e8f0">fullKey（明文，二次校验用）:</text>
+    <text x="80" y="900" font-size="12" font-family="Menlo, monospace" fill="#86efac">"v17|mysql|sales_db.sales_order|read.snapshot|</text>
+    <text x="80" y="918" font-size="12" font-family="Menlo, monospace" fill="#86efac"> rfp=ab12|afp=cd34"</text>
+    <text x="80" y="950" font-size="12.5" fill="#e2e8f0">artifact（签名产物模板，C1 无值）:</text>
+    <text x="80" y="972" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">{ decision: "PERMIT",</text>
+    <text x="80" y="990" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">  pushdown: { predicate: "(`region`=? AND …)",</text>
+    <text x="80" y="1008" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">    placeholders: [{index:0, ref:"subject.region",</text>
+    <text x="80" y="1026" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">                   type:"varchar"}] },     ← 只有元数据</text>
+    <text x="80" y="1044" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">  obligations: [{type:"AUDIT",…}], meta: {…},</text>
+    <text x="80" y="1062" font-size="12" font-family="Menlo, monospace" fill="#fca5a5">  signature: "7f2e9c…" }   ← HMAC 防伪标签</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="800" y="816" width="740" height="280" rx="10" fill="#fff" stroke="#e2e8f0"/>
+    <text x="820" y="846" font-size="13.5" font-weight="bold" fill="#0f172a">读取校验链（两道防线）</text>
+    <text x="820" y="880" font-size="13" fill="#374151">GET 命中（hash 索引命中）</text>
+    <line x1="820" y1="892" x2="1500" y2="892" stroke="#e5e7eb"/>
+    <text x="820" y="916" font-size="13" font-weight="bold" fill="#1d4ed8">防线 1：fullKey 逐字段比对</text>
+    <text x="820" y="938" font-size="12.5" fill="#6b7280">md5 碰撞 / 键错乱 → 不一致 → 视为 miss 回源</text>
+    <text x="820" y="960" font-size="12.5" fill="#6b7280">代价：多算一次；绝不是：错用他人产物</text>
+    <line x1="820" y1="974" x2="1500" y2="974" stroke="#e5e7eb"/>
+    <text x="820" y="998" font-size="13" font-weight="bold" fill="#dc2626">防线 2：HMAC 验签（㉕）</text>
+    <text x="820" y="1020" font-size="12.5" fill="#6b7280">重算 HMAC_SHA256(key, body) 常量时间比对</text>
+    <text x="820" y="1042" font-size="12.5" fill="#6b7280">防：RPC 中间人篡改 / 伪造产物 / Redis 缓存投毒</text>
+    <text x="820" y="1068" font-size="12.5" fill="#991b1b">两道全过才进入执行线；任一失败 → 回源 → 仍失败 → 降级 DENY</text>
+  </g>
+</svg>

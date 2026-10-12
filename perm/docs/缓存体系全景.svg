@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrRed" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrOrange" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#d97706"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1200" fill="#f8fafc"/>
+  <text x="60" y="52" font-size="28" font-weight="bold" fill="#0f172a">缓存体系全景：部署架构 × 三级缓存 × 数据流</text>
+  <text x="60" y="82" font-size="15" fill="#64748b">PEP 多实例 · PDP 无状态集群 · Redis 共享 · Kafka 广播 · perm-service 权威 —— 状态分布原则：请求相关进 Redis、实例相关进进程、权威进 DB</text>
+
+  <!-- ═══ 管理面泳道 ═══ -->
+  <rect x="40" y="108" width="1520" height="150" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-dasharray="6 4"/>
+  <text x="60" y="136" font-size="16" font-weight="bold" fill="#92400e">管理面（写入路径 · 低频重操作）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="150" width="270" height="92" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="150" width="270" height="30" rx="10" fill="#d97706"/>
+    <rect x="60" y="168" width="270" height="12" fill="#d97706"/>
+    <text x="195" y="171" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">perm-service（权威 · 管理面）</text>
+    <text x="76" y="202" font-size="12.5" fill="#374151">· 策略 CRUD / 校验 / 审批状态机</text>
+    <text x="76" y="222" font-size="12.5" fill="#374151">· 编译模板 AST / 版本固化 / 原子发布</text>
+    <text x="76" y="238" font-size="12.5" fill="#374151">· 权威数据：perm_policy_version 表(DB)</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="360" y="150" width="560" height="92" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="360" y="150" width="560" height="30" rx="10" fill="#f59e0b"/>
+    <rect x="360" y="168" width="560" height="12" fill="#f59e0b"/>
+    <text x="640" y="171" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">⑥ 原子发布流程（策略变更唯一入口）</text>
+    <text x="376" y="202" font-size="12.5" fill="#374151">① 版本固化  →  ② 预热（可选，热门方言产物入编译②）  →  ③ 广播事件到 Kafka</text>
+    <text x="376" y="222" font-size="12.5" fill="#374151">④ SET perm:version:latest = "v18"  →  ⑤ 状态置 active</text>
+    <text x="376" y="238" font-size="12.5" fill="#b91c1c">⑥ 任一步失败 → 全量回滚（版本表 / Redis 版本号 / active 状态回退）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="950" y="150" width="590" height="92" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="950" y="150" width="590" height="30" rx="10" fill="#f59e0b"/>
+    <rect x="950" y="168" width="590" height="12" fill="#f59e0b"/>
+    <text x="1245" y="171" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">版本号体系（双维度并行）</text>
+    <text x="966" y="202" font-size="12.5" fill="#374151">planVersion（全局策略集，一份）：任何策略发布 +1 → 产物/Plan 键分区、版本指针、比对锚点</text>
+    <text x="966" y="222" font-size="12.5" fill="#374151">policyVersion（每条策略一份）：该策略修改 +1 → 编译缓存①②键（perm:tpl:pol_a:v4:mysql）</text>
+    <text x="966" y="238" font-size="12.5" fill="#374151">artifactVersion（产物契约，1.0）：PEP 验签 schema 校验用，不参与缓存失效</text>
+  </g>
+
+  <!-- perm-service → Kafka 箭头 -->
+  <line x1="640" y1="242" x2="640" y2="330" stroke="#f59e0b" stroke-width="2.5" marker-end="url(#arrOrange)"/>
+  <text x="650" y="300" font-size="12.5" fill="#b45309">③ 事件广播</text>
+  <text x="650" y="316" font-size="11" fill="#b45309">{ eventType, planVersion, policyId, policyVersion }</text>
+
+  <!-- ═══ 事件总线 ═══ -->
+  <rect x="40" y="330" width="1520" height="118" rx="12" fill="#fce7f3" stroke="#db2777" stroke-dasharray="6 4"/>
+  <text x="60" y="358" font-size="16" font-weight="bold" fill="#9d174d">事件总线（推送失效 · &lt;1s）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="372" width="1460" height="56" rx="10" fill="#fff" stroke="#db2777"/>
+    <text x="180" y="398" font-size="14" font-weight="bold" fill="#9d174d" text-anchor="middle">Kafka</text>
+    <text x="180" y="416" font-size="12" fill="#374151" text-anchor="middle">topic 保留 7 天</text>
+    <line x1="290" y1="372" x2="290" y2="428" stroke="#fbcfe8"/>
+    <text x="520" y="398" font-size="13" fill="#374151" text-anchor="middle">每个实例独立消费者组 = 广播语义（一条事件所有实例各消费一次）</text>
+    <text x="520" y="416" font-size="12" fill="#6b7280" text-anchor="middle">perm-pep-1 / perm-pep-2 / … / perm-pdp-1 / perm-pdp-2 —— 各提交各的 offset，互不拖累</text>
+    <line x1="750" y1="372" x2="750" y2="428" stroke="#fbcfe8"/>
+    <text x="1180" y="398" font-size="13" fill="#374151" text-anchor="middle">可靠性三件套：at-least-once + 幂等（版本号比较）+ offset 后提交（崩溃续读补投）</text>
+    <text x="1180" y="416" font-size="12" fill="#6b7280" text-anchor="middle">消费者收到 → 指针前移 + 清 L1 + PDP 额外失效 Plan③/编译①② → 提交 offset</text>
+  </g>
+
+  <!-- Kafka → PEP 群 -->
+  <line x1="200" y1="428" x2="200" y2="520" stroke="#db2777" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="640" y1="428" x2="640" y2="560" stroke="#db2777" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1180" y1="428" x2="1180" y2="560" stroke="#db2777" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="470" y="470" font-size="12.5" fill="#9d174d">广播到每个实例</text>
+
+  <!-- ═══ 判定面泳道 ═══ -->
+  <rect x="40" y="520" width="1520" height="560" rx="12" fill="#e0ecff" stroke="#3b82f6" stroke-dasharray="6 4"/>
+  <text x="60" y="548" font-size="16" font-weight="bold" fill="#1e40af">判定面（读取路径 · 高频轻操作）</text>
+
+  <!-- PEP 实例群 -->
+  <g filter="url(#sh)">
+    <rect x="60" y="562" width="200" height="180" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="60" y="562" width="200" height="30" rx="10" fill="#2563eb"/>
+    <rect x="60" y="580" width="200" height="12" fill="#2563eb"/>
+    <text x="160" y="583" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">PEP 实例 1</text>
+    <text x="76" y="618" font-size="12" fill="#374151">L1 Caffeine（5 万条 / 100ns）</text>
+    <text x="76" y="638" font-size="12" fill="#374151">· AsyncLoadingCache 内建单飞</text>
+    <text x="76" y="658" font-size="12" fill="#374151">· 热点减少层（命中率≈1/N）</text>
+    <text x="76" y="678" font-size="12" fill="#374151">· 版本指针 currentPlanVersion</text>
+    <text x="76" y="698" font-size="12" fill="#374151">· 5s 版本比对线程（兜底）</text>
+    <text x="76" y="722" font-size="12" fill="#1d4ed8">PEP 内嵌业务进程（几十个）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="300" y="562" width="200" height="180" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="300" y="562" width="200" height="30" rx="10" fill="#2563eb"/>
+    <rect x="300" y="580" width="200" height="12" fill="#2563eb"/>
+    <text x="400" y="583" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">PEP 实例 2</text>
+    <text x="316" y="618" font-size="12" fill="#374151">L1 Caffeine（独立缓存）</text>
+    <text x="316" y="638" font-size="12" fill="#374151">· 与实例 1 互不共享</text>
+    <text x="316" y="658" font-size="12" fill="#374151">· 请求被 LB 无亲和撒布</text>
+    <text x="316" y="678" font-size="12" fill="#374151">· 跨实例击穿靠 PDP 收敛</text>
+    <text x="316" y="698" font-size="12" fill="#374151">· 独立消费者组收事件</text>
+    <text x="316" y="722" font-size="12" fill="#1d4ed8">多实例下 L1 降级为热点层</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="540" y="562" width="200" height="180" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="540" y="562" width="200" height="30" rx="10" fill="#2563eb"/>
+    <rect x="540" y="580" width="200" height="12" fill="#2563eb"/>
+    <text x="640" y="583" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">PEP 实例 N</text>
+    <text x="556" y="618" font-size="12" fill="#374151">…… 同构 ……</text>
+    <text x="556" y="638" font-size="12" fill="#374151">· 每实例独立版本指针</text>
+    <text x="556" y="658" font-size="12" fill="#374151">· 指针靠事件+比对收敛</text>
+    <text x="556" y="678" font-size="12" fill="#374151">· 最坏窗口 ≤ 5s（比对周期）</text>
+    <text x="556" y="698" font-size="12" fill="#374151">· 30s TTL 最终兜底</text>
+    <text x="556" y="722" font-size="12" fill="#1d4ed8">扩缩容零迁移（无状态）</text>
+  </g>
+
+  <!-- PEP → Redis -->
+  <line x1="160" y1="742" x2="160" y2="830" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <line x1="400" y1="742" x2="400" y2="830" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <line x1="640" y1="742" x2="640" y2="830" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="230" y="796" font-size="12.5" fill="#1d4ed8">L1 miss → L2</text>
+  <text x="470" y="796" font-size="12.5" fill="#1d4ed8">L2 miss → PDP</text>
+
+  <!-- Redis -->
+  <g filter="url(#sh)">
+    <rect x="60" y="830" width="680" height="230" rx="10" fill="#fff" stroke="#16a34a"/>
+    <rect x="60" y="830" width="680" height="30" rx="10" fill="#16a34a"/>
+    <rect x="60" y="848" width="680" height="12" fill="#16a34a"/>
+    <text x="400" y="851" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">L2 Redis（集群共享 · 主命中层 · 1~5ms）</text>
+    <text x="80" y="886" font-size="12.5" fill="#166534" font-weight="bold">产物缓存</text>
+    <text x="80" y="905" font-size="12" fill="#374151">perm:artifact:v17:mysql:8f3a…（CacheEntry{fullKey, artifact}，TTL 30s±5s）</text>
+    <text x="80" y="926" font-size="12.5" fill="#166534" font-weight="bold">Plan③（PDP 集群共享）</text>
+    <text x="80" y="945" font-size="12" fill="#374151">perm:plan:v17:…（五元键 → mergedRowExpr+义务集，多实例下共享才保值）</text>
+    <text x="80" y="966" font-size="12.5" fill="#166534" font-weight="bold">版本锚点 / 反向索引</text>
+    <text x="80" y="985" font-size="12" fill="#374151">perm:version:latest = "v18"（比对对齐点）</text>
+    <text x="80" y="1004" font-size="12" fill="#374151">perm:idx:policy:{policyId} → SET(键名)（单策略下线定点 DEL）</text>
+    <text x="80" y="1028" font-size="12" fill="#065f46">Redis 全程无失效逻辑：只提供 KV / TTL / 版本号键，智能全在节点侧</text>
+    <text x="80" y="1046" font-size="12" fill="#065f46">并发写幂等：确定性判定 + 同版本同键 → 后写覆盖无害，无需分布式锁</text>
+  </g>
+
+  <!-- Redis → PDP -->
+  <line x1="740" y1="930" x2="900" y2="930" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="770" y="918" font-size="12" fill="#1d4ed8">L2 miss（每实例 1 路）</text>
+
+  <!-- PDP 集群 -->
+  <g filter="url(#sh)">
+    <rect x="900" y="830" width="640" height="230" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="900" y="830" width="640" height="30" rx="10" fill="#7c3aed"/>
+    <rect x="900" y="848" width="640" height="12" fill="#7c3aed"/>
+    <text x="1220" y="851" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">PDP 集群（2~4 实例 · 无权威状态 · 可重建缓存态）</text>
+    <text x="920" y="886" font-size="12.5" fill="#5b21b6" font-weight="bold">L3 策略索引镜像（判定匹配数据源 · 微秒级）</text>
+    <text x="920" y="905" font-size="12" fill="#374151">resourceId+action 多级索引 → PolicyEntry{五条件} —— 事件推送 + 5s 比对 + 冷启动全量拉取</text>
+    <text x="920" y="926" font-size="12.5" fill="#5b21b6" font-weight="bold">编译缓存①②（实例内 Caffeine · 按需编译）</text>
+    <text x="920" y="945" font-size="12" fill="#374151">① AST 模板（policyId:version）  ② 方言模板（policyId:version:dialect）</text>
+    <text x="920" y="966" font-size="12.5" fill="#5b21b6" font-weight="bold">判定链运行时</text>
+    <text x="920" y="985" font-size="12" fill="#374151">实例内单飞（顺手合并 2~4 路）、版本指针、SPI 注册表、HMAC 密钥、标签短缓存</text>
+    <text x="920" y="1008" font-size="12.5" fill="#5b21b6" font-weight="bold">策略变更感知</text>
+    <text x="920" y="1027" font-size="12" fill="#374151">事件：更新 L3 镜像 + 策略级定点失效编译①② + 全局失效 Plan③；比对 5s 纠偏重建镜像</text>
+    <text x="920" y="1046" font-size="12" fill="#6d28d9">事件只失效不预编译 —— 新版本首次命中时按需编译（10~50ms）</text>
+  </g>
+
+  <!-- perm-service → Redis / PDP 虚线（权威同步） -->
+  <path d="M 330 196 C 330 100, 400 100, 400 60" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="6 4" fill="none" marker-end="url(#arrOrange)"/>
+  <text x="240" y="100" font-size="11.5" fill="#b45309">④ 更新版本锚点</text>
+  <path d="M 1200 242 C 1200 300, 1220 300, 1220 830" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="6 4" fill="none" marker-end="url(#arrOrange)"/>
+  <text x="1228" y="700" font-size="11.5" fill="#b45309">镜像未就绪时回源（10~50ms 兜底）</text>
+
+  <!-- 图例 -->
+  <rect x="40" y="1105" width="1520" height="78" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="60" y="1132" font-size="14" font-weight="bold" fill="#0f172a">图例</text>
+  <rect x="60" y="1144" width="16" height="16" rx="3" fill="#d97706"/>
+  <text x="84" y="1158" font-size="12.5" fill="#374151">管理面（写入）</text>
+  <rect x="230" y="1144" width="16" height="16" rx="3" fill="#db2777"/>
+  <text x="254" y="1158" font-size="12.5" fill="#374151">事件广播（失效推送）</text>
+  <rect x="440" y="1144" width="16" height="16" rx="3" fill="#3b82f6"/>
+  <text x="464" y="1158" font-size="12.5" fill="#374151">判定面（读取）</text>
+  <rect x="640" y="1144" width="16" height="16" rx="3" fill="#16a34a"/>
+  <text x="664" y="1158" font-size="12.5" fill="#374151">L2 Redis 共享缓存</text>
+  <rect x="880" y="1144" width="16" height="16" rx="3" fill="#7c3aed"/>
+  <text x="904" y="1158" font-size="12.5" fill="#374151">PDP 无状态集群</text>
+  <text x="1150" y="1158" font-size="12.5" fill="#dc2626">红色虚线 = 回源兜底（fail-closed）</text>
+</svg>

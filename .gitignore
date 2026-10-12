@@ -9,6 +9,7 @@ backend/target/
 frontend/node_modules/
 frontend/dist/
 agent/target/
+perm/backend/*/target/
 dist/
 seatunnel/dist/
 seatunnel/*/target/

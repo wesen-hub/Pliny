@@ -1,0 +1,14 @@
+server:
+  port: 18083
+
+spring:
+  application:
+    name: perm-pep-demo
+
+perm:
+  pdp:
+    # PDP 判定服务地址（Docker 内部网用容器名 perm-pdp）
+    url: ${PERM_PDP_URL:http://localhost:8081}
+  security:
+    # PDP 演示私钥配套公钥（Ed25519 验签，作业镜像可内嵌）
+    ed25519-public-key: ${PERM_ED25519_PUBLIC_KEY:MCowBQYDK2VwAyEAw3xYYpGY/C4gbWd/bV6jZebqAPqGsD/993Y6kBPI/ag=}

@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1050" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrRed" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#dc2626"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1050" fill="#f8fafc"/>
+  <text x="60" y="52" font-size="28" font-weight="bold" fill="#0f172a">执行管线六阶段：统一模型 → 引擎真实过滤（数据流与规则）</text>
+  <text x="60" y="82" font-size="15" fill="#64748b">管线方法 decideAndRewrite 覆盖 ①②③④ · postProcess 覆盖 ⑤⑥ · 每阶段输入输出各是什么、哪些规则在这里生效、对应哪个可替换 SPI</text>
+
+  <!-- 输入：统一请求模型 -->
+  <g filter="url(#sh)">
+    <rect x="60" y="110" width="1480" height="78" rx="10" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="80" y="138" font-size="15" font-weight="bold" fill="#075985">输入：QueryContext 统一请求模型（任何接入适配器翻译后的产物，管线只认它）</text>
+    <text x="80" y="160" font-size="12.5" fill="#075985">sql（原始 SQL/DSL 文本） + params（已有参数） + authContext（上下文） + dialect / resourceId / action（五级解析结果）</text>
+    <text x="80" y="178" font-size="12.5" fill="#075985">判定产物 CachedArtifact：pushdown.predicate（谓词模板） + placeholders（仅 {index,ref,type} 无值） + projection（visibleColumns/maskRules） + residual（AST） + obligations</text>
+  </g>
+
+  <line x1="800" y1="188" x2="800" y2="218" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+
+  <!-- 六阶段横排 -->
+  <g filter="url(#sh)">
+    <rect x="40" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="40" y="220" width="240" height="32" rx="10" fill="#2563eb"/>
+    <rect x="40" y="240" width="240" height="12" fill="#2563eb"/>
+    <text x="160" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">① QueryParser 解析检查</text>
+    <text x="56" y="274" font-size="11.5" font-weight="bold" fill="#1d4ed8">输入</text>
+    <text x="56" y="292" font-size="11.5" fill="#374151">· 原始 SQL 文本</text>
+    <text x="56" y="314" font-size="11.5" font-weight="bold" fill="#1d4ed8">输出</text>
+    <text x="56" y="332" font-size="11.5" fill="#374151">· AST + 元数据</text>
+    <text x="56" y="350" font-size="11.5" fill="#374151">· 表名/列清单/有无 LIMIT</text>
+    <text x="56" y="372" font-size="11.5" font-weight="bold" fill="#1d4ed8">职责与规则</text>
+    <text x="56" y="390" font-size="11" fill="#374151">· JSqlParser 解析</text>
+    <text x="56" y="406" font-size="11" fill="#374151">· R-S1 放行 / R-S2 拒绝</text>
+    <text x="56" y="422" font-size="11" fill="#374151">· 解析缓存：模板键+AST 深拷贝</text>
+    <text x="56" y="438" font-size="11" fill="#374151">· 表名→资源推断数据源</text>
+    <text x="56" y="458" font-size="11" fill="#b91c1c">JOIN/聚合/子查询 → 拒绝</text>
+    <rect x="52" y="478" width="216" height="62" rx="8" fill="#eff6ff"/>
+    <text x="64" y="496" font-size="11" font-weight="bold" fill="#1d4ed8">可替换 SPI</text>
+    <text x="64" y="514" font-size="10.5" fill="#374151">QueryParser</text>
+    <text x="64" y="530" font-size="10" fill="#6b7280">非 SQL 方言（Cypher/DSL）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="300" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="300" y="220" width="240" height="32" rx="10" fill="#059669"/>
+    <rect x="300" y="240" width="240" height="12" fill="#059669"/>
+    <text x="420" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">② ParamBinder 绑定</text>
+    <text x="316" y="274" font-size="11.5" font-weight="bold" fill="#047857">输入</text>
+    <text x="316" y="292" font-size="11.5" fill="#374151">· CachedArtifact 模板</text>
+    <text x="316" y="310" font-size="11.5" fill="#374151">· placeholders 无值</text>
+    <text x="316" y="328" font-size="11.5" fill="#374151">· + 上下文</text>
+    <text x="316" y="350" font-size="11.5" font-weight="bold" fill="#047857">输出</text>
+    <text x="316" y="368" font-size="11.5" fill="#374151">· BoundArtifact</text>
+    <text x="316" y="386" font-size="11.5" fill="#b91c1c">· bindOrder 含值</text>
+    <text x="316" y="404" font-size="11.5" fill="#374151">· 【值唯一出现点 C1】</text>
+    <text x="316" y="426" font-size="11.5" font-weight="bold" fill="#047857">职责与规则</text>
+    <text x="316" y="444" font-size="11" fill="#374151">· 按 ref 从上下文解析值</text>
+    <text x="316" y="460" font-size="11" fill="#374151">· A 类 ?+绑定 / B 类安全转义</text>
+    <text x="316" y="476" font-size="11" fill="#374151">· R-B3：权限 ? 恒在原 SQL 之后</text>
+    <text x="316" y="492" font-size="11" fill="#b91c1c">· 变量解析不到 → DENY</text>
+    <rect x="312" y="478" width="216" height="62" rx="8" fill="#ecfdf5"/>
+    <text x="324" y="496" font-size="11" font-weight="bold" fill="#047857">可替换 SPI</text>
+    <text x="324" y="514" font-size="10.5" fill="#374151">ParamBinder</text>
+    <text x="324" y="530" font-size="10" fill="#6b7280">$1 / 命名参数等特殊语法</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="560" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="560" y="220" width="240" height="32" rx="10" fill="#7c3aed"/>
+    <rect x="560" y="240" width="240" height="12" fill="#7c3aed"/>
+    <text x="680" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">③ PredicateInjector 注入</text>
+    <text x="576" y="274" font-size="11.5" font-weight="bold" fill="#5b21b6">输入</text>
+    <text x="576" y="292" font-size="11.5" fill="#374151">· BoundArtifact</text>
+    <text x="576" y="310" font-size="11.5" fill="#374151">· 解析后的 AST</text>
+    <text x="576" y="332" font-size="11.5" font-weight="bold" fill="#5b21b6">输出</text>
+    <text x="576" y="350" font-size="11.5" fill="#374151">· 注入权限谓词后的 AST</text>
+    <text x="576" y="372" font-size="11.5" font-weight="bold" fill="#5b21b6">职责与规则</text>
+    <text x="576" y="390" font-size="11" fill="#374151">· 权限谓词 AND 注入原 WHERE 后</text>
+    <text x="576" y="406" font-size="11" fill="#374151">· 无 WHERE 补 WHERE（R-B5）</text>
+    <text x="576" y="422" font-size="11" fill="#374151">· 列引用带表名/别名（R-B6）</text>
+    <text x="576" y="438" font-size="11" fill="#374151">· ES：bool.filter 片段合并</text>
+    <rect x="572" y="478" width="216" height="62" rx="8" fill="#f5f3ff"/>
+    <text x="584" y="496" font-size="11" font-weight="bold" fill="#5b21b6">可替换 SPI</text>
+    <text x="584" y="514" font-size="10.5" fill="#374151">PredicateInjector</text>
+    <text x="584" y="530" font-size="10" fill="#6b7280">非 SQL 引擎 DSL 注入</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="820" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="820" y="220" width="240" height="32" rx="10" fill="#d97706"/>
+    <rect x="820" y="240" width="240" height="12" fill="#d97706"/>
+    <text x="940" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">④ ColumnPruner 列投影</text>
+    <text x="836" y="274" font-size="11.5" font-weight="bold" fill="#9a3412">输入</text>
+    <text x="836" y="292" font-size="11.5" fill="#374151">· 注入后 AST</text>
+    <text x="836" y="310" font-size="11.5" fill="#374151">· pushdown.projection</text>
+    <text x="836" y="332" font-size="11.5" font-weight="bold" fill="#9a3412">输出</text>
+    <text x="836" y="350" font-size="11.5" fill="#374151">· 最终 SELECT 清单 AST</text>
+    <text x="836" y="372" font-size="11.5" font-weight="bold" fill="#9a3412">职责与规则</text>
+    <text x="836" y="390" font-size="11" fill="#374151">· 裁剪到 visibleColumns 交集</text>
+    <text x="836" y="406" font-size="11" fill="#374151">· SELECT * 三级展开（R-S4）</text>
+    <text x="836" y="422" font-size="11" fill="#374151">· 掩码列替换掩码表达式</text>
+    <text x="836" y="438" font-size="11" fill="#b91c1c">· 掩码列被 WHERE/ORDER BY 引用</text>
+    <text x="836" y="454" font-size="11" fill="#b91c1c">· → 拒绝（R-S5）</text>
+    <rect x="832" y="478" width="216" height="62" rx="8" fill="#fff7ed"/>
+    <text x="844" y="496" font-size="11" font-weight="bold" fill="#9a3412">可替换 SPI</text>
+    <text x="844" y="514" font-size="10.5" fill="#374151">ColumnPruner</text>
+    <text x="844" y="530" font-size="10" fill="#6b7280">ES _source include/exclude</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1080" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="1080" y="220" width="240" height="32" rx="10" fill="#db2777"/>
+    <rect x="1080" y="240" width="240" height="12" fill="#db2777"/>
+    <text x="1200" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">⑤ Executor 引擎执行</text>
+    <text x="1096" y="274" font-size="11.5" font-weight="bold" fill="#9d174d">输入</text>
+    <text x="1096" y="292" font-size="11.5" fill="#374151">· 改写后 SQL</text>
+    <text x="1096" y="310" font-size="11.5" fill="#374151">· bindOrder 值</text>
+    <text x="1096" y="332" font-size="11.5" font-weight="bold" fill="#9d174d">输出</text>
+    <text x="1096" y="350" font-size="11.5" fill="#374151">· 引擎结果集</text>
+    <text x="1096" y="372" font-size="11.5" font-weight="bold" fill="#9d174d">职责与规则</text>
+    <text x="1096" y="390" font-size="11" fill="#374151">· PreparedStatement 绑定执行</text>
+    <text x="1096" y="406" font-size="11" fill="#374151">· 权限过滤在引擎内完成</text>
+    <text x="1096" y="422" font-size="11" fill="#374151">· Cypher 位置→命名参数（R-B4）</text>
+    <text x="1096" y="438" font-size="11" fill="#374151">· ES client 调用</text>
+    <rect x="1092" y="478" width="216" height="62" rx="8" fill="#fdf2f8"/>
+    <text x="1104" y="496" font-size="11" font-weight="bold" fill="#9d174d">可替换 SPI</text>
+    <text x="1104" y="514" font-size="10.5" fill="#374151">DialectExecutor</text>
+    <text x="1104" y="530" font-size="10" fill="#6b7280">新引擎执行器（主接口）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1340" y="220" width="240" height="330" rx="10" fill="#fff" stroke="#dc2626"/>
+    <rect x="1340" y="220" width="240" height="32" rx="10" fill="#dc2626"/>
+    <rect x="1340" y="240" width="240" height="12" fill="#dc2626"/>
+    <text x="1460" y="243" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">⑥ ResidualProcessor 后置</text>
+    <text x="1356" y="274" font-size="11.5" font-weight="bold" fill="#991b1b">输入</text>
+    <text x="1356" y="292" font-size="11.5" fill="#374151">· 引擎结果集</text>
+    <text x="1356" y="310" font-size="11.5" fill="#374151">· residual AST（未下推谓词）</text>
+    <text x="1356" y="332" font-size="11.5" font-weight="bold" fill="#991b1b">输出</text>
+    <text x="1356" y="350" font-size="11.5" fill="#374151">· 过滤/掩码后的最终结果</text>
+    <text x="1356" y="372" font-size="11.5" font-weight="bold" fill="#991b1b">职责与规则</text>
+    <text x="1356" y="390" font-size="11" fill="#374151">· 内置 AST 求值器逐行过滤</text>
+    <text x="1356" y="406" font-size="11" fill="#b91c1c">· residual 过滤+LIMIT → 拒绝</text>
+    <text x="1356" y="422" font-size="11" fill="#b91c1c">· 结果集 10000 上限（R-R4）</text>
+    <text x="1356" y="438" font-size="11" fill="#374151">· 掩码兜底（最严 R-D9）</text>
+    <rect x="1352" y="478" width="216" height="62" rx="8" fill="#fef2f2"/>
+    <text x="1364" y="496" font-size="11" font-weight="bold" fill="#991b1b">可替换 SPI</text>
+    <text x="1364" y="514" font-size="10.5" fill="#374151">ResidualProcessor</text>
+    <text x="1364" y="530" font-size="10" fill="#6b7280">新 AST 节点求值逻辑</text>
+  </g>
+
+  <!-- 阶段间箭头 -->
+  <line x1="280" y1="385" x2="298" y2="385" stroke="#6b7280" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="540" y1="385" x2="558" y2="385" stroke="#6b7280" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="800" y1="385" x2="818" y2="385" stroke="#6b7280" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1060" y1="385" x2="1078" y2="385" stroke="#6b7280" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1320" y1="385" x2="1338" y2="385" stroke="#6b7280" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="288" y="376" font-size="10" fill="#6b7280">AST</text>
+  <text x="548" y="376" font-size="10" fill="#6b7280">Bound</text>
+  <text x="808" y="376" font-size="10" fill="#6b7280">注入AST</text>
+  <text x="1068" y="376" font-size="10" fill="#6b7280">改后SQL</text>
+  <text x="1328" y="376" font-size="10" fill="#6b7280">结果集</text>
+
+  <!-- 管线方法分段 -->
+  <rect x="40" y="580" width="760" height="58" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-dasharray="6 4"/>
+  <text x="60" y="604" font-size="13.5" font-weight="bold" fill="#075985">pipeline.decideAndRewrite(ctx) —— 执行前调用</text>
+  <text x="60" y="624" font-size="12" fill="#075985">内部：算缓存键 → L1 → L2 → PDP → 验签 → DENY 检查 → ① Parser → ② Binder → ③ Injector → ④ Pruner → 返回 RewriteResult</text>
+
+  <rect x="820" y="580" width="760" height="58" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-dasharray="6 4"/>
+  <text x="840" y="604" font-size="13.5" font-weight="bold" fill="#991b1b">pipeline.postProcess(result, bound) —— 执行后调用（引擎跑完再调）</text>
+  <text x="840" y="624" font-size="12" fill="#991b1b">内部：⑤ 的后续 → ⑥ Residual 过滤 + 掩码兜底 → Obligation（AUDIT sync 入队 / RATE_LIMIT 行数检查）→ 返回最终结果</text>
+
+  <!-- 改写前后对比 -->
+  <text x="60" y="690" font-size="16" font-weight="bold" fill="#0f172a">六阶段实际效果：一条 SQL 的变形轨迹</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="706" width="480" height="150" rx="10" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="60" y="706" width="480" height="28" rx="10" fill="#64748b"/>
+    <rect x="60" y="722" width="480" height="12" fill="#64748b"/>
+    <text x="300" y="725" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">原始 SQL（业务写）</text>
+    <text x="80" y="760" font-size="12" fill="#334155" font-family="monospace">SELECT id, name, customer_phone, amount</text>
+    <text x="80" y="778" font-size="12" fill="#334155" font-family="monospace">FROM sales_order WHERE order_date &gt;= ?</text>
+    <text x="80" y="800" font-size="11" fill="#6b7280">· ① Parser 解析通过（单表，R-S1 放行）</text>
+    <text x="80" y="818" font-size="11" fill="#6b7280">· 推断 resourceId=sales.sales_order</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="560" y="706" width="480" height="150" rx="10" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="560" y="706" width="480" height="28" rx="10" fill="#475569"/>
+    <rect x="560" y="722" width="480" height="12" fill="#475569"/>
+    <text x="800" y="725" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">改写后 SQL（管线输出）</text>
+    <text x="580" y="760" font-size="12" fill="#334155" font-family="monospace">SELECT id, name, SHA2(amount,256) AS amount</text>
+    <text x="580" y="778" font-size="12" fill="#334155" font-family="monospace">FROM sales_order WHERE order_date &gt;= ?</text>
+    <text x="580" y="796" font-size="12" fill="#334155" font-family="monospace">AND (`region` = ? AND `status` IN (?,?))</text>
+    <text x="580" y="818" font-size="11" fill="#6b7280">· ② Binder：region→"华东" ③ Injector：AND 注入</text>
+    <text x="580" y="836" font-size="11" fill="#6b7280">· ④ Pruner：customer_phone 被列交集剔除、amount 换掩码表达式</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1060" y="706" width="480" height="150" rx="10" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="1060" y="706" width="480" height="28" rx="10" fill="#334155"/>
+    <rect x="1060" y="722" width="480" height="12" fill="#334155"/>
+    <text x="1300" y="725" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">执行与后置（引擎 + PEP）</text>
+    <text x="1080" y="760" font-size="12" fill="#334155">· ⑤ 引擎执行改写 SQL（行权限在引擎内完成）</text>
+    <text x="1080" y="780" font-size="12" fill="#334155">· ⑥ residual 未下推谓词 → PEP 内存过滤</text>
+    <text x="1080" y="800" font-size="12" fill="#334155">· 掩码兜底 → 义务：AUDIT sync 入队确认</text>
+    <text x="1080" y="820" font-size="12" fill="#334155">· RATE_LIMIT 事后检查行数</text>
+    <text x="1080" y="840" font-size="12" fill="#6b7280">· 返回过滤/掩码后的最终结果</text>
+  </g>
+
+  <!-- 底部：顺序契约与禁令 -->
+  <rect x="40" y="880" width="1520" height="140" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-dasharray="6 4"/>
+  <text x="60" y="910" font-size="15" font-weight="bold" fill="#991b1b">执行顺序契约与硬禁令（语义正确性的根基）</text>
+
+  <text x="80" y="940" font-size="12.5" fill="#374151">① 顺序契约（R-R2）：pushdown 下推（含原 LIMIT）→ 引擎执行 → residual 掩码——下推缩小结果集，后置只收尾，不重不漏</text>
+  <text x="80" y="962" font-size="12.5" fill="#374151">② 禁令一（R-R3）：residual 过滤 + LIMIT 组合 → fail-closed 拒绝（先 LIMIT 后过滤 = 该保留的行被截掉）</text>
+  <text x="80" y="984" font-size="12.5" fill="#374151">③ 禁令二（R-R4）：后置结果集 &gt; 10000 行 → fail-closed 拒绝（全量拉回内存过滤是性能灾难）</text>
+  <text x="80" y="1006" font-size="12.5" fill="#374151">④ 值的位置（C1）：值只在 ② Binder 的 bindOrder 中出现——产物/缓存/网络全程只有模板，值不出 PEP</text>
+</svg>

@@ -1,0 +1,155 @@
+# 权限系统一键编排：MySQL + 管理面 + PDP + 前端
+# 用法：
+#   1) cd backend && mvn package -DskipTests   （宿主机先打 jar，容器内不联网构建）
+#   2) docker compose up -d --build
+# 访问：前端 http://localhost:18088   管理面 http://localhost:18082   PDP http://localhost:18081
+# 宿主端口 18081/18082/18088 规避本机既有服务占用（8081/8082 被 dcp-* 容器占用，8088 被 perm-frontend 占用）
+# name 显式指定：工作目录名含中文时 compose 无法生成默认项目名
+name: perm
+services:
+  perm-mysql:
+    image: mysql:8.0
+    container_name: perm-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: perm
+      MYSQL_DATABASE: perm_admin
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "13306:3306"
+    volumes:
+      - perm_mysql_data:/var/lib/mysql
+      # 首启自动建表（三表幂等 IF NOT EXISTS + planVersion 种子）
+      - ./backend/perm-admin/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pperm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  perm-admin:
+    build: ./backend/perm-admin
+    container_name: perm-admin
+    # 自愈：与 mysql 同时重启时抢跑连不上库会自动重试直至成功
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: jdbc
+      PERM_MYSQL_HOST: perm-mysql
+      PERM_MYSQL_PORT: "3306"
+      PERM_MYSQL_PASSWORD: perm
+      KAFKA_BOOTSTRAP_SERVERS: perm-kafka:9092
+      TZ: Asia/Shanghai
+    ports:
+      - "18082:8082"
+    depends_on:
+      perm-mysql:
+        condition: service_healthy
+      perm-kafka:
+        condition: service_healthy
+    healthcheck:
+      # temurin JRE 镜像无 wget，用 bash /dev/tcp 探测端口
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8082 && echo ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  perm-pdp:
+    build: ./backend/perm-pdp
+    container_name: perm-pdp
+    restart: unless-stopped
+    environment:
+      PERM_ADMIN_URL: http://perm-admin:8082
+      KAFKA_BOOTSTRAP_SERVERS: perm-kafka:9092
+      PERM_REDIS_HOST: perm-redis
+      PERM_REDIS_PORT: "6379"
+      PERM_REDIS_ENABLED: "true"
+      TZ: Asia/Shanghai
+    ports:
+      - "18081:8081"
+    depends_on:
+      perm-admin:
+        condition: service_healthy
+      perm-kafka:
+        condition: service_healthy
+      perm-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081 && echo ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  perm-frontend:
+    build: ./frontend
+    container_name: perm-frontend-app
+    restart: unless-stopped
+    ports:
+      - "18088:80"
+    depends_on:
+      perm-pdp:
+        condition: service_healthy
+      perm-admin:
+        condition: service_healthy
+
+  # 策略变更事件通道（Kafka 主通道 + 版本轮询兜底）
+  perm-kafka:
+    image: apache/kafka:3.7.0
+    container_name: perm-kafka
+    restart: unless-stopped
+    environment:
+      # apache/kafka 官方镜像用 KAFKA_* 变量体系（无 CFG 前缀）
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@perm-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://perm-kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+    ports:
+      - "19092:9092"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  # L2 共享产物缓存（版本化键空间，发布后自然失效）
+  # 用 redis:7-alpine：本机 arm64，redis:latest 旧 amd64 镜像在 qemu 模拟下 segfault
+  perm-redis:
+    image: redis:7-alpine
+    container_name: perm-redis
+    restart: unless-stopped
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # PEP 业务接入示例（SDK 全链路演示：判定 → 验签 → 改写 → 掩码）
+  perm-pep-demo:
+    build: ./backend/perm-pep-demo
+    container_name: perm-pep-demo
+    restart: unless-stopped
+    environment:
+      PERM_PDP_URL: http://perm-pdp:8081
+      TZ: Asia/Shanghai
+    ports:
+      - "18083:18083"
+    depends_on:
+      perm-pdp:
+        condition: service_healthy
+
+volumes:
+  perm_mysql_data:

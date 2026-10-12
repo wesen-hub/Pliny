@@ -1,0 +1,45 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: perm-pdp
+  data:
+    redis:
+      host: ${PERM_REDIS_HOST:localhost}
+      port: ${PERM_REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${spring.application.name}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      # 审计 sync 义务在判定路径内直写：max.block.ms 收敛快速失败（不阻断判定）
+      max-block-ms: 1000
+
+perm:
+  kafka:
+    # 事件主通道（Kafka 不可用时自动降级为版本轮询兜底）
+    enabled: true
+  redis:
+    # L2 共享产物缓存（默认关闭零依赖；compose/生产启用）
+    enabled: ${PERM_REDIS_ENABLED:false}
+    ttl-seconds: 60
+  security:
+    # Ed25519 非对称签名（R-Sec6）：私钥签名/公钥验签，密钥对 Base64 注入
+    # 演示密钥对（仅供演示，勿用于生产；正式形态 KMS 管理 + 轮换，R-Sec8）
+    # 生成：java -cp perm-common.jar com.perm.common.signature.Ed25519Keys
+    ed25519-private-key: ${PERM_ED25519_PRIVATE_KEY:MC4CAQAwBQYDK2VwBCIEIGxzCt1N7ZYcLoYvssPxR0O5C90vSDBM+IirfuBd2xbf}
+    ed25519-public-key: ${PERM_ED25519_PUBLIC_KEY:MCowBQYDK2VwAyEAw3xYYpGY/C4gbWd/bV6jZebqAPqGsD/993Y6kBPI/ag=}
+  admin:
+    # 管理面地址（快照同步目标；Docker 内部网用容器名 perm-admin）
+    url: ${PERM_ADMIN_URL:http://localhost:8082}
+  sync:
+    # 快照版本比对间隔（毫秒，版本比对兜底通道，R-Sync）
+    interval-ms: 5000
+
+logging:
+  level:
+    com.perm.pdp: INFO

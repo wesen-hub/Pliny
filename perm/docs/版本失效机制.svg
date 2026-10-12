@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrR" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrO" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#d97706"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#f8fafc"/>
+  <text x="60" y="50" font-size="28" font-weight="bold" fill="#0f172a">版本失效机制：双维度版本号 × 指针前移 × 三层防线</text>
+  <text x="60" y="78" font-size="14" fill="#64748b">核心思想：失效 = 指针前移（让旧键不可达），不是删除；Redis 无失效逻辑，智能全在节点侧</text>
+
+  <!-- ═══ 左列：双维度版本号 ═══ -->
+  <rect x="40" y="100" width="470" height="560" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-dasharray="6 4"/>
+  <text x="60" y="130" font-size="16" font-weight="bold" fill="#92400e">① 版本号体系（双维度并行）</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="148" width="430" height="200" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="148" width="430" height="30" rx="10" fill="#f59e0b"/>
+    <rect x="60" y="166" width="430" height="12" fill="#f59e0b"/>
+    <text x="275" y="169" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">planVersion（全局策略集 · 粗粒度全量失效）</text>
+    <text x="76" y="198" font-size="12.5" fill="#374151">· 维度：整个系统只维护一份（v17 → v18）</text>
+    <text x="76" y="220" font-size="12.5" fill="#374151">· 触发：任何一条策略发布/下线/回滚 → +1</text>
+    <text x="76" y="242" font-size="12.5" fill="#374151">· 为什么必须全局：Plan 是多策略交集合并产物，</text>
+    <text x="86" y="258" font-size="12" fill="#6b7280">任何策略变更都可能影响任何 Plan——无法定位</text>
+    <text x="86" y="274" font-size="12" fill="#6b7280">影响面，只能全量失效（合并模型的必然代价）</text>
+    <text x="76" y="298" font-size="12.5" fill="#374151">· 用途：产物/Plan 键分区 · 版本指针 · 比对锚点</text>
+    <text x="76" y="320" font-size="12.5" fill="#b45309">· 存储：perm:version:latest（Redis）+ 版本表（DB 事实源）</text>
+    <text x="76" y="338" font-size="12.5" fill="#b45309">· 单调性：只前进不回退（回滚 = 发布内容等于旧版的 v19）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="368" width="430" height="170" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="368" width="430" height="30" rx="10" fill="#f59e0b"/>
+    <rect x="60" y="386" width="430" height="12" fill="#f59e0b"/>
+    <text x="275" y="389" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">policyVersion（每条策略 · 细粒度定点隔离）</text>
+    <text x="76" y="418" font-size="12.5" fill="#374151">· 维度：每条策略一份，互不影响（pol_a v3→v4）</text>
+    <text x="76" y="440" font-size="12.5" fill="#374151">· 触发：该策略自身每次修改 +1</text>
+    <text x="76" y="462" font-size="12.5" fill="#374151">· 用途：编译缓存①②键（perm:tpl:pol_a:v4:mysql）</text>
+    <text x="76" y="484" font-size="12.5" fill="#374151">· 为什么能用策略级：编译缓存的键天然含 policyId</text>
+    <text x="86" y="500" font-size="12" fill="#6b7280">→ pol_a v4 发布只作废自己的 v3 编译条目，其他</text>
+    <text x="86" y="516" font-size="12" fill="#6b7280">4 条策略的编译缓存不动（键天然隔离的收益）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="558" width="430" height="82" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="558" width="430" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="60" y="574" width="430" height="12" fill="#f59e0b"/>
+    <text x="275" y="577" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">关系：策略 +1 → 全局 +1</text>
+    <text x="76" y="606" font-size="12.5" fill="#374151">pol_a v3→v4 → 编译②：只失效 pol_a（定点）</text>
+    <text x="76" y="624" font-size="12.5" fill="#374151">             → 产物/Plan：全部换前缀（全量，O(1)）</text>
+  </g>
+
+  <!-- ═══ 中列：指针前移 ═══ -->
+  <rect x="530" y="100" width="540" height="560" rx="12" fill="#e0ecff" stroke="#3b82f6" stroke-dasharray="6 4"/>
+  <text x="550" y="130" font-size="16" font-weight="bold" fill="#1e40af">② 键空间版本化：失效 = 指针前移（O(1)）</text>
+
+  <g filter="url(#sh)">
+    <rect x="550" y="150" width="500" height="120" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="550" y="150" width="500" height="28" rx="10" fill="#2563eb"/>
+    <rect x="550" y="166" width="500" height="12" fill="#2563eb"/>
+    <text x="800" y="169" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">节点内存：版本指针（currentPlanVersion）</text>
+    <text x="566" y="200" font-size="12.5" fill="#374151">每个 PEP/PDP 实例内存一个变量，算键用它：</text>
+    <text x="566" y="222" font-size="11.5" fill="#1d4ed8" font-family="Menlo, monospace">key = "perm:artifact:" + currentPlanVersion + ":" + dialect + ":" + md5(...)</text>
+    <text x="566" y="246" font-size="12.5" fill="#374151">指针前移 = 一次内存赋值 → 之后拼出的键全部落在新版本区</text>
+  </g>
+
+  <line x1="800" y1="270" x2="800" y2="294" stroke="#2563eb" stroke-width="2" marker-end="url(#arr)"/>
+
+  <g filter="url(#sh)">
+    <rect x="550" y="294" width="500" height="180" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="550" y="294" width="500" height="28" rx="10" fill="#2563eb"/>
+    <rect x="550" y="310" width="500" height="12" fill="#2563eb"/>
+    <text x="800" y="313" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">失效的三个动作</text>
+    <text x="566" y="346" font-size="12.5" font-weight="bold" fill="#1d4ed8">动作 1：指针前移（O(1)）</text>
+    <text x="710" y="346" font-size="12.5" fill="#374151">currentPlanVersion = "v18"</text>
+    <text x="566" y="370" font-size="12.5" font-weight="bold" fill="#1d4ed8">动作 2：清 L1（Caffeine）</text>
+    <text x="710" y="370" font-size="12.5" fill="#374151">按 v17 前缀批量失效（或全清 5 万条）</text>
+    <text x="566" y="394" font-size="12.5" font-weight="bold" fill="#1d4ed8">动作 3：Redis 什么都不做 ✓</text>
+    <text x="710" y="394" font-size="12.5" fill="#374151">旧键仍在，但没有任何节点能再拼出 v17 键去查它</text>
+    <text x="566" y="428" font-size="12.5" fill="#1e40af">v17 孤儿键等 TTL（30s±5s）自然回收——删除是物理成本，不可达是零成本</text>
+    <text x="566" y="450" font-size="12.5" fill="#1e40af">指针只前进不回退；冷启动初始化 = GET perm:version:latest 直接对齐最新</text>
+  </g>
+
+  <line x1="800" y1="474" x2="800" y2="498" stroke="#2563eb" stroke-width="2" marker-end="url(#arr)"/>
+
+  <g filter="url(#sh)">
+    <rect x="550" y="498" width="500" height="142" rx="10" fill="#fff" stroke="#3b82f6"/>
+    <rect x="550" y="498" width="500" height="28" rx="10" fill="#2563eb"/>
+    <rect x="550" y="514" width="500" height="12" fill="#2563eb"/>
+    <text x="800" y="517" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">三种失效粒度（哪类变更失效哪些键）</text>
+    <text x="566" y="548" font-size="12.5" fill="#374151">任何策略变更 → 全部产物键：键空间版本化（planVersion+1）</text>
+    <text x="566" y="574" font-size="12.5" fill="#374151">Renderer 升级 → 该方言键：收窄失效 SCAN perm:artifact:v17:es:*</text>
+    <text x="566" y="600" font-size="12.5" fill="#374151">单策略下线 → 该策略影响键：反向索引 SMEMBERS perm:idx:policy:pol_a</text>
+    <text x="566" y="624" font-size="12.5" fill="#374151">策略自身改版 → 编译①②：策略级版本换键（policyId:version）</text>
+  </g>
+
+  <!-- ═══ 右列：三层防线 ═══ -->
+  <rect x="1090" y="100" width="470" height="560" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-dasharray="6 4"/>
+  <text x="1110" y="130" font-size="16" font-weight="bold" fill="#991b1b">③ 三层防线（正确性由快到慢收敛）</text>
+
+  <g filter="url(#sh)">
+    <rect x="1110" y="150" width="430" height="150" rx="10" fill="#fff" stroke="#dc2626"/>
+    <rect x="1110" y="150" width="430" height="30" rx="10" fill="#dc2626"/>
+    <rect x="1110" y="168" width="430" height="12" fill="#dc2626"/>
+    <text x="1325" y="171" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">第一层：版本事件失效（推 · &lt;1s）</text>
+    <text x="1126" y="200" font-size="12.5" fill="#374151">Kafka 广播 { planVersion, policyId, policyVersion }</text>
+    <text x="1126" y="222" font-size="12.5" fill="#374151">· 每实例独立消费者组 = 广播语义</text>
+    <text x="1126" y="244" font-size="12.5" fill="#374151">· 幂等：v18 ≤ 本地指针 → 忽略</text>
+    <text x="1126" y="266" font-size="12.5" fill="#374151">· offset 后提交：崩溃续读补投</text>
+    <text x="1126" y="288" font-size="12.5" fill="#374151">· topic 保留 7 天：宕机节点可追回</text>
+  </g>
+
+  <line x1="1325" y1="300" x2="1325" y2="322" stroke="#dc2626" stroke-width="2" marker-end="url(#arrR)"/>
+
+  <g filter="url(#sh)">
+    <rect x="1110" y="322" width="430" height="140" rx="10" fill="#fff" stroke="#dc2626"/>
+    <rect x="1110" y="322" width="430" height="30" rx="10" fill="#dc2626"/>
+    <rect x="1110" y="340" width="430" height="12" fill="#dc2626"/>
+    <text x="1325" y="343" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">第二层：版本比对（拉 · ≤5s 兜底）</text>
+    <text x="1126" y="374" font-size="12.5" fill="#374151">每节点后台 5s 定时：</text>
+    <text x="1126" y="398" font-size="12" fill="#1d4ed8" font-family="Menlo, monospace">GET perm:version:latest  ≠  本地指针</text>
+    <text x="1126" y="422" font-size="12.5" fill="#374151">→ 落后则纠偏：指针前移 + 清 L1 + PDP 重建 L3 镜像</text>
+    <text x="1126" y="446" font-size="12.5" fill="#991b1b">不做每请求比对：每请求打 Redis 核对版本不值</text>
+  </g>
+
+  <line x1="1325" y1="462" x2="1325" y2="484" stroke="#dc2626" stroke-width="2" marker-end="url(#arrR)"/>
+
+  <g filter="url(#sh)">
+    <rect x="1110" y="484" width="430" height="140" rx="10" fill="#fff" stroke="#dc2626"/>
+    <rect x="1110" y="484" width="430" height="30" rx="10" fill="#dc2626"/>
+    <rect x="1110" y="502" width="430" height="12" fill="#dc2626"/>
+    <text x="1325" y="505" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">第三层：TTL（30s±5s 最终兜底）</text>
+    <text x="1126" y="536" font-size="12.5" fill="#374151">事件全丢 + 比对没赶上 → 自然过期收敛</text>
+    <text x="1126" y="560" font-size="12.5" fill="#374151">TTL 是"孤儿键的办后事"，不是"防缓存旧"</text>
+    <text x="1126" y="584" font-size="12.5" fill="#374151">抖动 ±5s：防雪崩（同刻大批过期回源风暴）</text>
+    <text x="1126" y="608" font-size="12.5" fill="#991b1b">方向保证：fail-closed，越权窗口永远 ≤ 最坏 30s</text>
+  </g>
+
+  <!-- ═══ 底部：时间线 ═══ -->
+  <rect x="40" y="680" width="1520" height="390" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="60" y="714" font-size="16" font-weight="bold" fill="#0f172a">④ 越权窗口时间线（节点 B 错过事件的全过程）</text>
+
+  <!-- 时间轴 -->
+  <line x1="100" y1="790" x2="1500" y2="790" stroke="#cbd5e1" stroke-width="2"/>
+  <g>
+    <circle cx="130" cy="790" r="6" fill="#d97706"/>
+    <text x="120" y="770" font-size="13" font-weight="bold" fill="#92400e" text-anchor="middle">t=0s</text>
+    <text x="60" y="826" font-size="12" fill="#374151" text-anchor="middle">v17→v18 发布</text>
+    <text x="60" y="844" font-size="12" fill="#6b7280" text-anchor="middle">事件广播</text>
+  </g>
+  <g>
+    <circle cx="360" cy="790" r="6" fill="#16a34a"/>
+    <text x="350" y="770" font-size="13" font-weight="bold" fill="#15803d" text-anchor="middle">t=0.5s</text>
+    <text x="290" y="826" font-size="12" fill="#374151" text-anchor="middle">节点 A 收事件：指针→v18</text>
+    <text x="290" y="844" font-size="12" fill="#6b7280" text-anchor="middle">清 L1 → 新请求走 v18 键 ✓</text>
+  </g>
+  <g>
+    <circle cx="590" cy="790" r="6" fill="#dc2626"/>
+    <text x="580" y="770" font-size="13" font-weight="bold" fill="#b91c1c" text-anchor="middle">t=1s</text>
+    <text x="520" y="826" font-size="12" fill="#374151" text-anchor="middle">节点 B 错过事件（消费者 lag）</text>
+    <text x="520" y="844" font-size="12" fill="#b91c1c" text-anchor="middle">仍用 v17 产物 → 越权窗口开始</text>
+  </g>
+  <g>
+    <circle cx="820" cy="790" r="6" fill="#2563eb"/>
+    <text x="810" y="770" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="middle">t=5s</text>
+    <text x="750" y="826" font-size="12" fill="#374151" text-anchor="middle">节点 B 比对线程纠偏</text>
+    <text x="750" y="844" font-size="12" fill="#15803d" text-anchor="middle">指针→v18 → 越权窗口结束 ✓</text>
+  </g>
+  <g>
+    <circle cx="1050" cy="790" r="6" fill="#6b7280"/>
+    <text x="1040" y="770" font-size="13" font-weight="bold" fill="#374151" text-anchor="middle">t=30s</text>
+    <text x="980" y="826" font-size="12" fill="#374151" text-anchor="middle">v17 键 TTL 到期</text>
+    <text x="980" y="844" font-size="12" fill="#6b7280" text-anchor="middle">（比对也挂时的最坏收敛点）</text>
+  </g>
+  <g>
+    <circle cx="1330" cy="790" r="6" fill="#0f172a"/>
+    <text x="1320" y="770" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="middle">保障</text>
+    <text x="1260" y="826" font-size="12" fill="#374151" text-anchor="middle">产物内嵌 planVersion</text>
+    <text x="1260" y="844" font-size="12" fill="#374151" text-anchor="middle">使用前校验 → 回源失败即 DENY</text>
+  </g>
+
+  <!-- 窗口带 -->
+  <rect x="590" y="870" width="230" height="30" rx="6" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="705" y="890" font-size="12.5" font-weight="bold" fill="#b91c1c" text-anchor="middle">越权窗口 ≤ 5s（比对周期）</text>
+  <line x1="705" y1="900" x2="705" y2="928" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="705" y="944" font-size="12" fill="#6b7280" text-anchor="middle">窗口上界由比对周期决定</text>
+
+  <text x="60" y="1020" font-size="14" font-weight="bold" fill="#0f172a">四重保障叠加（由快到慢）：</text>
+  <text x="240" y="1020" font-size="13.5" fill="#374151">使用前版本校验（实时，产物内嵌 planVersion）→ 事件失效（&lt;1s，推）→ 版本比对（≤5s，拉）→ TTL（30s±5s，自然过期）</text>
+  <text x="60" y="1050" font-size="13.5" fill="#991b1b">关键约束（C4）：策略收紧后的越权窗口不可接受——绝不依赖 TTL 续用旧 PERMIT，失效方向永远 fail-closed 收紧；</text>
+  <text x="60" y="1072" font-size="13.5" fill="#991b1b">配合 ⑥ 预热防失效风暴：发布时先预热热门方言产物再广播，把"失效后全量冷启动打 PDP"变成"发布时有序回填"。</text>
+</svg>

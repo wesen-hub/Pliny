@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 640" font-family="-apple-system, PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="ta" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1640" height="640" fill="#ffffff"/>
+  <text x="820" y="30" text-anchor="middle" font-size="21" font-weight="bold" fill="#0f172a">策略（Policy）定义：9 组成部分 → 子字段层级 → 叶子值示例</text>
+  <text x="820" y="52" text-anchor="middle" font-size="11" fill="#475569">单根树：Policy 为根，9 个组成部分为枝干；每列自上而下展开子字段，第三层（数组→对象）以 └ 缩进，叶子均标注类型与示例值</text>
+
+  <!-- 根节点 -->
+  <rect x="745" y="64" width="150" height="40" rx="10" fill="#1d4ed8"/>
+  <text x="820" y="89" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">Policy 策略</text>
+
+  <!-- 总线 -->
+  <line x1="820" y1="104" x2="820" y2="136" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="122" y1="136" x2="1522" y2="136" stroke="#94a3b8" stroke-width="1.5"/>
+  <g stroke="#94a3b8" stroke-width="1.2">
+    <line x1="122" y1="136" x2="122" y2="190" marker-end="url(#ta)"/>
+    <line x1="297" y1="136" x2="297" y2="190" marker-end="url(#ta)"/>
+    <line x1="472" y1="136" x2="472" y2="190" marker-end="url(#ta)"/>
+    <line x1="647" y1="136" x2="647" y2="190" marker-end="url(#ta)"/>
+    <line x1="822" y1="136" x2="822" y2="190" marker-end="url(#ta)"/>
+    <line x1="997" y1="136" x2="997" y2="190" marker-end="url(#ta)"/>
+    <line x1="1172" y1="136" x2="1172" y2="190" marker-end="url(#ta)"/>
+    <line x1="1347" y1="136" x2="1347" y2="190" marker-end="url(#ta)"/>
+    <line x1="1522" y1="136" x2="1522" y2="190" marker-end="url(#ta)"/>
+  </g>
+
+  <!-- ════ 列1 meta ════ -->
+  <g>
+    <rect x="40" y="190" width="165" height="34" rx="6" fill="#2563eb"/><text x="122" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">meta · 身份元信息</text>
+    <text x="52" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ policyId</text>
+    <text x="66" y="264" font-size="9.5" fill="#475569">└ 字符串 · 'pol_sales_region_001'</text>
+    <text x="52" y="284" font-size="12" font-weight="bold" fill="#1e293b">▪ policyName</text>
+    <text x="66" y="304" font-size="9.5" fill="#475569">└ 字符串 · '区域经理-本区域订单可见'</text>
+    <text x="52" y="324" font-size="12" font-weight="bold" fill="#1e293b">▪ version</text>
+    <text x="66" y="344" font-size="9.5" fill="#475569">└ 正整数 · 3（发布+1，不可变）</text>
+    <text x="52" y="364" font-size="12" font-weight="bold" fill="#1e293b">▪ owner / description</text>
+    <text x="66" y="384" font-size="9.5" fill="#475569">└ 字符串 · '数据安全组'</text>
+  </g>
+
+  <!-- ════ 列2 effect ════ -->
+  <g>
+    <rect x="215" y="190" width="165" height="34" rx="6" fill="#059669"/><text x="297" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">effect · 效果</text>
+    <text x="227" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ 取值（枚举叶）</text>
+    <text x="241" y="264" font-size="9.5" fill="#15803d">└ GRANT — 允许，可携带约束</text>
+    <text x="241" y="284" font-size="9.5" fill="#b91c1c">└ DENY — 拒绝，constraints 忽略</text>
+    <text x="227" y="304" font-size="12" font-weight="bold" fill="#1e293b">▪ 裁决规则</text>
+    <text x="241" y="324" font-size="9.5" fill="#475569">└ DENY-overrides（拒绝优先）</text>
+  </g>
+
+  <!-- ════ 列3 priority ════ -->
+  <g>
+    <rect x="390" y="190" width="165" height="34" rx="6" fill="#64748b"/><text x="472" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">priority · 优先级</text>
+    <text x="402" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ 取值（整数叶）</text>
+    <text x="416" y="264" font-size="9.5" fill="#475569">└ 示例 100</text>
+    <text x="402" y="284" font-size="12" font-weight="bold" fill="#1e293b">▪ 用途</text>
+    <text x="416" y="304" font-size="9.5" fill="#475569">└ 仅多 DENY 时选 denyReason</text>
+    <text x="416" y="324" font-size="9.5" fill="#475569">└ 不参与 GRANT vs DENY 裁决</text>
+  </g>
+
+  <!-- ════ 列4 subject ════ -->
+  <g>
+    <rect x="565" y="190" width="165" height="34" rx="6" fill="#4f46e5"/><text x="647" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">subject · 主体</text>
+    <text x="577" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ type</text>
+    <text x="591" y="264" font-size="9.5" fill="#475569">└ 枚举 · role / user / group</text>
+    <text x="577" y="284" font-size="12" font-weight="bold" fill="#1e293b">▪ ids</text>
+    <text x="591" y="304" font-size="9.5" fill="#475569">└ 字符串数组 · ['regional_manager']</text>
+    <text x="577" y="324" font-size="12" font-weight="bold" fill="#1e293b">▪ attributes[]（数组→对象）</text>
+    <text x="591" y="344" font-size="9.5" fill="#475569">└ ref：'${subject.level}'（字符串）</text>
+    <text x="591" y="364" font-size="9.5" fill="#475569">└ op：EQ / NE / IN / NOT_IN（枚举）</text>
+    <text x="591" y="384" font-size="9.5" fill="#475569">└ value：'manager'（字符串/数组）</text>
+    <text x="591" y="404" font-size="9.5" fill="#475569">└ 语义：ids OR 后 attributes AND 收窄</text>
+  </g>
+
+  <!-- ════ 列5 resource ════ -->
+  <g>
+    <rect x="740" y="190" width="165" height="34" rx="6" fill="#0e7490"/><text x="822" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">resource · 资源</text>
+    <text x="752" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ resourceId</text>
+    <text x="766" y="264" font-size="9.5" fill="#475569">└ 三段式 'sales_db.sales_order'</text>
+    <text x="752" y="284" font-size="12" font-weight="bold" fill="#1e293b">▪ columns（列白名单）</text>
+    <text x="766" y="304" font-size="9.5" fill="#475569">└ 数组 ['order_id','amount',…]</text>
+    <text x="752" y="324" font-size="12" font-weight="bold" fill="#1e293b">▪ excludeColumns（减列）</text>
+    <text x="766" y="344" font-size="9.5" fill="#475569">└ 数组 ['customer_id_card']</text>
+    <text x="752" y="364" font-size="12" font-weight="bold" fill="#1e293b">▪ visibility</text>
+    <text x="766" y="384" font-size="9.5" fill="#475569">└ 枚举 VISIBLE / HIDDEN / CONDITIONAL</text>
+    <text x="752" y="404" font-size="12" font-weight="bold" fill="#1e293b">▪ tagTarget（标签策略扩展）</text>
+    <text x="766" y="424" font-size="9.5" fill="#475569">└ kind：entity / row / column（枚举）</text>
+    <text x="766" y="444" font-size="9.5" fill="#475569">└ keyColumn 'customer_id' · factTable 'tag_fact_view'</text>
+  </g>
+
+  <!-- ════ 列6 actions ════ -->
+  <g>
+    <rect x="915" y="190" width="165" height="34" rx="6" fill="#0284c7"/><text x="997" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">actions · 动作</text>
+    <text x="927" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ 取值（字符串数组叶）</text>
+    <text x="941" y="264" font-size="9.5" fill="#475569">└ 'read.snapshot'</text>
+    <text x="941" y="284" font-size="9.5" fill="#475569">└ 'read.changes'</text>
+    <text x="941" y="304" font-size="9.5" fill="#475569">└ 'export.csv'</text>
+    <text x="927" y="324" font-size="12" font-weight="bold" fill="#1e293b">▪ 命名空间规则</text>
+    <text x="941" y="344" font-size="9.5" fill="#475569">└ domain.verb 分层 · read.* 可通配</text>
+    <text x="941" y="364" font-size="9.5" fill="#475569">└ tag.read/count 需 T1+ · claim T2+</text>
+    <text x="941" y="384" font-size="9.5" fill="#475569">└ tag.drill 需 T3+</text>
+  </g>
+
+  <!-- ════ 列7 constraints ════ -->
+  <g>
+    <rect x="1090" y="190" width="165" height="34" rx="6" fill="#7c3aed"/><text x="1172" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">constraints · 约束</text>
+    <text x="1102" y="244" font-size="12" font-weight="bold" fill="#5b21b6">▪ rowExpr（表达式 AST）</text>
+    <text x="1116" y="264" font-size="9.5" fill="#475569">└ 内部节点：AND / OR / NOT / 比较</text>
+    <text x="1116" y="284" font-size="9.5" fill="#475569">└ IN / BETWEEN / LIKE / IS NULL</text>
+    <text x="1116" y="304" font-size="9.5" fill="#475569">└ 叶：column.region · ${subject.region}</text>
+    <text x="1116" y="324" font-size="9.5" fill="#475569">└ 叶：常量 'paid' · 占位符 ?1 · TAG_REF()</text>
+    <text x="1102" y="344" font-size="12" font-weight="bold" fill="#5b21b6">▪ maskRules[]（数组→对象）</text>
+    <text x="1116" y="364" font-size="9.5" fill="#475569">└ column：'customer_phone'（字符串）</text>
+    <text x="1116" y="384" font-size="9.5" fill="#475569">└ rule：FULL/NULL/HASH/PARTIAL/REPLACE</text>
+    <text x="1116" y="404" font-size="9.5" fill="#475569">└ expression（方言表达式）：</text>
+    <text x="1116" y="424" font-size="9.5" fill="#475569">└ 'CONCAT(LEFT(p,3),"****",RIGHT(p,4))'</text>
+    <text x="1102" y="444" font-size="12" font-weight="bold" fill="#5b21b6">▪ env[]（数组→对象）</text>
+    <text x="1116" y="464" font-size="9.5" fill="#475569">└ ref '${env.ipRange}' · op EQ · value 'office'</text>
+    <text x="1116" y="484" font-size="9.5" fill="#475569">└ 合并：行谓词 AND · 列交集 · 掩码最严</text>
+  </g>
+
+  <!-- ════ 列8 effectivePeriod ════ -->
+  <g>
+    <rect x="1265" y="190" width="165" height="34" rx="6" fill="#ea580c"/><text x="1347" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">effectivePeriod · 生效期</text>
+    <text x="1277" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ from</text>
+    <text x="1291" y="264" font-size="9.5" fill="#475569">└ ISO8601 '2026-09-01T00:00:00+08:00'</text>
+    <text x="1277" y="284" font-size="12" font-weight="bold" fill="#1e293b">▪ to</text>
+    <text x="1291" y="304" font-size="9.5" fill="#475569">└ 时间戳 / null（长期）</text>
+    <text x="1277" y="324" font-size="12" font-weight="bold" fill="#1e293b">▪ 语义</text>
+    <text x="1291" y="344" font-size="9.5" fill="#475569">└ 判定阶段折叠进 decision</text>
+    <text x="1291" y="364" font-size="9.5" fill="#475569">└ Plan 缓存 TTL 对齐时间窗粒度</text>
+  </g>
+
+  <!-- ════ 列9 obligations ════ -->
+  <g>
+    <rect x="1440" y="190" width="165" height="34" rx="6" fill="#db2777"/><text x="1522" y="212" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">obligations · 义务</text>
+    <text x="1452" y="244" font-size="12" font-weight="bold" fill="#1e293b">▪ 数组（0~n 个对象）</text>
+    <text x="1452" y="264" font-size="12" font-weight="bold" fill="#1e293b">▪ type</text>
+    <text x="1466" y="284" font-size="9.5" fill="#475569">└ 枚举 AUDIT / RATE_LIMIT</text>
+    <text x="1452" y="304" font-size="12" font-weight="bold" fill="#1e293b">▪ AUDIT 子字段</text>
+    <text x="1466" y="324" font-size="9.5" fill="#475569">└ level：OFF / deny / detail / summary</text>
+    <text x="1466" y="344" font-size="9.5" fill="#475569">└ sync：true / false（交付前确认）</text>
+    <text x="1452" y="364" font-size="12" font-weight="bold" fill="#1e293b">▪ RATE_LIMIT 子字段</text>
+    <text x="1466" y="384" font-size="9.5" fill="#475569">└ maxRows：10000（整数）</text>
+    <text x="1466" y="404" font-size="9.5" fill="#475569">└ 义务 = PEP 行为，方言无关</text>
+  </g>
+
+  <!-- 底部图例 -->
+  <rect x="40" y="512" width="1565" height="100" rx="10" fill="#0f172a"/>
+  <text x="820" y="536" text-anchor="middle" font-size="12" font-weight="bold" fill="#f8fafc">层级读法</text>
+  <text x="820" y="558" text-anchor="middle" font-size="11" fill="#cbd5e1">▪ 深色加粗 = 第二层（子字段）　└ 缩进灰字 = 叶子（带类型与示例值）　└ 再缩进 = 第三层（数组→对象内的子字段，仅 subject.attributes / resource.tagTarget / constraints.maskRules / constraints.env / obligations 存在）</text>
+  <text x="820" y="580" text-anchor="middle" font-size="11" fill="#cbd5e1">叶子值类型全集：字符串 / 整数 / 布尔 / 时间戳 / 枚举 / 数组 / 对象 / 表达式 AST（rowExpr 独有，内部节点与叶子可再递归展开）</text>
+  <text x="820" y="600" text-anchor="middle" font-size="11" fill="#cbd5e1">注意：priority 只有数值一个叶子；effect 只有枚举两个叶子；actions 是扁平字符串数组——这三部分没有第三层</text>
+</svg>

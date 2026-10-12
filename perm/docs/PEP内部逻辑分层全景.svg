@@ -1,0 +1,461 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1160" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrPurple" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrOrange" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#d97706"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1160" fill="#f8fafc"/>
+  <text x="60" y="52" font-size="28" font-weight="bold" fill="#0f172a">PEP 内部逻辑分层全景：四层请求链 + 常驻后台 + 业务扩展 SPI</text>
+  <text x="60" y="82" font-size="15" fill="#64748b">内置 32 项逻辑业务零感知 · 请求单向流经四层 · 常驻后台持续支撑 · 右侧 SPI 全部有内置默认实现，不扩展就用默认</text>
+
+  <!-- ════════ 层 1：入口与拦截 ════════ -->
+  <rect x="40" y="100" width="1500" height="178" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-dasharray="6 4"/>
+  <text x="60" y="128" font-size="16" font-weight="bold" fill="#1d4ed8">第 1 层 · 入口与拦截（进 PEP 的闸门）</text>
+  <text x="1380" y="128" font-size="12.5" fill="#1d4ed8">请求入口 → 豁免分流 → 元数据五级解析</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="140" width="280" height="126" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="60" y="140" width="280" height="28" rx="10" fill="#2563eb"/>
+    <rect x="60" y="156" width="280" height="12" fill="#2563eb"/>
+    <text x="200" y="159" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">接入点拦截</text>
+    <text x="74" y="186" font-size="12" fill="#374151">· MyBatis：StatementHandler.prepare 插件（全自动）</text>
+    <text x="74" y="204" font-size="12" fill="#374151">· JDBC：DataSource 代理（@PermJdbc 标记）</text>
+    <text x="74" y="222" font-size="12" fill="#374151">· Spark/Flink：提交器 API（手动调用）</text>
+    <text x="74" y="240" font-size="12" fill="#6b7280">物理拦截位置由接入方式决定</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="365" y="140" width="280" height="126" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="365" y="140" width="280" height="28" rx="10" fill="#3b82f6"/>
+    <rect x="365" y="156" width="280" height="12" fill="#3b82f6"/>
+    <text x="505" y="159" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">豁免检查（哪些查询不拦）</text>
+    <text x="379" y="186" font-size="12" fill="#374151">· @PermSkip 注解 / skip-rules 注册表匹配</text>
+    <text x="379" y="204" font-size="12" fill="#374151">· 豁免 ≠ 隐身：仍记审计（跳过判定事件）</text>
+    <text x="379" y="222" font-size="12" fill="#374151">· ThreadLocal 幂等标记防双重拦截</text>
+    <text x="379" y="240" font-size="12" fill="#6b7280">默认全拦，不拦必须显式声明</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="670" y="140" width="280" height="126" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="670" y="140" width="280" height="28" rx="10" fill="#3b82f6"/>
+    <rect x="670" y="156" width="280" height="12" fill="#3b82f6"/>
+    <text x="810" y="159" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">元数据解析（resourceId/action/dialect）</text>
+    <text x="684" y="186" font-size="12" fill="#374151">· 五级：注解 → 资源注册表 → 接入方式推断</text>
+    <text x="684" y="204" font-size="12" fill="#374151">· → 全局默认 → fail-closed 拒绝</text>
+    <text x="684" y="222" font-size="12" fill="#374151">· 推断：SELECT→read、表名→resourceId</text>
+    <text x="684" y="240" font-size="12" fill="#6b7280">注解仅 MyBatis 可解析，JDBC 走注册表</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="975" y="140" width="280" height="126" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="975" y="140" width="280" height="28" rx="10" fill="#3b82f6"/>
+    <rect x="975" y="156" width="280" height="12" fill="#3b82f6"/>
+    <text x="1115" y="159" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">上下文调用与校验</text>
+    <text x="989" y="186" font-size="12" fill="#374151">· 调 Provider 取 userId/roles/attrs</text>
+    <text x="989" y="204" font-size="12" fill="#374151">· 可选三渠道提取器增量合并（自动装配）</text>
+    <text x="989" y="222" font-size="12" fill="#374151">· 缺 userId/roles → DENY</text>
+    <text x="989" y="240" font-size="12" fill="#6b7280">提取异常 fail-closed，绝不猜测</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1280" y="140" width="260" height="126" rx="10" fill="#fff" stroke="#2563eb"/>
+    <rect x="1280" y="140" width="260" height="28" rx="10" fill="#3b82f6"/>
+    <rect x="1280" y="156" width="260" height="12" fill="#3b82f6"/>
+    <text x="1410" y="159" font-size="13.5" font-weight="bold" fill="#fff" text-anchor="middle">SQL 解析与范围检查</text>
+    <text x="1294" y="186" font-size="12" fill="#374151">· JSqlParser 解析（QueryParser）</text>
+    <text x="1294" y="204" font-size="12" fill="#374151">· R-S1 放行 / R-S2 拒绝（JOIN/聚合）</text>
+    <text x="1294" y="222" font-size="12" fill="#374151">· 解析缓存：模板键 + AST 深拷贝</text>
+    <text x="1294" y="240" font-size="12" fill="#6b7280">超范围拒绝（可自定义 Renderer）</text>
+  </g>
+
+  <!-- 层 1 → 层 2 -->
+  <line x1="790" y1="278" x2="790" y2="298" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <text x="800" y="294" font-size="11.5" fill="#2563eb">QueryContext 统一模型</text>
+
+  <!-- ════════ 层 2：判定与缓存 ════════ -->
+  <rect x="40" y="300" width="1500" height="178" rx="12" fill="#ecfdf5" stroke="#059669" stroke-dasharray="6 4"/>
+  <text x="60" y="328" font-size="16" font-weight="bold" fill="#047857">第 2 层 · 判定与缓存（拿产物的逻辑）</text>
+  <text x="1380" y="328" font-size="12.5" fill="#047857">算键 → L1 → L2 → PDP → 熔断/降级</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="340" width="228" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="60" y="340" width="228" height="28" rx="10" fill="#059669"/>
+    <rect x="60" y="356" width="228" height="12" fill="#059669"/>
+    <text x="174" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">缓存键计算</text>
+    <text x="74" y="386" font-size="11.5" fill="#374151">· 六/七元指纹 hash</text>
+    <text x="74" y="404" font-size="11.5" fill="#374151">· planVersion+dialect+resourceId</text>
+    <text x="74" y="422" font-size="11.5" fill="#374151">· +action+rolesFP+stableFP</text>
+    <text x="74" y="440" font-size="11.5" fill="#374151">· [+subjectIdsFP 分层键]</text>
+    <text x="74" y="456" font-size="11" fill="#6b7280">波动属性绝不进键</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="314" y="340" width="228" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="314" y="340" width="228" height="28" rx="10" fill="#10b981"/>
+    <rect x="314" y="356" width="228" height="12" fill="#10b981"/>
+    <text x="428" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">L1 Caffeine（进程内）</text>
+    <text x="328" y="386" font-size="11.5" fill="#374151">· 5 万容量 / 30s±5s TTL 抖动</text>
+    <text x="328" y="404" font-size="11.5" fill="#374151">· DENY 结果同样缓存（防穿透）</text>
+    <text x="328" y="422" font-size="11.5" fill="#374151">· 命中后 fullKey 二次校验</text>
+    <text x="328" y="440" font-size="11.5" fill="#374151">· 碰撞视为未命中</text>
+    <text x="328" y="456" font-size="11" fill="#6b7280">recordStats 指标</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="568" y="340" width="228" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="568" y="340" width="228" height="28" rx="10" fill="#10b981"/>
+    <rect x="568" y="356" width="228" height="12" fill="#10b981"/>
+    <text x="682" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">单飞 SingleFlight</text>
+    <text x="582" y="386" font-size="11.5" fill="#374151">· 同 key 并发只发一次 L2/PDP</text>
+    <text x="582" y="404" font-size="11.5" fill="#374151">· 其余线程等待同一结果</text>
+    <text x="582" y="422" font-size="11.5" fill="#374151">· 防缓存击穿</text>
+    <text x="582" y="456" font-size="11" fill="#6b7280">L1 未命中时触发</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="822" y="340" width="228" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="822" y="340" width="228" height="28" rx="10" fill="#10b981"/>
+    <rect x="822" y="356" width="228" height="12" fill="#10b981"/>
+    <text x="936" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">L2 Redis（集群共享）</text>
+    <text x="836" y="386" font-size="11.5" fill="#374151">· 100 万容量共享产物</text>
+    <text x="836" y="404" font-size="11.5" fill="#374151">· 多实例命中率稀释的补偿层</text>
+    <text x="836" y="422" font-size="11.5" fill="#374151">· perm:version:latest 比对锚点</text>
+    <text x="836" y="456" font-size="11" fill="#6b7280">并发写幂等</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1076" y="340" width="228" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="1076" y="340" width="228" height="28" rx="10" fill="#10b981"/>
+    <rect x="1076" y="356" width="228" height="12" fill="#10b981"/>
+    <text x="1190" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">PDP RPC</text>
+    <text x="1090" y="386" font-size="11.5" fill="#374151">· AuthorizationRequest 构造</text>
+    <text x="1090" y="404" font-size="11.5" fill="#374151">· 响应解析（CachedArtifact）</text>
+    <text x="1090" y="422" font-size="11.5" fill="#374151">· 失败 → 进降级决策</text>
+    <text x="1090" y="456" font-size="11" fill="#6b7280">远程判定唯一入口</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1330" y="340" width="210" height="126" rx="10" fill="#fff" stroke="#059669"/>
+    <rect x="1330" y="340" width="210" height="28" rx="10" fill="#059669"/>
+    <rect x="1330" y="356" width="210" height="12" fill="#059669"/>
+    <text x="1435" y="359" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">熔断与降级</text>
+    <text x="1344" y="386" font-size="11.5" fill="#374151">· 持续失败触发熔断 → DENY</text>
+    <text x="1344" y="404" font-size="11.5" fill="#374151">· PDP 不可达：缓存 PERMIT</text>
+    <text x="1344" y="422" font-size="11.5" fill="#374151">· 立即降 DENY，DENY 保持</text>
+    <text x="1344" y="440" font-size="11.5" fill="#374151">· 未命中 DENY</text>
+    <text x="1344" y="456" font-size="11" fill="#b91c1c">绝不 TTL 续用（R-K6）</text>
+  </g>
+
+  <!-- 层 2 → 层 3 -->
+  <line x1="790" y1="478" x2="790" y2="498" stroke="#059669" stroke-width="2.5" marker-end="url(#arrGreen)"/>
+  <text x="800" y="494" font-size="11.5" fill="#059669">CachedArtifact（模板产物）</text>
+
+  <!-- ════════ 层 3：产物处理 ════════ -->
+  <rect x="40" y="500" width="1500" height="178" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-dasharray="6 4"/>
+  <text x="60" y="528" font-size="16" font-weight="bold" fill="#5b21b6">第 3 层 · 产物处理（模板 → 引擎上的真实过滤）</text>
+  <text x="1380" y="528" font-size="12.5" fill="#5b21b6">验签 → DENY 检查 → 绑定 → 注入 → 投影</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="540" width="228" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="60" y="540" width="228" height="28" rx="10" fill="#7c3aed"/>
+    <rect x="60" y="556" width="228" height="12" fill="#7c3aed"/>
+    <text x="174" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">HMAC 验签 + schema 校验</text>
+    <text x="74" y="586" font-size="11.5" fill="#374151">· 重算签名常量时间比对</text>
+    <text x="74" y="604" font-size="11.5" fill="#374151">· 产物结构合法性检查</text>
+    <text x="74" y="622" font-size="11.5" fill="#374151">· 失败视同 miss 回源</text>
+    <text x="74" y="640" font-size="11.5" fill="#6b7280">防篡改/伪造/缓存投毒</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="314" y="540" width="228" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="314" y="540" width="228" height="28" rx="10" fill="#8b5cf6"/>
+    <rect x="314" y="556" width="228" height="12" fill="#8b5cf6"/>
+    <text x="428" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">DENY 检查（红支路）</text>
+    <text x="328" y="586" font-size="11.5" fill="#374151">· decision=DENY → 不进改写链</text>
+    <text x="328" y="604" font-size="11.5" fill="#374151">· 拒绝对齐 + DENY 义务执行</text>
+    <text x="328" y="622" font-size="11.5" fill="#374151">· 审计记录后直接返回</text>
+    <text x="328" y="640" font-size="11.5" fill="#6b7280">PERMIT 才继续下行</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="568" y="540" width="228" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="568" y="540" width="228" height="28" rx="10" fill="#8b5cf6"/>
+    <rect x="568" y="556" width="228" height="12" fill="#8b5cf6"/>
+    <text x="682" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">ParamBinder（绑定）</text>
+    <text x="582" y="586" font-size="11.5" fill="#374151">· bindOrder 生成</text>
+    <text x="582" y="604" font-size="11.5" fill="#374151">· 【值唯一出现点，C1】</text>
+    <text x="582" y="622" font-size="11.5" fill="#374151">· A 类 ?+绑定 / B 类安全转义</text>
+    <text x="582" y="640" font-size="11.5" fill="#374151">· 变量解析不到 → DENY</text>
+    <text x="582" y="656" font-size="11" fill="#6b7280">权限 ? 恒在原 SQL 之后（R-B3）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="822" y="540" width="228" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="822" y="540" width="228" height="28" rx="10" fill="#8b5cf6"/>
+    <rect x="822" y="556" width="228" height="12" fill="#8b5cf6"/>
+    <text x="936" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">PredicateInjector（注入）</text>
+    <text x="836" y="586" font-size="11.5" fill="#374151">· 权限谓词 AND 注入原 WHERE 后</text>
+    <text x="836" y="604" font-size="11.5" fill="#374151">· 无 WHERE 补 WHERE（R-B5）</text>
+    <text x="836" y="622" font-size="11.5" fill="#374151">· 列引用带表名/别名限定（R-B6）</text>
+    <text x="836" y="640" font-size="11.5" fill="#374151">· ES：bool.filter 片段合并</text>
+    <text x="836" y="656" font-size="11" fill="#6b7280">引擎可执行才叫下推</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1076" y="540" width="228" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="1076" y="540" width="228" height="28" rx="10" fill="#8b5cf6"/>
+    <rect x="1076" y="556" width="228" height="12" fill="#8b5cf6"/>
+    <text x="1190" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">ColumnPruner（列投影）</text>
+    <text x="1090" y="586" font-size="11.5" fill="#374151">· 裁剪到 visibleColumns 交集</text>
+    <text x="1090" y="604" font-size="11.5" fill="#374151">· SELECT * 三级展开（R-S4）</text>
+    <text x="1090" y="622" font-size="11.5" fill="#374151">· 产物 schema → 本地缓存 →</text>
+    <text x="1090" y="640" font-size="11.5" fill="#374151">· information_schema 实时查</text>
+    <text x="1090" y="656" font-size="11" fill="#6b7280">掩码列替换为掩码表达式</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1330" y="540" width="210" height="126" rx="10" fill="#fff" stroke="#7c3aed"/>
+    <rect x="1330" y="540" width="210" height="28" rx="10" fill="#7c3aed"/>
+    <rect x="1330" y="556" width="210" height="12" fill="#7c3aed"/>
+    <text x="1435" y="559" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">掩码列引用检测</text>
+    <text x="1344" y="586" font-size="11.5" fill="#374151">· 掩码列被 WHERE / ORDER BY</text>
+    <text x="1344" y="604" font-size="11.5" fill="#374151">· / GROUP BY / JOIN ON 引用</text>
+    <text x="1344" y="622" font-size="11.5" fill="#374151">· → 拒绝（R-S5）</text>
+    <text x="1344" y="640" font-size="11.5" fill="#6b7280">防绕过列权限</text>
+  </g>
+
+  <!-- 层 3 → 层 4 -->
+  <line x1="790" y1="678" x2="790" y2="698" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrPurple)"/>
+  <text x="800" y="694" font-size="11.5" fill="#7c3aed">改写后 SQL + bindOrder 值</text>
+
+  <!-- ════════ 层 4：执行与收尾 ════════ -->
+  <rect x="40" y="700" width="1500" height="178" rx="12" fill="#fff7ed" stroke="#d97706" stroke-dasharray="6 4"/>
+  <text x="60" y="728" font-size="16" font-weight="bold" fill="#9a3412">第 4 层 · 执行与收尾（引擎做不了的兜底 + 闭环）</text>
+  <text x="1380" y="728" font-size="12.5" fill="#9a3412">执行 → 后置 → 标签 → 义务 → 审计</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="740" width="228" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="60" y="740" width="228" height="28" rx="10" fill="#d97706"/>
+    <rect x="60" y="756" width="228" height="12" fill="#d97706"/>
+    <text x="174" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">引擎执行（Executor）</text>
+    <text x="74" y="786" font-size="11.5" fill="#374151">· 改写 SQL 交引擎执行</text>
+    <text x="74" y="804" font-size="11.5" fill="#374151">· 权限过滤在引擎内完成</text>
+    <text x="74" y="822" font-size="11.5" fill="#374151">· Cypher：位置参数→命名参数 map</text>
+    <text x="74" y="840" font-size="11.5" fill="#6b7280">dialect+accessType 路由</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="314" y="740" width="228" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="314" y="740" width="228" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="314" y="756" width="228" height="12" fill="#f59e0b"/>
+    <text x="428" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">ResidualProcessor（后置）</text>
+    <text x="328" y="786" font-size="11.5" fill="#374151">· 引擎无关 AST 求值器逐行过滤</text>
+    <text x="328" y="804" font-size="11.5" fill="#374151">· residual 过滤 + LIMIT → 拒绝</text>
+    <text x="328" y="822" font-size="11.5" fill="#374151">· 结果集 10000 上限（R-R4）</text>
+    <text x="328" y="840" font-size="11.5" fill="#374151">· 外部查询批量（R-R6）</text>
+    <text x="328" y="856" font-size="11" fill="#6b7280">顺序契约：下推→执行→后置（R-R2）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="568" y="740" width="228" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="568" y="740" width="228" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="568" y="756" width="228" height="12" fill="#f59e0b"/>
+    <text x="682" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">ColumnMaskApplier（掩码）</text>
+    <text x="582" y="786" font-size="11.5" fill="#374151">· 掩码后置应用：HASH / PARTIAL</text>
+    <text x="582" y="804" font-size="11.5" fill="#374151">· / REPLACE / NULL</text>
+    <text x="582" y="822" font-size="11.5" fill="#374151">· 多策略掩码取最严（R-D9）</text>
+    <text x="582" y="840" font-size="11.5" fill="#6b7280">不影响行数，安全</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="822" y="740" width="228" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="822" y="740" width="228" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="822" y="756" width="228" height="12" fill="#f59e0b"/>
+    <text x="936" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">标签执行（跨库方案）</text>
+    <text x="836" y="786" font-size="11.5" fill="#374151">· 模式 A：实体列表绑定下推</text>
+    <text x="836" y="804" font-size="11.5" fill="#374151">· （&lt;1000，值进产物唯一例外）</text>
+    <text x="836" y="822" font-size="11.5" fill="#374151">· 校验式：圈选动作锚定</text>
+    <text x="836" y="840" font-size="11.5" fill="#374151">· （大标签，不注入谓词）</text>
+    <text x="836" y="856" font-size="11" fill="#6b7280">跨库：模式 B 子查询已删除</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1076" y="740" width="228" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="1076" y="740" width="228" height="28" rx="10" fill="#f59e0b"/>
+    <rect x="1076" y="756" width="228" height="12" fill="#f59e0b"/>
+    <text x="1190" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">ObligationExecutor（义务）</text>
+    <text x="1090" y="786" font-size="11.5" fill="#374151">· AUDIT：sync 交付前入队确认</text>
+    <text x="1090" y="804" font-size="11.5" fill="#374151">· / async 尽力入队</text>
+    <text x="1090" y="822" font-size="11.5" fill="#374151">· RATE_LIMIT：事后行数检查</text>
+    <text x="1090" y="840" font-size="11.5" fill="#374151">· 超限告警或拒绝</text>
+    <text x="1090" y="856" font-size="11" fill="#6b7280">NOTIFY 预留</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1330" y="740" width="210" height="126" rx="10" fill="#fff" stroke="#d97706"/>
+    <rect x="1330" y="740" width="210" height="28" rx="10" fill="#d97706"/>
+    <rect x="1330" y="756" width="210" height="12" fill="#d97706"/>
+    <text x="1435" y="759" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">审计通道</text>
+    <text x="1344" y="786" font-size="11.5" fill="#374151">· 内存队列 10000 → 独立线程</text>
+    <text x="1344" y="804" font-size="11.5" fill="#374151">· 批量 Kafka（每批 ≤100）</text>
+    <text x="1344" y="822" font-size="11.5" fill="#374151">· 队列满分档（R-A4）</text>
+    <text x="1344" y="840" font-size="11.5" fill="#374151">· 严格 fail-closed / 丢弃+告警</text>
+    <text x="1344" y="856" font-size="11" fill="#6b7280">字段全集 15 项（R-A2）</text>
+  </g>
+
+  <!-- 层 4 → 结果 -->
+  <line x1="790" y1="878" x2="790" y2="896" stroke="#d97706" stroke-width="2.5" marker-end="url(#arrOrange)"/>
+  <text x="800" y="893" font-size="11.5" fill="#d97706">过滤/掩码后的最终结果 → 返回业务</text>
+
+  <!-- ════════ 常驻后台 ════════ -->
+  <rect x="40" y="900" width="1500" height="168" rx="12" fill="#fdf2f8" stroke="#db2777" stroke-dasharray="6 4"/>
+  <text x="60" y="928" font-size="16" font-weight="bold" fill="#9d174d">常驻后台（不随请求运行 · 进程内持续运转）</text>
+  <text x="1400" y="928" font-size="12.5" fill="#9d174d">失效 / 同步 / 上报 / 观测</text>
+
+  <g filter="url(#sh)">
+    <rect x="60" y="940" width="228" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="60" y="940" width="228" height="28" rx="10" fill="#db2777"/>
+    <rect x="60" y="956" width="228" height="12" fill="#db2777"/>
+    <text x="174" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">版本事件消费</text>
+    <text x="74" y="986" font-size="11.5" fill="#374151">· Kafka 独立消费者组=广播</text>
+    <text x="74" y="1004" font-size="11.5" fill="#374151">· 版本号比较幂等</text>
+    <text x="74" y="1022" font-size="11.5" fill="#374151">· offset 后提交（补投续读）</text>
+    <text x="74" y="1040" font-size="11.5" fill="#374151">· 收到即本地失效</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="314" y="940" width="228" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="314" y="940" width="228" height="28" rx="10" fill="#ec4899"/>
+    <rect x="314" y="956" width="228" height="12" fill="#ec4899"/>
+    <text x="428" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">版本比对线程</text>
+    <text x="328" y="986" font-size="11.5" fill="#374151">· 5s 定时 GET version:latest</text>
+    <text x="328" y="1004" font-size="11.5" fill="#374151">· 与 currentPlanVersion 比对</text>
+    <text x="328" y="1022" font-size="11.5" fill="#374151">· 不一致 → 本地失效</text>
+    <text x="328" y="1040" font-size="11.5" fill="#374151">· 失效第二道防线（推的兜底）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="568" y="940" width="228" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="568" y="940" width="228" height="28" rx="10" fill="#ec4899"/>
+    <rect x="568" y="956" width="228" height="12" fill="#ec4899"/>
+    <text x="682" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">L1 回收</text>
+    <text x="582" y="986" font-size="11.5" fill="#374151">· Caffeine TTL 自然过期</text>
+    <text x="582" y="1004" font-size="11.5" fill="#374151">· 旧键靠 TTL 物理回收</text>
+    <text x="582" y="1022" font-size="11.5" fill="#374151">· 不主动删除（指针前移即可）</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="822" y="940" width="228" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="822" y="940" width="228" height="28" rx="10" fill="#ec4899"/>
+    <rect x="822" y="956" width="228" height="12" fill="#ec4899"/>
+    <text x="936" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">指标统计</text>
+    <text x="836" y="986" font-size="11.5" fill="#374151">· recordStats 缓存命中率</text>
+    <text x="836" y="1004" font-size="11.5" fill="#374151">· 判定耗时 / 审计积压</text>
+    <text x="836" y="1022" font-size="11.5" fill="#374151">· 降级/熔断事件</text>
+    <text x="836" y="1040" font-size="11.5" fill="#374151">· 暴露监控指标</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1076" y="940" width="228" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="1076" y="940" width="228" height="28" rx="10" fill="#ec4899"/>
+    <rect x="1076" y="956" width="228" height="12" fill="#ec4899"/>
+    <text x="1190" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">注册表热更新</text>
+    <text x="1090" y="986" font-size="11.5" fill="#374151">· 资源注册表本地缓存</text>
+    <text x="1090" y="1004" font-size="11.5" fill="#374151">· 豁免规则 / 表 schema</text>
+    <text x="1090" y="1022" font-size="11.5" fill="#374151">· 定期同步刷新</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1330" y="940" width="210" height="112" rx="10" fill="#fff" stroke="#db2777"/>
+    <rect x="1330" y="940" width="210" height="28" rx="10" fill="#db2777"/>
+    <rect x="1330" y="956" width="210" height="12" fill="#db2777"/>
+    <text x="1435" y="959" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">SPI 运行时</text>
+    <text x="1344" y="986" font-size="11.5" fill="#374151">· Executor 路由注册表</text>
+    <text x="1344" y="1004" font-size="11.5" fill="#374151">· dialect+accessType→Executor</text>
+    <text x="1344" y="1022" font-size="11.5" fill="#374151">· Adapter 注册表</text>
+  </g>
+
+  <!-- ════════ 右侧 SPI 扩展点列 ════════ -->
+  <rect x="1570" y="100" width="310" height="968" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-dasharray="6 4"/>
+  <text x="1590" y="130" font-size="15" font-weight="bold" fill="#0f766e">业务扩展 SPI</text>
+  <text x="1590" y="150" font-size="11.5" fill="#0f766e">全部有内置默认实现，不扩展就用默认</text>
+
+  <rect x="1590" y="164" width="270" height="58" rx="8" fill="#fff" stroke="#0d9488"/>
+  <text x="1602" y="184" font-size="12.5" font-weight="bold" fill="#b91c1c">必写（1）</text>
+  <text x="1602" y="202" font-size="11.5" fill="#374151">AuthorizationContextProvider</text>
+  <text x="1602" y="216" font-size="10.5" fill="#6b7280">身份来源：userId/roles/attrs</text>
+
+  <rect x="1590" y="232" width="270" height="110" rx="8" fill="#fff" stroke="#0d9488"/>
+  <text x="1602" y="252" font-size="12.5" font-weight="bold" fill="#0f766e">上下文渠道（3）</text>
+  <text x="1602" y="272" font-size="11.5" fill="#374151">SubjectAttributeExtractor</text>
+  <text x="1602" y="286" font-size="10.5" fill="#6b7280">角色继承展开等主体属性</text>
+  <text x="1602" y="304" font-size="11.5" fill="#374151">ResourceAttributeExtractor</text>
+  <text x="1602" y="318" font-size="10.5" fill="#6b7280">资源侧属性</text>
+  <text x="1602" y="336" font-size="11.5" fill="#374151">EnvironmentExtractor</text>
+  <text x="1602" y="350" font-size="10.5" fill="#6b7280">时间/环境（判定期折叠）</text>
+
+  <rect x="1590" y="352" width="270" height="262" rx="8" fill="#fff" stroke="#0d9488"/>
+  <text x="1602" y="372" font-size="12.5" font-weight="bold" fill="#0f766e">执行链（7）</text>
+  <text x="1602" y="392" font-size="11.5" fill="#374151">DialectExecutor</text>
+  <text x="1602" y="406" font-size="10.5" fill="#6b7280">新引擎执行器（主接口）</text>
+  <text x="1602" y="424" font-size="11.5" fill="#374151">QueryParser</text>
+  <text x="1602" y="438" font-size="10.5" fill="#6b7280">非 SQL 方言解析</text>
+  <text x="1602" y="456" font-size="11.5" fill="#374151">ParamBinder</text>
+  <text x="1602" y="470" font-size="10.5" fill="#6b7280">特殊占位符语法</text>
+  <text x="1602" y="488" font-size="11.5" fill="#374151">PredicateInjector</text>
+  <text x="1602" y="502" font-size="10.5" fill="#6b7280">DSL 片段注入策略</text>
+  <text x="1602" y="520" font-size="11.5" fill="#374151">ColumnPruner</text>
+  <text x="1602" y="534" font-size="10.5" fill="#6b7280">字段投影（ES _source）</text>
+  <text x="1602" y="552" font-size="11.5" fill="#374151">ResidualProcessor</text>
+  <text x="1602" y="566" font-size="10.5" fill="#6b7280">新 AST 节点求值</text>
+  <text x="1602" y="584" font-size="11.5" fill="#374151">ObligationExecutor</text>
+  <text x="1602" y="598" font-size="10.5" fill="#6b7280">自定义义务类型</text>
+
+  <rect x="1590" y="624" width="270" height="96" rx="8" fill="#fff" stroke="#0d9488"/>
+  <text x="1602" y="644" font-size="12.5" font-weight="bold" fill="#0f766e">辅助（2）</text>
+  <text x="1602" y="664" font-size="11.5" fill="#374151">ArtifactDecoder</text>
+  <text x="1602" y="678" font-size="10.5" fill="#6b7280">产物自定义解码（压缩/加密）</text>
+  <text x="1602" y="696" font-size="11.5" fill="#374151">AuditReporter</text>
+  <text x="1602" y="710" font-size="10.5" fill="#6b7280">审计上报渠道（默认 Kafka）</text>
+
+  <rect x="1590" y="730" width="270" height="66" rx="8" fill="#fff" stroke="#0d9488"/>
+  <text x="1602" y="750" font-size="12.5" font-weight="bold" fill="#0f766e">表达式（1）</text>
+  <text x="1602" y="770" font-size="11.5" fill="#374151">CustomExpr（R-E4）</text>
+  <text x="1602" y="784" font-size="10.5" fill="#6b7280">白名单外函数扩展</text>
+
+  <text x="1590" y="822" font-size="12" font-weight="bold" fill="#0f766e">注册方式</text>
+  <text x="1590" y="842" font-size="11" fill="#374151">① @Component 自动发现</text>
+  <text x="1590" y="858" font-size="10.5" fill="#6b7280">Provider / 三渠道 / 义务 / 审计 / CustomExpr</text>
+  <text x="1590" y="876" font-size="11" fill="#374151">② router.register(...)</text>
+  <text x="1590" y="892" font-size="10.5" fill="#6b7280">Executor / Parser 等执行链组件</text>
+  <text x="1590" y="910" font-size="11" fill="#374151">③ 策略包提交加载（PDP 侧）</text>
+  <text x="1590" y="926" font-size="10.5" fill="#6b7280">DialectRenderer 六件套</text>
+
+  <rect x="1590" y="944" width="270" height="108" rx="8" fill="#fff7ed" stroke="#d97706"/>
+  <text x="1602" y="964" font-size="12.5" font-weight="bold" fill="#9a3412">高频扩展（真实会用）</text>
+  <text x="1602" y="984" font-size="11.5" fill="#374151">① AuthorizationContextProvider 必写</text>
+  <text x="1602" y="1002" font-size="11.5" fill="#374151">② CustomExpr 白名单外函数</text>
+  <text x="1602" y="1020" font-size="11.5" fill="#374151">③ DialectExecutor/Renderer 新引擎</text>
+  <text x="1602" y="1038" font-size="11.5" fill="#374151">④ SubjectAttributeExtractor 外部角色</text>
+
+  <!-- 底部原则条 -->
+  <rect x="40" y="1088" width="1840" height="52" rx="10" fill="#e2e8f0"/>
+  <text x="60" y="1110" font-size="13" fill="#334155">核心原则：适配器薄（框架差异压扁在 extract/apply 两步翻译）· 管线厚（32 项执行语义只有一份）· SPI 全是替换点（默认实现内置，不扩展就用默认）</text>
+  <text x="60" y="1130" font-size="13" fill="#334155">安全底线：全链路 fail-closed（判定失败→DENY · 绑定失败→DENY · 验签失败→回源 · 审计队列满→拒绝交付 · 熔断态→DENY · 降级只收窄）</text>
+</svg>

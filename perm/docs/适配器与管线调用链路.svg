@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1300" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrOrange" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#d97706"/>
+    </marker>
+    <marker id="arrPurple" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrGray" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#94a3b8"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1300" fill="#f8fafc"/>
+  <text x="60" y="52" font-size="28" font-weight="bold" fill="#0f172a">适配器与管线调用链路：MyBatis 一次查询的完整时序（10 步）</text>
+  <text x="60" y="82" font-size="15" fill="#64748b">单向两级调用：MyBatis 调适配器 → 适配器调管线两次（执行前 decideAndRewrite / 执行后 postProcess）→ 管线是被调的工具，从不主动调任何人</text>
+
+  <!-- 五个泳道头部 -->
+  <rect x="40" y="108" width="1520" height="62" rx="10" fill="#e2e8f0"/>
+  <g>
+    <rect x="60" y="118" width="270" height="42" rx="8" fill="#334155"/>
+    <text x="195" y="144" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">业务代码</text>
+  </g>
+  <g>
+    <rect x="380" y="118" width="270" height="42" rx="8" fill="#2563eb"/>
+    <text x="515" y="144" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">MyBatis 框架</text>
+  </g>
+  <g>
+    <rect x="700" y="118" width="270" height="42" rx="8" fill="#7c3aed"/>
+    <text x="835" y="144" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">适配器 PermInterceptor</text>
+  </g>
+  <g>
+    <rect x="1020" y="118" width="270" height="42" rx="8" fill="#059669"/>
+    <text x="1155" y="144" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">管线 ExecutionPipeline</text>
+  </g>
+  <g>
+    <rect x="1340" y="118" width="200" height="42" rx="8" fill="#d97706"/>
+    <text x="1440" y="144" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">数据库引擎</text>
+  </g>
+
+  <!-- 泳道生命线 -->
+  <line x1="195" y1="170" x2="195" y2="1240" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+  <line x1="515" y1="170" x2="515" y2="1240" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+  <line x1="835" y1="170" x2="835" y2="1240" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+  <line x1="1155" y1="170" x2="1155" y2="1240" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+  <line x1="1440" y1="170" x2="1440" y2="1240" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+
+  <!-- ① 业务 → MyBatis -->
+  <line x1="195" y1="210" x2="515" y2="210" stroke="#334155" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="355" y="200" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="middle">① orderMapper.queryOrders(startDate)</text>
+
+  <!-- ② MyBatis → 适配器 -->
+  <line x1="515" y1="260" x2="835" y2="260" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="675" y="250" font-size="12" font-weight="bold" fill="#1d4ed8" text-anchor="middle">② 插件机制调用 intercept()（StatementHandler.prepare 拦截点）</text>
+
+  <!-- ③ 适配器 → 管线（第一次） -->
+  <line x1="835" y1="310" x2="1155" y2="310" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+  <text x="995" y="300" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">③ pipeline.decideAndRewrite(ctx)</text>
+  <text x="995" y="318" font-size="11" fill="#047857">传：QueryContext（SQL+参数+上下文+资源）</text>
+
+  <!-- 管线内部展开 -->
+  <g filter="url(#sh)">
+    <rect x="1000" y="340" width="540" height="150" rx="10" fill="#ecfdf5" stroke="#059669"/>
+    <text x="1016" y="362" font-size="12.5" font-weight="bold" fill="#047857">管线内部（适配器不需要知道）：</text>
+    <text x="1016" y="384" font-size="11.5" fill="#374151">· 算缓存键（六/七元指纹）→ L1 Caffeine → 未命中 → 单飞 → L2 Redis</text>
+    <text x="1016" y="402" font-size="11.5" fill="#374151">· 仍未命中 → PDP RPC（远程判定）→ 回填 L2/L1</text>
+    <text x="1016" y="420" font-size="11.5" fill="#374151">· HMAC 验签 → DENY 检查（红支路）</text>
+    <text x="1016" y="438" font-size="11.5" fill="#374151">· ① Parser → ② Binder（bindOrder 值）→ ③ Injector → ④ Pruner</text>
+    <text x="1016" y="456" font-size="11.5" fill="#374151">· PDP 不可达 → 缓存 PERMIT 立即降 DENY / 未命中 DENY（fail-closed）</text>
+  </g>
+  <line x1="1155" y1="490" x2="1155" y2="520" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+
+  <!-- ④ 管线 → 适配器 返回 -->
+  <line x1="1155" y1="520" x2="835" y2="520" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+  <text x="995" y="510" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">④ 返回 RewriteResult{改写 SQL, 参数映射, BoundArtifact}</text>
+
+  <!-- ⑤ 适配器 → MyBatis 写回 -->
+  <line x1="835" y1="570" x2="515" y2="570" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrPurple)"/>
+  <text x="675" y="560" font-size="12" font-weight="bold" fill="#5b21b6" text-anchor="middle">⑤ 把改写结果写回 BoundSql（meta.setValue delegate.boundSql）</text>
+
+  <!-- ⑥ MyBatis → 数据库 -->
+  <line x1="515" y1="620" x2="1440" y2="620" stroke="#d97706" stroke-width="2" marker-end="url(#arrOrange)"/>
+  <text x="975" y="610" font-size="12" font-weight="bold" fill="#9a3412" text-anchor="middle">⑥ invocation.proceed()：MyBatis 拿【改写后 SQL】去数据库执行</text>
+  <text x="975" y="628" font-size="11" fill="#9a3412">引擎跑的是改写 SQL —— 行权限在数据库内过滤完成</text>
+
+  <!-- 改写 SQL 气泡 -->
+  <g filter="url(#sh)">
+    <rect x="600" y="650" width="720" height="66" rx="10" fill="#fff7ed" stroke="#d97706"/>
+    <text x="620" y="674" font-size="11.5" font-family="monospace" fill="#334155">SELECT id, name, SHA2(amount,256) AS amount FROM sales_order</text>
+    <text x="620" y="692" font-size="11.5" font-family="monospace" fill="#334155">WHERE order_date &gt;= ? AND (`region` = ? AND `status` IN (?,?))</text>
+  </g>
+  <line x1="1440" y1="716" x2="1440" y2="740" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+
+  <!-- ⑦ 数据库 → MyBatis -->
+  <line x1="1440" y1="740" x2="515" y2="740" stroke="#d97706" stroke-width="2" marker-end="url(#arrOrange)"/>
+  <text x="975" y="730" font-size="12" fill="#9a3412" text-anchor="middle">⑦ 返回结果集（已含引擎侧行过滤）</text>
+
+  <!-- ⑧ MyBatis → 适配器 -->
+  <line x1="515" y1="790" x2="835" y2="790" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="675" y="780" font-size="12" fill="#1d4ed8" text-anchor="middle">proceed() 返回 result</text>
+
+  <!-- ⑨ 适配器 → 管线（第二次） -->
+  <line x1="835" y1="840" x2="1155" y2="840" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+  <text x="995" y="830" font-size="12" font-weight="bold" fill="#047857" text-anchor="middle">⑧ pipeline.postProcess(result, bound) —— 第二次调用</text>
+  <text x="995" y="848" font-size="11" fill="#047857">传：ResultSet + BoundArtifact</text>
+
+  <g filter="url(#sh)">
+    <rect x="1000" y="868" width="540" height="112" rx="10" fill="#ecfdf5" stroke="#059669"/>
+    <text x="1016" y="890" font-size="12.5" font-weight="bold" fill="#047857">管线内部：</text>
+    <text x="1016" y="912" font-size="11.5" fill="#374151">· ⑤→⑥ residual 未下推谓词 → 内置 AST 求值器内存过滤</text>
+    <text x="1016" y="930" font-size="11.5" fill="#374151">· 掩码兜底（residual 掩码不影响行数）</text>
+    <text x="1016" y="948" font-size="11.5" fill="#374151">· Obligation：AUDIT sync 交付前入队确认 / RATE_LIMIT 行数检查</text>
+    <text x="1016" y="966" font-size="11.5" fill="#b91c1c">· 禁令：residual 过滤+LIMIT 组合 → 拒绝 · 结果集 &gt;10000 → 拒绝</text>
+  </g>
+
+  <!-- ⑨ 管线 → 适配器 -->
+  <line x1="1155" y1="980" x2="835" y2="980" stroke="#059669" stroke-width="2" marker-end="url(#arrGreen)"/>
+  <text x="995" y="970" font-size="12" fill="#047857" text-anchor="middle">⑨ 返回过滤/掩码后的最终结果</text>
+
+  <!-- ⑩ 适配器 → MyBatis → 业务 -->
+  <line x1="835" y1="1030" x2="515" y2="1030" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrPurple)"/>
+  <line x1="515" y1="1080" x2="195" y2="1080" stroke="#334155" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="675" y="1020" font-size="12" fill="#5b21b6" text-anchor="middle">⑩ return finalResult 给 MyBatis → 业务</text>
+
+  <!-- 底部总结 -->
+  <rect x="40" y="1120" width="1520" height="150" rx="12" fill="#e2e8f0"/>
+  <text x="60" y="1150" font-size="15" font-weight="bold" fill="#0f172a">调用关系三句话</text>
+  <text x="80" y="1178" font-size="13" fill="#334155">① 方向唯一：框架调适配器 → 适配器调管线两次（执行前 decideAndRewrite / 执行后 postProcess）→ 中间夹一次 invocation.proceed() 让引擎执行改写 SQL</text>
+  <text x="80" y="1202" font-size="13" fill="#334155">② 通信靠翻译：适配器把 MyBatis 对象翻成 QueryContext 给管线，管线返回 RewriteResult，适配器再翻回 BoundSql —— 管线全程不认识 MyBatis</text>
+  <text x="80" y="1226" font-size="13" fill="#334155">③ 分工清楚：适配器只有 extract/apply 两个翻译动作 + 两次管线调用（约 30 行）——判定/缓存/绑定/注入/投影/后置/审计全部在管线内，所有接入方式共用同一份</text>
+</svg>
