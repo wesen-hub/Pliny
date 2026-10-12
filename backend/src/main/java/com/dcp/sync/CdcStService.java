@@ -42,7 +42,7 @@ public class CdcStService {
     private final DatasourceService datasourceService;
     private final SeaTunnelClient seaTunnelClient;
     private final CurrentPositionReader currentPositionReader;
-    private final CdcJobFamilyService jobFamilyService;
+    private final CdcTaskDispatchService taskDispatchService;
     private final BackfillService backfillService;
     private final String encKey;
 
@@ -61,14 +61,14 @@ public class CdcStService {
     public CdcStService(JdbcTemplate metaJdbc, DatasourceService datasourceService,
                         SeaTunnelClient seaTunnelClient,
                         CurrentPositionReader currentPositionReader,
-                        CdcJobFamilyService jobFamilyService,
+                        CdcTaskDispatchService taskDispatchService,
                         BackfillService backfillService,
                         @org.springframework.beans.factory.annotation.Value("${dcp.enc-key}") String encKey) {
         this.metaJdbc = metaJdbc;
         this.datasourceService = datasourceService;
         this.seaTunnelClient = seaTunnelClient;
         this.currentPositionReader = currentPositionReader;
-        this.jobFamilyService = jobFamilyService;
+        this.taskDispatchService = taskDispatchService;
         this.backfillService = backfillService;
         this.encKey = encKey;
     }
@@ -149,35 +149,33 @@ public class CdcStService {
         // 后加列 → 字段级回补登记(新任务 oldFieldMapping 为空, 由快照兜底不登记)
         backfillService.registerBackfillsIfNeeded(logicalTable, syncTaskId, taskId, datasourceId,
                 sourceDb, sourceTable, oldFieldMapping, fieldMapping);
-        // 作业族归属(一源库一作业族): 确保 (datasourceId, sourceDb) 唯一作业族并回填 family_id;
-        // 族已在运行 → 停旧启新重组族 job(新表/新列配置合并进族内 job, 旧表同 jobId 恢复 checkpoint 续采)
-        long familyId = jobFamilyService.ensureFamily(datasourceId, sourceDb,
-                (int) countTasksOf(datasourceId, sourceDb));
-        metaJdbc.update("UPDATE cdc_st_task SET family_id = ? WHERE task_id = ?", familyId, taskId);
-        log.info("SeaTunnel CDC 任务已注册: {} ← {}.{} topic={} syncTaskId={} family={}", logicalTable,
-                sourceDb, sourceTable, topic, syncTaskId, familyId);
+        // 一任务一 job(2026-10-12 拍板): 注册即分配独立 worker(最闲) + 独立 server-id 区间(池领取,
+        // 终身跟随);任务已在运行 → 停旧启新单任务重提(同 jobId 恢复 checkpoint 续采)
+        String workerId = taskDispatchService.pickLeastLoadedWorker();
+        if (workerId == null) {
+            workerId = "default";
+        }
+        metaJdbc.update("UPDATE cdc_st_task SET worker_id = ? WHERE task_id = ?", workerId, taskId);
+        taskDispatchService.ensureRangeForTask(taskId, null);
+        log.info("SeaTunnel CDC 任务已注册: {} ← {}.{} topic={} syncTaskId={} worker={}", logicalTable,
+                sourceDb, sourceTable, topic, syncTaskId, workerId);
         try {
-            if (familyRunning(familyId)) {
-                restartFamily(familyId);
+            Integer running = metaJdbc.queryForObject(
+                    "SELECT running FROM cdc_st_task WHERE task_id = ?", Integer.class, taskId);
+            if (running != null && running == 1) {
+                restartTask(taskId);
             }
         } catch (Exception e) {
             // 注册已成功(配置落库), 停旧启新失败由 watchdog 判死兜底重提
-            log.warn("作业族重组启动失败(family={}), watchdog 将兜底重试: {}", familyId, e.getMessage());
+            log.warn("任务重提失败(task={}), watchdog 将兜底重试: {}", taskId, e.getMessage());
         }
     }
 
-    /** 该源库下任务数(含本任务, 族内表数 → server-id 区间宽度=表数×5) */
-    private long countTasksOf(Long datasourceId, String sourceDb) {
-        Long n = metaJdbc.queryForObject(
-                "SELECT COUNT(*) FROM cdc_st_task WHERE datasource_id = ? AND source_db = ?",
-                Long.class, datasourceId, sourceDb);
-        return n == null ? 1 : n;
-    }
-
-    /** 作业族是否在运行(族表 running 标记) */
-    private boolean familyRunning(long familyId) {
-        Map<String, Object> f = jobFamilyService.familyOf(familyId);
-        return f != null && f.get("running") != null && ((Number) f.get("running")).intValue() == 1;
+    /** 任务是否在运行(任务行 running 标记) */
+    private boolean taskRunning(long taskId) {
+        Integer n = metaJdbc.queryForObject(
+                "SELECT running FROM cdc_st_task WHERE task_id = ?", Integer.class, taskId);
+        return n != null && n == 1;
     }
 
     /**
@@ -309,61 +307,32 @@ public class CdcStService {
         return modeOf(task.getLogicalTable());
     }
 
-    /** 启动某逻辑表的<b>全部</b>采集任务(一源库一作业族: 按 (datasourceId, sourceDb) 归族逐族启动, 族内全表共进退) */
+    /** 启动某逻辑表的<b>全部</b>采集任务(一任务一 job: 逐任务独立启, 互不牵连) */
     public synchronized Map<String, Object> start(String logicalTable) {
         List<CdcStTask> tasks = loadTasks(logicalTable);
         if (tasks.isEmpty()) {
             throw new IllegalArgumentException("任务未注册: " + logicalTable);
         }
         List<Long> started = new ArrayList<>();
-        for (long familyId : familiesOf(tasks)) {
-            startFamily(familyId);
-            started.add(familyId);
+        for (CdcStTask t : tasks) {
+            startTask(t.getTaskId());
+            started.add(t.getTaskId());
         }
-        return Map.of("logicalTable", logicalTable, "running", true, "families", started, "count", started.size());
+        return Map.of("logicalTable", logicalTable, "running", true, "taskIds", started, "count", started.size());
     }
 
-    /** 启动单个任务实例(同(逻辑,源)多实例并存时精确控制): 归属作业族整族启动(族共进退); 模式取所属 sync_task */
+    /** 启动单个任务实例(同(逻辑,源)多实例并存时精确控制): 单任务独立启动; 模式取所属 sync_task */
     public synchronized Map<String, Object> startInstance(Long taskId) {
         CdcStTask task = loadTask(taskId);
         if (task == null) {
             throw new IllegalArgumentException("采集任务实例不存在: " + taskId);
         }
-        long familyId = jobFamilyService.familyIdOf(task.getDatasourceId(), task.getSourceDb());
-        if (familyId <= 0) {
-            familyId = ensureFamilyOf(task.getDatasourceId(), task.getSourceDb());
-        }
-        startFamily(familyId);
-        return Map.of("logicalTable", task.getLogicalTable(), "taskId", taskId, "familyId", familyId,
+        startTask(taskId);
+        return Map.of("logicalTable", task.getLogicalTable(), "taskId", taskId,
                 "source", task.getSourceDb() + "." + task.getSourceTable(), "running", true);
     }
 
-    /** 任务列表涉及的全部作业族 id(按 (datasourceId, sourceDb) 去重; 未归族存量归族兜底) */
-    private List<Long> familiesOf(List<CdcStTask> tasks) {
-        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
-        for (CdcStTask t : tasks) {
-            keys.add(t.getDatasourceId() + "|" + t.getSourceDb());
-        }
-        List<Long> ids = new ArrayList<>();
-        for (String key : keys) {
-            String[] parts = key.split("\\|");
-            long dsId = Long.parseLong(parts[0]);
-            long familyId = jobFamilyService.familyIdOf(dsId, parts[1]);
-            ids.add(familyId > 0 ? familyId : ensureFamilyOf(dsId, parts[1]));
-        }
-        return ids;
-    }
-
-    /** 归族: 确保 (datasourceId, sourceDb) 作业族存在并回填该库全部任务 family_id(存量数据兼容) */
-    private long ensureFamilyOf(long datasourceId, String sourceDb) {
-        long familyId = jobFamilyService.ensureFamily(datasourceId, sourceDb,
-                (int) countTasksOf(datasourceId, sourceDb));
-        metaJdbc.update("UPDATE cdc_st_task SET family_id = ? WHERE datasource_id = ? AND source_db = ?",
-                familyId, datasourceId, sourceDb);
-        return familyId;
-    }
-
-    // ───────────────── 作业族启动(一 job 多流水线) ─────────────────
+    // ───────────────── 单任务启动(一任务一 job) ─────────────────
 
     /** 启动准备产物: 每表一条流水线的已计算参数(源表/模式/位点) */
     private record PreparedTask(CdcStTask task, DatasourceConfig ds, String dsType,
@@ -408,130 +377,94 @@ public class CdcStService {
     }
 
     /**
-     * 启动作业族: 一源库一 job(全表流水线合并, 共享 env/checkpoint);
-     * 已在跑幂等跳过; 重启复用族 jobId 恢复 checkpoint(新加表无 checkpoint 状态 → 自动快照+增量追平)。
-     * 提交定向到族绑定的 worker REST 入口(独立实例定向提交)。
+     * 启动单任务: 一任务一 job(单 source/transform/sink);
+     * 已在跑幂等跳过; 重启复用任务 jobId 恢复 checkpoint; 提交定向到任务绑定的 worker REST 入口。
      */
-    private void startFamily(long familyId) {
-        Map<String, Object> family = jobFamilyService.familyOf(familyId);
-        if (family == null) {
-            throw new IllegalStateException("作业族不存在: " + familyId);
+    private void startTask(long taskId) {
+        CdcStTask task = loadTask(taskId);
+        if (task == null) {
+            throw new IllegalStateException("采集任务不存在: " + taskId);
         }
-        String workerId = String.valueOf(family.get("worker_id"));
-        String baseUrl = jobFamilyService.workerUrl(workerId);
+        String baseUrl = taskDispatchService.workerUrl(task.getWorkerId());
         if (baseUrl == null) {
-            baseUrl = jobFamilyService.defaultWorkerUrl();
+            baseUrl = taskDispatchService.defaultWorkerUrl();
         }
-        List<CdcStTask> tasks = loadFamilyTasks(familyId);
-        if (tasks.isEmpty()) {
-            log.warn("作业族无任务, 跳过启动: family={}", familyId);
-            return;
-        }
-        String familyJobId = family.get("sea_tunnel_job_id") == null ? null
-                : String.valueOf(family.get("sea_tunnel_job_id"));
-        boolean hasJobId = familyJobId != null && !familyJobId.isBlank();
+        String taskJobId = task.getSeaTunnelJobId();
+        boolean hasJobId = taskJobId != null && !taskJobId.isBlank();
         // 已在跑 → 幂等跳过(避免重复提交同 jobId 被 Zeta 拒绝)
         if (hasJobId) {
             try {
-                SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(baseUrl, familyJobId);
+                SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(baseUrl, taskJobId);
                 if ("RUNNING".equals(info.getJobStatus())) {
-                    markFamilyRunning(familyId, familyJobId, tasks);
-                    log.info("作业族已在运行, 跳过: family={} worker={} jobId={}", familyId, workerId, familyJobId);
+                    markTaskRunning(taskId, taskJobId, task);
+                    log.info("任务已在运行, 跳过: task={} jobId={}", taskId, taskJobId);
                     return;
                 }
             } catch (Exception ignore) {
                 // jobInfo 查不到(引擎重启等) → 重新提交
             }
         }
-        // server-id 区间宽度复核(表数增长 → 停态换领; 每表 5 个宽度)
-        jobFamilyService.reallocRangeIfNeeded(familyId, tasks.size());
-        family = jobFamilyService.familyOf(familyId);
-        String range = String.valueOf(family.get("server_id_range"));
-        // 每表位点准备 + 缺列告警
-        List<PreparedTask> prepared = new ArrayList<>();
-        for (CdcStTask task : tasks) {
-            prepared.add(prepareTaskForStart(task));
-        }
+        // server-id 区间(注册时已领取; 存量任务缺区间 → 启动时补领)
+        String range = taskDispatchService.ensureRangeForTask(taskId, task.getServerIdRange());
+        // 位点准备 + 缺列告警
+        PreparedTask prepared = prepareTaskForStart(task);
         if (!hasJobId) {
-            // 启停纪律(问题记录二.2): 无 savepoint(族 jobId 无 checkpoint)且位点模式 latest
+            // 启停纪律(问题记录二.2): 无 savepoint(任务 jobId 无 checkpoint)且位点模式 latest
             // → 强制 initial 防静默丢全量历史
-            prepared = prepared.stream().map(p ->
-                    "latest".equalsIgnoreCase(p.startupMode()) ? p.withStartupMode("initial") : p).toList();
+            if ("latest".equalsIgnoreCase(prepared.startupMode())) {
+                prepared = prepared.withStartupMode("initial");
+            }
         }
-        Map<String, Object> config = buildFamilyJobConfig(prepared, familyId, range, false);
-        String jobId = hasJobId ? familyJobId : String.valueOf(System.currentTimeMillis() * 100 + familyId);
+        Map<String, Object> config = buildTaskJobConfig(prepared, range, false);
+        String jobId = hasJobId ? taskJobId : String.valueOf(System.currentTimeMillis() * 100 + taskId);
         try {
             String stJobId = seaTunnelClient.submitJob(baseUrl, jobId, config, hasJobId);
-            persistFamilyStarted(familyId, stJobId, tasks, null);
-            log.info("作业族已启动: family={} worker={} tables={} jobId={}", familyId, workerId,
-                    tasks.size(), stJobId);
+            persistTaskStarted(taskId, stJobId, task, null);
+            log.info("任务已启动: task={} worker={} jobId={}", taskId, task.getWorkerId(), stJobId);
         } catch (IllegalStateException e) {
             // 启停纪律(问题记录二.2): restore 失败(旧 jobId 无可用 savepoint/checkpoint, 如 S3
             // 位点丢失)→ 弃旧 jobId, 换新 jobId + 全 initial 全量重采; 二次失败照抛不吞
             if (!hasJobId) {
                 throw e;
             }
-            log.warn("作业族 restore 失败, 回退全 initial 重采: family={} jobId={}: {}",
-                    familyId, jobId, e.getMessage());
-            String freshJobId = String.valueOf(System.currentTimeMillis() * 100 + familyId);
-            Map<String, Object> freshConfig = buildFamilyJobConfig(prepared, familyId, range, true);
+            log.warn("任务 restore 失败, 回退全 initial 重采: task={} jobId={}: {}", taskId, jobId, e.getMessage());
+            String freshJobId = String.valueOf(System.currentTimeMillis() * 100 + taskId);
+            Map<String, Object> freshConfig = buildTaskJobConfig(prepared, range, true);
             String stJobId = seaTunnelClient.submitJob(baseUrl, freshJobId, freshConfig, false);
-            persistFamilyStarted(familyId, stJobId, tasks, "restore 失败回退全 initial 重采");
-            log.info("作业族已全量重采启动: family={} jobId={}", familyId, stJobId);
+            persistTaskStarted(taskId, stJobId, task, "restore 失败回退全 initial 重采");
+            log.info("任务已全量重采启动: task={} jobId={}", taskId, stJobId);
         }
     }
 
-    /** 停旧启新重组族 job(register 加表/加列/映射更新后, 族在运行 → 自动停旧启新生效) */
-    private void restartFamily(long familyId) {
-        stopFamily(familyId);
-        startFamily(familyId);
+    /** 停旧启新重提单任务(register 加表/加列/映射更新后, 任务在运行 → 自动停旧启新生效) */
+    private void restartTask(long taskId) {
+        stopTask(taskId);
+        startTask(taskId);
     }
 
-    /** 标记族及族内全部任务运行中(任务行 sea_tunnel_job_id 同步族 jobId, 兼容状态展示) */
-    private void markFamilyRunning(long familyId, String jobId, List<CdcStTask> tasks) {
-        metaJdbc.update("UPDATE cdc_job_family SET sea_tunnel_job_id = ?, running = 1 WHERE id = ?", jobId, familyId);
-        metaJdbc.update("UPDATE cdc_st_task SET sea_tunnel_job_id = ?, running = 1 WHERE family_id = ?", jobId, familyId);
-        for (CdcStTask t : tasks) {
-            markOwnerRunning(t);
-        }
+    /** 标记任务运行中(任务行 sea_tunnel_job_id + running=1) */
+    private void markTaskRunning(long taskId, String jobId, CdcStTask task) {
+        metaJdbc.update("UPDATE cdc_st_task SET sea_tunnel_job_id = ?, running = 1 WHERE task_id = ?", jobId, taskId);
+        markOwnerRunning(task);
     }
 
-    /** 提交成功: 族/任务 running=1 + 执行历史 */
-    private void persistFamilyStarted(long familyId, String stJobId, List<CdcStTask> tasks, String message) {
-        markFamilyRunning(familyId, stJobId, tasks);
-        for (CdcStTask t : tasks) {
-            recordHistory(t.getLogicalTable(), modeOfTask(t).syncMode(), stJobId, "start", "RUNNING", message);
-        }
+    /** 提交成功: 任务 running=1 + 执行历史 */
+    private void persistTaskStarted(long taskId, String stJobId, CdcStTask task, String message) {
+        markTaskRunning(taskId, stJobId, task);
+        recordHistory(task.getLogicalTable(), modeOfTask(task).syncMode(), stJobId, "start", "RUNNING", message);
     }
 
-    /** 加载作业族全部任务(按族表 (datasource_id, source_db), 兼容未回填 family_id 的存量行) */
-    private List<CdcStTask> loadFamilyTasks(long familyId) {
-        Map<String, Object> family = jobFamilyService.familyOf(familyId);
-        if (family == null) {
-            return List.of();
-        }
-        long dsId = ((Number) family.get("datasource_id")).longValue();
-        String db = String.valueOf(family.get("source_db"));
-        return metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
-                        + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, "
-                        + "task_id, sync_task_id, snapshot_start_position "
-                        + "FROM cdc_st_task WHERE datasource_id = ? AND source_db = ? ORDER BY task_id",
-                (rs, i) -> mapTask(rs), dsId, db);
-    }
-
-    /** 停止作业族(族共进退: 优雅 stop 族 job → checkpoint 落盘 → 全族收敛; 下次启动同 jobId 续采) */
-    private void stopFamily(long familyId) {
-        Map<String, Object> family = jobFamilyService.familyOf(familyId);
-        if (family == null) {
+    /** 停止单任务(优雅 stop 任务 job → checkpoint 落盘; 下次启动同 jobId 续采) */
+    private void stopTask(long taskId) {
+        CdcStTask task = loadTask(taskId);
+        if (task == null) {
             return;
         }
-        String workerId = String.valueOf(family.get("worker_id"));
-        String baseUrl = jobFamilyService.workerUrl(workerId);
+        String baseUrl = taskDispatchService.workerUrl(task.getWorkerId());
         if (baseUrl == null) {
-            baseUrl = jobFamilyService.defaultWorkerUrl();
+            baseUrl = taskDispatchService.defaultWorkerUrl();
         }
-        String jobId = family.get("sea_tunnel_job_id") == null ? null
-                : String.valueOf(family.get("sea_tunnel_job_id"));
+        String jobId = task.getSeaTunnelJobId();
         if (jobId != null && !jobId.isBlank()) {
             try {
                 SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(baseUrl, jobId);
@@ -539,16 +472,12 @@ public class CdcStService {
                     seaTunnelClient.stopJob(baseUrl, jobId);
                 }
             } catch (Exception e) {
-                log.warn("停止作业族 job 失败 family={} ({}): {}", familyId, jobId, e.getMessage());
+                log.warn("停止任务 job 失败 task={} ({}): {}", taskId, jobId, e.getMessage());
             }
         }
-        List<CdcStTask> tasks = loadFamilyTasks(familyId);
-        metaJdbc.update("UPDATE cdc_job_family SET running = 0 WHERE id = ?", familyId);
-        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE family_id = ?", familyId);
-        for (CdcStTask t : tasks) {
-            markOwnerIdle(t);
-            recordHistory(t.getLogicalTable(), modeOfTask(t).syncMode(), jobId, "stop", "STOPPED", null);
-        }
+        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE task_id = ?", taskId);
+        markOwnerIdle(task);
+        recordHistory(task.getLogicalTable(), modeOfTask(task).syncMode(), jobId, "stop", "STOPPED", null);
     }
 
     /**
@@ -667,71 +596,32 @@ public class CdcStService {
         }
     }
 
-    /** 停止某逻辑表的全部采集任务(一源库一作业族: 涉及族整族停, 族共进退; 优雅停止 checkpoint 落盘, 下次启动同 jobId 续采) */
+    /** 停止某逻辑表的全部采集任务(一任务一 job: 逐任务独立停, 互不牵连; 优雅停止 checkpoint 落盘, 下次启动同 jobId 续采) */
     public synchronized Map<String, Object> stop(String logicalTable) {
         List<CdcStTask> tasks = loadTasks(logicalTable);
         List<Long> stopped = new ArrayList<>();
-        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
         for (CdcStTask task : tasks) {
-            keys.add(task.getDatasourceId() + "|" + task.getSourceDb());
+            stopTask(task.getTaskId());
+            stopped.add(task.getTaskId());
         }
-        for (String key : keys) {
-            String[] parts = key.split("\\|");
-            long familyId = jobFamilyService.familyIdOf(Long.parseLong(parts[0]), parts[1]);
-            if (familyId > 0) {
-                stopFamily(familyId);
-                stopped.add(familyId);
-            } else {
-                // 存量未归族: 按旧单 job 语义停止(默认 URL, 旧 jobId)
-                for (CdcStTask t : tasks) {
-                    stopLegacyOne(t);
-                }
-            }
-        }
-        return Map.of("logicalTable", logicalTable, "running", false, "families", stopped);
+        return Map.of("logicalTable", logicalTable, "running", false, "taskIds", stopped);
     }
 
-    /** 停止单个任务实例(归属作业族整族停止, 族共进退) */
+    /** 停止单个任务实例(单任务独立停止) */
     public synchronized Map<String, Object> stopInstance(Long taskId) {
         CdcStTask task = loadTask(taskId);
         if (task == null) {
             throw new IllegalArgumentException("采集任务实例不存在: " + taskId);
         }
-        long familyId = jobFamilyService.familyIdOf(task.getDatasourceId(), task.getSourceDb());
-        if (familyId > 0) {
-            stopFamily(familyId);
-        } else {
-            stopLegacyOne(task);
-        }
-        return Map.of("logicalTable", task.getLogicalTable(), "taskId", taskId, "familyId", familyId,
+        stopTask(taskId);
+        return Map.of("logicalTable", task.getLogicalTable(), "taskId", taskId,
                 "source", task.getSourceDb() + "." + task.getSourceTable(), "running", false);
-    }
-
-    /** 存量兼容: 未归族任务按旧单 job 语义停止(默认 URL, 旧 jobId) */
-    private void stopLegacyOne(CdcStTask task) {
-        String logicalTable = task.getLogicalTable();
-        if (task.getSeaTunnelJobId() != null && !task.getSeaTunnelJobId().isBlank()) {
-            // 启停纪律(问题记录二.2): 优雅停止 → SeaTunnel 同步完成最终 checkpoint 落盘(S3),
-            // 等效 CLI savepoint; 停止前确认 job 仍在, 已消失的 job 直接收敛本地标记
-            try {
-                SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(task.getSeaTunnelJobId());
-                if (info.isRunning() || "UNKNOW".equals(info.getJobStatus())) {
-                    seaTunnelClient.stopJob(task.getSeaTunnelJobId());
-                }
-            } catch (Exception e) {
-                log.warn("停止旧单 job 失败 {} ({}): {}", logicalTable, task.getSourceTable(), e.getMessage());
-            }
-        }
-        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE task_id = ?", task.getTaskId());
-        markOwnerIdle(task);
-        recordHistory(logicalTable, modeOfTask(task).syncMode(), task.getSeaTunnelJobId(),
-                "stop", "STOPPED", null);
     }
 
     private CdcStTask loadTask(Long taskId) {
         java.util.List<CdcStTask> l = metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
                         + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, "
-                        + "task_id, sync_task_id, snapshot_start_position "
+                        + "task_id, sync_task_id, snapshot_start_position, worker_id, server_id_range, running "
                         + "FROM cdc_st_task WHERE task_id = ?",
                 (rs, i) -> mapTask(rs), taskId);
         return l.isEmpty() ? null : l.get(0);
@@ -742,7 +632,7 @@ public class CdcStService {
         List<Map<String, Object>> out = new ArrayList<>();
         metaJdbc.query("SELECT ct.logical_table, ct.datasource_id, ct.source_db, ct.source_table, ct.topic, "
                         + "ct.business_key_fields, ct.key_columns, ct.bucket_count, ct.field_mapping, ct.row_chain, "
-                        + "ct.sea_tunnel_job_id, ct.running, ct.sync_task_id, ct.task_id, ct.family_id, st.name AS owner_name "
+                        + "ct.sea_tunnel_job_id, ct.running, ct.sync_task_id, ct.task_id, ct.worker_id, st.name AS owner_name "
                         + "FROM cdc_st_task ct LEFT JOIN sync_task st ON st.id = ct.sync_task_id AND ct.sync_task_id > 0 "
                         + "ORDER BY ct.logical_table, ct.task_id",
                 (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
@@ -763,13 +653,16 @@ public class CdcStService {
                     m.put("rowChain", rs.getString("row_chain"));
                     String stJobId = rs.getString("sea_tunnel_job_id");
                     m.put("seaTunnelJobId", stJobId);
-                    m.put("familyId", rs.getLong("family_id"));
+                    m.put("workerId", rs.getString("worker_id"));
                     boolean localRunning = rs.getInt("running") == 1;
                     boolean live = false;
                     if (stJobId != null && !stJobId.isBlank()) {
                         try {
                             SeaTunnelClient.JobInfo info = seaTunnelClient.jobInfo(
-                                    workerBaseUrlOfTask(rs.getLong("family_id")), stJobId);
+                                    taskDispatchService.workerUrl(rs.getString("worker_id")) == null
+                                            ? taskDispatchService.defaultWorkerUrl()
+                                            : taskDispatchService.workerUrl(rs.getString("worker_id")),
+                                    stJobId);
                             live = "RUNNING".equals(info.getJobStatus());
                         } catch (Exception ignore) {
                             // 引擎不可达时按本地状态
@@ -957,86 +850,72 @@ public class CdcStService {
         return s;
     }
 
-    /** 构造作业族 job 配置(一 job 多流水线): 每表独立 source/transform/sink 写各自 topic, 共享 env/checkpoint */
-    private Map<String, Object> buildFamilyJobConfig(List<PreparedTask> prepared, long familyId,
-                                                     String range, boolean forceInitial) {
+    /** 构造单任务 job 配置(一任务一 job: 单 source/transform/sink, 独立 env/checkpoint) */
+    private Map<String, Object> buildTaskJobConfig(PreparedTask p, String range, boolean forceInitial) {
+        CdcStTask task = p.task();
         Map<String, Object> env = new LinkedHashMap<>();
         env.put("job.mode", "STREAMING");
-        env.put("job.name", "cdc-family-" + familyId);
+        env.put("job.name", "cdc-task-" + task.getTaskId());
         env.put("parallelism", 1);
         env.put("checkpoint.interval", 10000);
 
-        long rangeStart = rangeStart(range);
-        List<Map<String, Object>> sources = new ArrayList<>();
-        List<Map<String, Object>> transforms = new ArrayList<>();
-        List<Map<String, Object>> sinks = new ArrayList<>();
-        int idx = 0;
-        for (PreparedTask p : prepared) {
-            CdcStTask task = p.task();
-            String srcTable = "cdc_source_" + idx;
-            String outTable = "cdc_output_" + idx;
-            String startupMode = forceInitial ? "initial" : p.startupMode();
-            // server-id 从族区间按表序派生(每表 5 个; 区间宽度=表数×5 由 reallocRangeIfNeeded 保证)
-            long sidBase = rangeStart + (long) idx * CdcJobFamilyService.SERVER_IDS_PER_TABLE;
-            Map<String, Object> source = buildSource(task, p.ds(), startupMode, p.snapshotOnly(),
-                    p.startValue(), p.dsType(), sidBase);
-            // 纯快照模式: Debezium snapshot.mode=initial_only(快照完该 source 结束, 其余流水线继续)
-            if (p.snapshotOnly()) {
-                source.put("debezium", java.util.Map.of("snapshot.mode", "initial_only"));
-            }
-            source.put("result_table_name", srcTable);
-            sources.add(source);
-
-            Map<String, Object> transform = new LinkedHashMap<>();
-            transform.put("plugin_name", "CdcSeqTransform");
-            transform.put("source_table_name", srcTable);
-            transform.put("result_table_name", outTable);
-            transform.put("logical_table", task.getLogicalTable());
-            transform.put("task_id", String.valueOf(task.getTaskId()));
-            transform.put("datasource_id", String.valueOf(task.getDatasourceId()));
-            transform.put("source_db", task.getSourceDb());
-            transform.put("source_table", task.getSourceTable());
-            transform.put("business_key_fields", task.getBusinessKeyFields());
-            transform.put("key_columns", task.getKeyColumns());
-            transform.put("bucket_count", task.getBucketCount());
-            transform.put("null_key_mode", "ERROR");
-            // 告警落库(新方案): 主键修改/缺列告警写 sync_alert(元库)
-            transform.put("alert_db_url", alertDbUrl);
-            transform.put("alert_db_user", alertDbUser);
-            transform.put("alert_db_password", alertDbPassword);
-            transform.put("source_type", p.dsType());
-            // 快照级号 S=f(快照起点位点)(方案 A: 后端读源库当前位点下发; 非快照任务无此配置项)
-            if (p.snapshotStartPosition() != null && !p.snapshotStartPosition().isBlank()) {
-                transform.put("snapshot_start_position", p.snapshotStartPosition());
-            }
-            // 新方案强校验必配: 注册级已保证映射非空
-            transform.put("field_mapping", task.getFieldMapping());
-            if (task.getRowChain() != null && !task.getRowChain().isBlank()) {
-                transform.put("row_chain", task.getRowChain());
-            }
-            transforms.add(transform);
-
-            Map<String, Object> sink = new LinkedHashMap<>();
-            sink.put("plugin_name", "Kafka");
-            sink.put("bootstrap.servers", kafkaBootstrap);
-            sink.put("topic", task.getTopic());
-            sink.put("format", "json");
-            sink.put("partition_key_fields", List.of("__bucket"));
-            sink.put("semantics", "AT_LEAST_ONCE");
-            sink.put("source_table_name", outTable);
-            sinks.add(sink);
-            idx++;
+        String startupMode = forceInitial ? "initial" : p.startupMode();
+        // server-id: 本任务独占区间(注册时池领取, 迁移不漂移)
+        long sidBase = rangeStart(range);
+        Map<String, Object> source = buildSource(task, p.ds(), startupMode, p.snapshotOnly(),
+                p.startValue(), p.dsType(), sidBase);
+        // 纯快照模式: Debezium snapshot.mode=initial_only(快照完 source 结束)
+        if (p.snapshotOnly()) {
+            source.put("debezium", java.util.Map.of("snapshot.mode", "initial_only"));
         }
+        source.put("result_table_name", "cdc_source_0");
+
+        Map<String, Object> transform = new LinkedHashMap<>();
+        transform.put("plugin_name", "CdcSeqTransform");
+        transform.put("source_table_name", "cdc_source_0");
+        transform.put("result_table_name", "cdc_output_0");
+        transform.put("logical_table", task.getLogicalTable());
+        transform.put("task_id", String.valueOf(task.getTaskId()));
+        transform.put("datasource_id", String.valueOf(task.getDatasourceId()));
+        transform.put("source_db", task.getSourceDb());
+        transform.put("source_table", task.getSourceTable());
+        transform.put("business_key_fields", task.getBusinessKeyFields());
+        transform.put("key_columns", task.getKeyColumns());
+        transform.put("bucket_count", task.getBucketCount());
+        transform.put("null_key_mode", "ERROR");
+        // 告警落库(新方案): 主键修改/缺列告警写 sync_alert(元库)
+        transform.put("alert_db_url", alertDbUrl);
+        transform.put("alert_db_user", alertDbUser);
+        transform.put("alert_db_password", alertDbPassword);
+        transform.put("source_type", p.dsType());
+        // 快照级号 S=f(快照起点位点)(方案 A: 后端读源库当前位点下发; 非快照任务无此配置项)
+        if (p.snapshotStartPosition() != null && !p.snapshotStartPosition().isBlank()) {
+            transform.put("snapshot_start_position", p.snapshotStartPosition());
+        }
+        // 新方案强校验必配: 注册级已保证映射非空
+        transform.put("field_mapping", task.getFieldMapping());
+        if (task.getRowChain() != null && !task.getRowChain().isBlank()) {
+            transform.put("row_chain", task.getRowChain());
+        }
+
+        Map<String, Object> sink = new LinkedHashMap<>();
+        sink.put("plugin_name", "Kafka");
+        sink.put("bootstrap.servers", kafkaBootstrap);
+        sink.put("topic", task.getTopic());
+        sink.put("format", "json");
+        sink.put("partition_key_fields", List.of("__bucket"));
+        sink.put("semantics", "AT_LEAST_ONCE");
+        sink.put("source_table_name", "cdc_output_0");
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("env", env);
-        root.put("source", sources);
-        root.put("transform", transforms);
-        root.put("sink", sinks);
+        root.put("source", List.of(source));
+        root.put("transform", List.of(transform));
+        root.put("sink", List.of(sink));
         return root;
     }
 
-    /** 族 server-id 区间起点(取首段; 多段逗号分隔时用首段, 宽度保证由区间分配承担) */
+    /** 任务 server-id 区间起点(取首段; 多段逗号分隔时用首段) */
     private static long rangeStart(String range) {
         if (range == null || range.isBlank()) {
             return 5400L;
@@ -1049,20 +928,6 @@ public class CdcStService {
         }
     }
 
-    /** 任务的定向 worker REST 入口(族 → worker → url; 无族回退默认 URL) */
-    private String workerBaseUrlOfTask(long familyId) {
-        if (familyId > 0) {
-            Map<String, Object> f = jobFamilyService.familyOf(familyId);
-            if (f != null) {
-                String url = jobFamilyService.workerUrl(String.valueOf(f.get("worker_id")));
-                if (url != null) {
-                    return url;
-                }
-            }
-        }
-        return jobFamilyService.defaultWorkerUrl();
-    }
-
     private String tableConfigTopic(String logicalTable) {
         try {
             return metaJdbc.queryForObject(
@@ -1072,13 +937,13 @@ public class CdcStService {
         }
     }
 
-    /** 巡检 auto-restore 的最近尝试时间(作业族级, 失败退避防风暴) */
+    /** 巡检 auto-restore 的最近尝试时间(任务级, 失败退避防风暴) */
     private final java.util.concurrent.ConcurrentHashMap<Long, Long> lastRestoreAttempt = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** restore 失败退避窗口: 5 分钟内不重试同一作业族 */
+    /** restore 失败退避窗口: 5 分钟内不重试同一任务 */
     private static final long RESTORE_BACKOFF_MS = 5 * 60_000L;
 
-    /** worker 判死连续不可达计数(作业族级; 达阈值触发迁移, worker 可达即清零) */
+    /** worker 判死连续不可达计数(任务级; 达阈值触发迁移, worker 可达即清零) */
     private final java.util.concurrent.ConcurrentHashMap<Long, Integer> workerDownCount = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** worker 连续不可达多少次判死迁移(每巡检周期计 1 次, 默认 60s → 约 3 分钟) */
@@ -1086,12 +951,12 @@ public class CdcStService {
 
     /**
      * 待办1: SeaTunnel job 丢失巡检自动 restore(问题记录二.1, H14 实证 master 宕机后 job
-     * 消失不自动恢复)。每 watchdog-interval-ms 按作业族扫描:
-     * ① worker 判死: 族绑定的 worker REST 入口连续不可达达阈值 → 迁移至最闲 worker
+     * 消失不自动恢复)。每 watchdog-interval-ms 按运行任务扫描(一任务一 job):
+     * ① worker 判死: 任务绑定的 worker REST 入口连续不可达达阈值 → 迁移至最闲 worker
      * (server-id 区间随迁不漂移)后定向重提;
-     * ② job 丢失判死: worker 可达但族 job 非 RUNNING → 同族 jobId 重新提交
+     * ② job 丢失判死: worker 可达但任务 job 非 RUNNING → 同任务 jobId 重新提交
      * (isStartWithSavePoint → 从 S3 checkpoint 恢复);
-     * autoStop 全族(full-once/scheduled-batch/full-scheduled) FINISHED 属正常完成,
+     * autoStop 任务(full-once/scheduled-batch/full-scheduled) FINISHED 属正常完成,
      * 只收敛本地标记不重启。
      *
      * <p>savepoint 定期调度口径: 2.3.12 REST 无 savepoint 端点(实测 404), CLI savepoint 会
@@ -1105,28 +970,31 @@ public class CdcStService {
             return;
         }
         try {
-            for (Map<String, Object> family : jobFamilyService.listFamilies()) {
-                long familyId = ((Number) family.get("id")).longValue();
-                String workerId = String.valueOf(family.get("worker_id"));
-                String baseUrl = jobFamilyService.workerUrl(workerId);
+            // 一任务一 job: 扫描全部运行中的采集任务(worker 判死 → 单任务迁移; job 丢失 → 单任务 restore)
+            List<Map<String, Object>> runningTasks = metaJdbc.queryForList(
+                    "SELECT task_id, worker_id, sea_tunnel_job_id FROM cdc_st_task WHERE running = 1");
+            for (Map<String, Object> row : runningTasks) {
+                long taskId = ((Number) row.get("task_id")).longValue();
+                String workerId = row.get("worker_id") == null ? null : String.valueOf(row.get("worker_id"));
+                String baseUrl = taskDispatchService.workerUrl(workerId);
                 if (baseUrl == null) {
-                    baseUrl = jobFamilyService.defaultWorkerUrl();
+                    baseUrl = taskDispatchService.defaultWorkerUrl();
                 }
                 try {
-                    // ① worker 判死: REST 入口连续不可达达阈值 → 迁移至最闲 worker 后定向重提
+                    // ① worker 判死: 任务绑定的 REST 入口连续不可达达阈值 → 迁移至最闲 worker 后定向重提
                     if (!seaTunnelClient.engineReachable(baseUrl)) {
-                        int downs = workerDownCount.merge(familyId, 1, Integer::sum);
-                        log.warn("作业族 worker 不可达: family={} worker={} url={} 连续 {} 次",
-                                familyId, workerId, baseUrl, downs);
+                        int downs = workerDownCount.merge(taskId, 1, Integer::sum);
+                        log.warn("任务 worker 不可达: task={} worker={} url={} 连续 {} 次",
+                                taskId, workerId, baseUrl, downs);
                         if (downs >= WORKER_DOWN_MIGRATE_THRESHOLD) {
-                            migrateFamilyAway(familyId, workerId);
-                            workerDownCount.remove(familyId);
+                            migrateTaskAway(taskId, workerId);
+                            workerDownCount.remove(taskId);
                         }
                         continue;
                     }
-                    workerDownCount.remove(familyId);
-                    // ② 族 job 丢失判死: 非 RUNNING → 整族 restore(带 savepoint)
-                    Object jobObj = family.get("sea_tunnel_job_id");
+                    workerDownCount.remove(taskId);
+                    // ② 任务 job 丢失判死: 非 RUNNING → 单任务 restore(带 savepoint)
+                    Object jobObj = row.get("sea_tunnel_job_id");
                     String jobId = jobObj == null ? null : String.valueOf(jobObj);
                     if (jobId == null || jobId.isBlank()) {
                         continue;   // 从未启动, 不巡检
@@ -1135,33 +1003,31 @@ public class CdcStService {
                     if (info != null && info.isRunning()) {
                         continue;   // 健康
                     }
-                    if (info != null && info.isFinished() && familyAutoStop(familyId)) {
-                        // 全族一次性/批模式正常跑完: 收敛标记, 不重启
-                        metaJdbc.update("UPDATE cdc_job_family SET running = 0 WHERE id = ?", familyId);
-                        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE family_id = ?", familyId);
-                        for (CdcStTask t : loadFamilyTasks(familyId)) {
-                            markOwnerIdle(t);
-                        }
+                    CdcStTask task = loadTask(taskId);
+                    if (info != null && info.isFinished() && taskAutoStop(task)) {
+                        // 一次性/批模式正常跑完: 收敛标记, 不重启
+                        metaJdbc.update("UPDATE cdc_st_task SET running = 0 WHERE task_id = ?", taskId);
+                        markOwnerIdle(task);
                         continue;
                     }
-                    Long lastAttempt = lastRestoreAttempt.get(familyId);
+                    Long lastAttempt = lastRestoreAttempt.get(taskId);
                     if (lastAttempt != null && System.currentTimeMillis() - lastAttempt < RESTORE_BACKOFF_MS) {
                         continue;   // 退避期内不重试(上次 restore 失败)
                     }
-                    log.warn("作业族 job 丢失, 自动 restore: family={} jobId={} status={}", familyId, jobId,
+                    log.warn("任务 job 丢失, 自动 restore: task={} jobId={} status={}", taskId, jobId,
                             info == null ? "NOT-FOUND" : info.getJobStatus());
                     // G1 主键修改告警未处理(OPEN)→ 不自动 restore: 任务因主键修改已暂停,
                     // 人工处理 sync_alert 后重建任务/映射(检查点保留, 处理后手动启动续采)
-                    if (hasOpenPkAlerts(familyId)) {
-                        log.warn("族内存在未处理主键修改告警, 不自动 restore: family={} (请处理 sync_alert 后人工重启)",
-                                familyId);
+                    if (hasOpenPkAlerts(task)) {
+                        log.warn("任务存在未处理主键修改告警, 不自动 restore: task={} (请处理 sync_alert 后人工重启)",
+                                taskId);
                         continue;
                     }
-                    startFamily(familyId);
-                    lastRestoreAttempt.remove(familyId);
+                    startTask(taskId);
+                    lastRestoreAttempt.remove(taskId);
                 } catch (Exception e) {
-                    log.warn("作业族巡检 restore 失败 family={}: {}", familyId, e.getMessage());
-                    lastRestoreAttempt.put(familyId, System.currentTimeMillis());
+                    log.warn("任务巡检 restore 失败 task={}: {}", taskId, e.getMessage());
+                    lastRestoreAttempt.put(taskId, System.currentTimeMillis());
                 }
             }
         } catch (Exception e) {
@@ -1169,50 +1035,36 @@ public class CdcStService {
         }
     }
 
-    /** 全族任务是否均为 autoStop(full-once/scheduled-batch/full-scheduled); 空族不算 */
-    private boolean familyAutoStop(long familyId) {
-        List<CdcStTask> tasks = loadFamilyTasks(familyId);
-        if (tasks.isEmpty()) {
-            return false;
-        }
-        for (CdcStTask t : tasks) {
-            if (!modeOfTask(t).autoStop()) {
-                return false;
-            }
-        }
-        return true;
+    /** 单任务是否 autoStop(full-once/scheduled-batch/full-scheduled) */
+    private boolean taskAutoStop(CdcStTask task) {
+        return modeOfTask(task).autoStop();
     }
 
-    /** 族内任一逻辑表存在未处理主键修改告警 */
-    private boolean hasOpenPkAlerts(long familyId) {
-        for (CdcStTask t : loadFamilyTasks(familyId)) {
-            Integer n = metaJdbc.queryForObject(
-                    "SELECT COUNT(*) FROM sync_alert WHERE logical_table = ? "
-                            + "AND alert_type = 'primary_key_change' AND status = 'OPEN'",
-                    Integer.class, t.getLogicalTable());
-            if (n != null && n > 0) {
-                return true;
-            }
-        }
-        return false;
+    /** 任务逻辑表存在未处理主键修改告警 */
+    private boolean hasOpenPkAlerts(CdcStTask task) {
+        Integer n = metaJdbc.queryForObject(
+                "SELECT COUNT(*) FROM sync_alert WHERE logical_table = ? "
+                        + "AND alert_type = 'primary_key_change' AND status = 'OPEN'",
+                Integer.class, task.getLogicalTable());
+        return n != null && n > 0;
     }
 
     /**
-     * worker 判死迁移: 族换绑最闲 worker(server-id 区间随迁不漂移, 无需重领)→ 新 worker 定向重提。
+     * worker 判死迁移: 任务换绑最闲 worker(server-id 区间随迁不漂移, 无需重领)→ 新 worker 定向重提。
      * 死 worker 恢复后不回迁(避免反复漂移); 旧 worker 上的残留 job 由 Zeta 端超时/运维清理。
      */
-    private void migrateFamilyAway(long familyId, String deadWorkerId) {
-        String toWorker = jobFamilyService.pickLeastLoadedWorker(deadWorkerId);
+    private void migrateTaskAway(long taskId, String deadWorkerId) {
+        String toWorker = taskDispatchService.pickLeastLoadedWorker(deadWorkerId);
         if (toWorker == null) {
-            log.warn("无可迁移目标 worker(仅剩死 worker 或未登记), family={} 保持原绑定等待恢复", familyId);
+            log.warn("无可迁移目标 worker(仅剩死 worker 或未登记), task={} 保持原绑定等待恢复", taskId);
             return;
         }
-        jobFamilyService.migrateFamily(familyId, toWorker);
-        log.warn("作业族判死迁移: family={} {} → {}", familyId, deadWorkerId, toWorker);
+        taskDispatchService.migrateTask(taskId, toWorker);
+        log.warn("任务判死迁移: task={} {} → {}", taskId, deadWorkerId, toWorker);
         try {
-            startFamily(familyId);
+            startTask(taskId);
         } catch (Exception e) {
-            log.warn("迁移后重启失败 family={}: {} (watchdog 下轮重试)", familyId, e.getMessage());
+            log.warn("迁移后重启失败 task={}: {} (watchdog 下轮重试)", taskId, e.getMessage());
         }
     }
 
@@ -1220,7 +1072,7 @@ public class CdcStService {
     private List<CdcStTask> loadTasks(String logicalTable) {
         return metaJdbc.query("SELECT logical_table, datasource_id, source_db, source_table, topic, "
                         + "business_key_fields, key_columns, bucket_count, field_mapping, row_chain, sea_tunnel_job_id, "
-                        + "task_id, sync_task_id, snapshot_start_position "
+                        + "task_id, sync_task_id, snapshot_start_position, worker_id, server_id_range, running "
                         + "FROM cdc_st_task WHERE logical_table = ? ORDER BY task_id",
                 (rs, i) -> mapTask(rs), logicalTable);
     }
@@ -1241,6 +1093,8 @@ public class CdcStService {
         t.setTaskId(rs.getLong(12));
         t.setSyncTaskId(rs.getLong(13));
         t.setSnapshotStartPosition(rs.getString(14));
+        t.setWorkerId(rs.getString(15));
+        t.setServerIdRange(rs.getString(16));
         return t;
     }
 
@@ -1336,5 +1190,9 @@ public class CdcStService {
         private Long syncTaskId;
         /** 快照起点位点(方案 A: 首次 start 时读源库当前位点持久化; 重启/重放复用保证 S 恒定) */
         private String snapshotStartPosition;
+        /** 绑定的 worker(cdc_worker.worker_id; NULL=默认入口, 存量任务兼容) */
+        private String workerId;
+        /** 本任务独占 server-id 区间(server_id_pool 领取, 迁移不漂移) */
+        private String serverIdRange;
     }
 }
