@@ -10,22 +10,33 @@ import com.dcp.outlet.sdk.LogicRef;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 /**
- * **逻辑仓库 jar 加载**(方式③):定位 → **校验 sha256** → 独立 ClassLoader 加载 → 关闭时释放。
+ * **逻辑仓库 jar 加载**(方式③):定位 → **校验 sha256** → ClassLoader 加载 → 关闭时释放。
  *
  * <p>jar 内通过 {@code META-INF/services/com.dcp.outlet.sdk.ConsumerLogicProvider} 声明逻辑
  * (与部署期 SPI 同一契约),因此 jar 作者只需实现 SDK 接口、打上该文件。
  *
  * <p>父加载器传 SDK 的加载器:jar 不必自带 SDK,且保证 {@code ConsumerLogic} 类型是**同一个类**。
+ *
+ * <p><b>ClassLoader 缓存 + 引用计数(2026-10-15 落地)</b>:同一 {@code logicId@version} 的
+ * ClassLoader **复用**——类元数据只加载一份(不再按分区叠加膨胀元空间);但每次 load 仍重新
+ * ServiceLoader 扫描出**独立 logic 实例**(UnitRunner「一单元一实例」,状态隔离不变)。
+ * 引用计数归零才真正 close ClassLoader 并移出缓存(共享 ClassLoader 不能"单元一停就关");
+ * 缓存条目随归零即时清理,不残留泄漏源。
  */
 public class JarLogicLoader implements LogicLoader {
 
     private static final Logger LOG = Logger.getLogger("outlet-logic-repo");
 
     private final LogicRepository repository;
+    /** ClassLoader 缓存:key = logicId@version(LogicRef 自带 equals/hashCode)。 */
+    private final Map<LogicRef, CacheEntry> cache = new HashMap<>();
 
     public JarLogicLoader(LogicRepository repository) { this.repository = repository; }
 
@@ -34,29 +45,59 @@ public class JarLogicLoader implements LogicLoader {
         LogicArtifact artifact = repository.locate(ref)
                 .orElseThrow(() -> new LogicNotFoundException(ref));
 
-        verifyHash(artifact);
+        CacheEntry entry;
+        synchronized (cache) {
+            entry = cache.get(ref);
+            if (entry == null) {
+                verifyHash(artifact);          // 仅首次加载校验(缓存命中复用;版本不可变,同 ref 的 jar 不重载)
+                try {
+                    URLClassLoader cl = new URLClassLoader(
+                            new URL[]{artifact.path().toUri().toURL()},
+                            ConsumerLogic.class.getClassLoader());   // 父加载器 = SDK
+                    entry = new CacheEntry(ref, cl);
+                } catch (Exception e) {
+                    throw new IllegalStateException("加载逻辑 jar 失败:" + artifact, e);
+                }
+                cache.put(ref, entry);
+                LOG.info(() -> "cached classloader for " + ref + " <- " + artifact.path());
+            }
+            entry.refs.incrementAndGet();
+        }
 
-        try {
-            URLClassLoader cl = new URLClassLoader(
-                    new URL[]{artifact.path().toUri().toURL()},
-                    ConsumerLogic.class.getClassLoader());        // 父加载器 = SDK
+        // 复用缓存的 ClassLoader,但每次 new 独立 logic 实例(一单元一实例)
+        ConsumerLogic logic = scan(entry.classLoader, ref);
+        if (logic == null) {
+            release(entry);   // 扫描未命中也要成对释放引用,不泄漏
+            throw new LogicNotFoundException(ref);
+        }
+        return new JarLoadedLogic(ref, logic, entry);
+    }
 
-            ServiceLoader<ConsumerLogicProvider> providers =
-                    ServiceLoader.load(ConsumerLogicProvider.class, cl);
-            for (ConsumerLogicProvider p : providers) {
-                for (ConsumerLogicProvider.ProviderEntry e : p.logics()) {
-                    if (e.ref().equals(ref)) {
-                        LOG.info(() -> "loaded logic from repo: " + ref + " ← " + artifact.path());
-                        return new JarLoadedLogic(ref, e.logic(), cl);
-                    }
+    /** 复用缓存 ClassLoader 重新 ServiceLoader 扫描 → 反射 new Provider → new logic 实例。 */
+    private ConsumerLogic scan(URLClassLoader cl, LogicRef ref) {
+        ServiceLoader<ConsumerLogicProvider> providers =
+                ServiceLoader.load(ConsumerLogicProvider.class, cl);
+        for (ConsumerLogicProvider p : providers) {
+            for (ConsumerLogicProvider.ProviderEntry e : p.logics()) {
+                if (e.ref().equals(ref)) {
+                    return e.logic();
                 }
             }
-            cl.close();
-            throw new LogicNotFoundException(ref);
-        } catch (LogicNotFoundException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalStateException("加载逻辑 jar 失败:" + artifact, e);
+        }
+        return null;
+    }
+
+    /** 引用计数 -1;归零才真正关闭 ClassLoader 并移出缓存(成对调用,见 {@link JarLoadedLogic#close})。 */
+    private void release(CacheEntry entry) {
+        synchronized (cache) {
+            if (entry.refs.decrementAndGet() == 0) {
+                cache.remove(entry.ref, entry);
+                try {
+                    entry.classLoader.close();
+                } catch (Exception ignored) {
+                    // 关闭失败不掩盖业务异常
+                }
+            }
         }
     }
 
@@ -77,14 +118,26 @@ public class JarLogicLoader implements LogicLoader {
         }
     }
 
-    /** jar 来源的加载结果:**close() 必须关闭 ClassLoader**(否则类加载器与文件句柄泄漏)。 */
-    private static final class JarLoadedLogic implements LoadedLogic {
+    /** 缓存的 ClassLoader + 引用计数。 */
+    private static final class CacheEntry {
+        final LogicRef ref;
+        final URLClassLoader classLoader;
+        final AtomicInteger refs = new AtomicInteger();
+
+        CacheEntry(LogicRef ref, URLClassLoader classLoader) {
+            this.ref = ref;
+            this.classLoader = classLoader;
+        }
+    }
+
+    /** jar 来源的加载结果:close() 释放引用(归零才关 ClassLoader);logic 实例每单元独立。 */
+    private final class JarLoadedLogic implements LoadedLogic {
         private final LogicRef ref;
         private final ConsumerLogic logic;
-        private final URLClassLoader classLoader;
+        private final CacheEntry entry;
 
-        JarLoadedLogic(LogicRef ref, ConsumerLogic logic, URLClassLoader classLoader) {
-            this.ref = ref; this.logic = logic; this.classLoader = classLoader;
+        JarLoadedLogic(LogicRef ref, ConsumerLogic logic, CacheEntry entry) {
+            this.ref = ref; this.logic = logic; this.entry = entry;
         }
 
         @Override public LogicRef ref() { return ref; }
@@ -92,11 +145,7 @@ public class JarLogicLoader implements LogicLoader {
 
         @Override
         public void close() {
-            try {
-                classLoader.close();
-            } catch (Exception ignored) {
-                // 关闭失败不掩盖业务异常
-            }
+            release(entry);   // decRef;归零才 close ClassLoader(共享时不能单元一停就关)
         }
     }
 }

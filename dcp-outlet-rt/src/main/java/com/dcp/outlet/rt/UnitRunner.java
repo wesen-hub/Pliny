@@ -254,7 +254,19 @@ public class UnitRunner {
             // 停机顺序:停 poll → 释放逻辑资源(close)→ 关消费源 → 落状态
             try {
                 if (u.rt != null && u.rt.running()) u.rt.stop();
-                if (logicRef != null && logicRef.logic() != null) logicRef.logic().close();
+            } catch (Throwable t) {
+                u.lastError = String.valueOf(t.getMessage());
+                log.error("rt.stop() failed", t);
+            }
+            try {
+                if (logicRef != null) {
+                    try {
+                        if (logicRef.logic() != null) logicRef.logic().close();
+                    } finally {
+                        // 释放逻辑来源资源(jar 方式:ClassLoader 引用计数 -1;classpath/SPI 为空实现)
+                        logicRef.close();
+                    }
+                }
             } catch (Throwable t) {
                 u.lastError = String.valueOf(t.getMessage());
                 log.error("logic.close() failed", t);
