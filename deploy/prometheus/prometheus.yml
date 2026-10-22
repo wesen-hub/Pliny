@@ -25,6 +25,13 @@ global:
 rule_files:
   - /etc/prometheus/rules/*.yml
 
+# 指标长期持久化: remote_write 到 VictoriaMetrics(本地 TSDB 仅短期热数据, 长期由 VM 保留 90d)
+remote_write:
+  - url: http://victoriametrics:8428/api/v1/write
+    queue_config:
+      max_samples_per_send: 10000
+      capacity: 20000
+
 scrape_configs:
   # ---------------------------------------------------------------- 出口后端(唯一 target)
   - job_name: dcp-outlet-backend

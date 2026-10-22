@@ -67,6 +67,24 @@ services:
       retries: 20
       start_period: 30s
 
+  # 指标长期存储: VictoriaMetrics(Prometheus remote_write 后端, 单机版, retention 90d)
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: dcp-victoriametrics
+    restart: unless-stopped
+    command:
+      - "-retentionPeriod=90d"
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm-data:/victoria-metrics-data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8428/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
   # M6: Zipkin 链路追踪(治理层): 内存存储, 9411 Web UI + /api/v2/spans 上报
   zipkin:
     image: openzipkin/zipkin:3
@@ -845,6 +863,7 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+  vm-data:
   etcd-data:
   agent-data:
   seatunnel-checkpoint:
